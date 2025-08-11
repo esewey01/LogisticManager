@@ -1,0 +1,91 @@
+Crea una aplicación web completa de gestión logística para una comercializadora. El sistema debe ser intuitivo, escalable y modular, con las siguientes características:
+
+Autenticación básica:
+- Login con email y contraseña (2 usuarios: logistica@empresa.com, admin@empresa.com)
+- Roles: usuario, administrador
+- Si es admin, ve más pantallas
+
+Integraciones con APIs:
+1. Shopify (2 tiendas):
+   - Usa fetch() para consumir órdenes desde Shopify Admin API
+   - Endpoint: https://c3b13f-2.myshopify.com/admin/api/2025-07/graphql.json
+   - Autenticación: Basic Auth (API key + password) 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
+   - Sincroniza cada 5 minutos 
+   - Guarda órdenes en BD con canal = "WW"
+2. Mercado Libre (WHISIP, EXPRESSPL):
+   - Simula la API por ahora (endpoint /mgl/simulate)
+   - En el futuro: usar OAuth y /orders/search?seller_id=XXXX
+   - Guarda con canal = "MGL"
+3. Catálogos de marcas:
+   - Subir Excel (ELEGATE, etc.) → procesar con `xlsx` → guardar en BD
+   - Tabla: marca, sku, producto, precio, stock_disponible
+
+Dashboard principal (/):
+- Resumen visual:
+  - Total órdenes
+  - Órdenes sin gestionar
+  - Ventas totales (suma de precios)
+  - Órdenes en PREVIO (retrasadas)
+- Tarjetas por canal: WW, CT, MGL (con íconos y colores)
+- Gráfico simple de barras: órdenes por día (últimos 7 días)
+- Calendario integrado (HTML5 + eventos)
+- Notas rápidas: agregar/editar/borrar
+- Indicador de estado de APIs: ✅ Shopify conectado, ❌ MGL pendiente
+
+Pantalla: Pedidos (/pedidos)
+- Tabla con todas las órdenes no gestionadas
+- Columnas: ID, Cliente, Canal, Productos, Combo/Unidad, Fecha, Gestionado, Acciones
+- Filtros: por canal, por combo, por fecha
+- Búsqueda global por SKU, nombre, cliente
+- Modal al hacer clic: muestra dirección, teléfono, productos detallados
+- Botón "Crear Ticket" (por fila o múltiple seleccionado)
+- Botón "Cancelar pedido" (con motivo)
+- Importar desde Excel: con plantilla descargable (CSV con columnas definidas)
+- Indicadores visuales:
+  - Color por canal
+  - Icono si es combo
+  - si ya tiene ticket
+
+Pantalla: Tickets (/tickets)
+- Muestra solo pedidos con ticket creado
+- Generación automática de ticket:
+  - Si mismo cliente + misma marca → mismo ticket (color verde)
+  - Si no, ticket individual
+- Validación de stock:
+  - Compara con catálogo de marca y con inventario interno (Protón simulado)
+  - Estado: OK (azul), APARTAR (amarillo), STOCK OUT (rojo)
+- Tabla: Ticket, Cliente, Marca, Estado Stock, Acciones
+- Acciones:
+  - "Buscar en ML" → abre Mercado Libre en nueva pestaña con búsqueda del SKU
+  - "Notificar Marca" → genera enlace de WhatsApp predefinido
+  - "Exportar a Excel" → solo productos en STOCK OUT
+
+Pantalla: Paquetería (/paqueteria)
+- Asignación automática de paquetería por marca (tabla de reglas)
+- Integración con:
+  - Wiship (API): para Estafeta, DHL
+  - Express PL (API): simulada por ahora
+- Botón "Generar Guía" (individual o masivo)
+- Descarga de guías en "tira" (PDF, formato estándar)
+- Agendamiento: genera mensaje WhatsApp con lista de productos para recolección
+
+(Admin) Pantalla: Usuarios (/admin/usuarios)
+- Tabla: Usuario, Rol, Activo, Último acceso, Órdenes gestionadas, Tickets generados
+- Gráfico: actividad por usuario
+- Posibilidad de desactivar usuarios
+
+(Admin) Configuración (/config)
+- Gestionar marcas: agregar, editar, subir catálogo
+- Gestionar proveedores (paqueterías): Wiship, Express PL, etc.
+- Gestionar canales: WW, CT, MGL (con color e ícono)
+- Reglas de asignación: "Si marca = X → paquetería = Y"
+- Subir catálogos en Excel
+
+UI/UX:
+- Navbar fijo: logo, usuario (con menú desplegable: perfil, cerrar sesión)
+- Sidebar con íconos: Dashboard, Pedidos, Tickets, Paquetería, Config (solo admin)
+- Diseño limpio, colores profesionales
+- Modales para acciones importantes
+- Responsive (mínimo para desktop)
+
+El sistema debe ser profesional, intuitivo y listo para escalar. Aunque no todo funcione al 10
