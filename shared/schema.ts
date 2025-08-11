@@ -1,234 +1,164 @@
-import { sql } from "drizzle-orm";
-import { 
-  pgTable, 
-  text, 
-  varchar, 
-  timestamp, 
-  integer, 
-  decimal, 
-  boolean, 
-  jsonb,
-  uuid,
-  index
-} from "drizzle-orm/pg-core";
-import { createInsertSchema } from "drizzle-zod";
+// shared/schema.ts
+import { pgTable, serial, text, boolean, timestamp, integer, decimal } from "drizzle-orm/pg-core";
 import { z } from "zod";
-import { relations } from "drizzle-orm";
 
-// Session storage table (required for auth)
-export const sessions = pgTable(
-  "sessions",
-  {
-    sid: varchar("sid").primaryKey(),
-    sess: jsonb("sess").notNull(),
-    expire: timestamp("expire").notNull(),
-  },
-  (table) => [index("IDX_session_expire").on(table.expire)],
-);
-
-// Users table
+// === USERS ===
 export const users = pgTable("users", {
-  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
-  email: varchar("email", { length: 255 }).unique().notNull(),
+  id: serial("id").primaryKey(),
+  email: text("email").notNull().unique(),
   password: text("password").notNull(),
-  firstName: varchar("first_name", { length: 100 }),
-  lastName: varchar("last_name", { length: 100 }),
-  role: varchar("role", { length: 20 }).notNull().default("user"), // "user" | "admin"
-  isActive: boolean("is_active").notNull().default(true),
+  firstName: text("first_name"),
+  lastName: text("last_name"),
+  role: text("role").notNull().default("user"),
   lastLogin: timestamp("last_login"),
   createdAt: timestamp("created_at").defaultNow(),
-  updatedAt: timestamp("updated_at").defaultNow(),
+  updatedAt: timestamp("updated_at"),
 });
 
-// Brands/Catalogs table
+export type User = typeof users.$inferSelect;
+export type InsertUser = typeof users.$inferInsert;
+
+// === BRANDS ===
 export const brands = pgTable("brands", {
-  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
-  name: varchar("name", { length: 100 }).notNull(),
-  code: varchar("code", { length: 20 }).unique().notNull(),
+  id: serial("id").primaryKey(),
+  name: text("name").notNull(),
+  code: text("code").notNull().unique(),
   isActive: boolean("is_active").notNull().default(true),
   createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at"),
 });
 
-// Catalog products
+export type Brand = typeof brands.$inferSelect;
+export type InsertBrand = typeof brands.$inferInsert;
+
+// === CATALOG PRODUCTS ===
 export const catalogProducts = pgTable("catalog_products", {
-  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
-  brandId: uuid("brand_id").references(() => brands.id).notNull(),
-  sku: varchar("sku", { length: 100 }).notNull(),
-  productName: text("product_name").notNull(),
-  price: decimal("price", { precision: 10, scale: 2 }).notNull(),
-  availableStock: integer("available_stock").notNull().default(0),
-  createdAt: timestamp("created_at").defaultNow(),
-  updatedAt: timestamp("updated_at").defaultNow(),
-});
-
-// Channels configuration
-export const channels = pgTable("channels", {
-  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
-  code: varchar("code", { length: 10 }).unique().notNull(), // "WW", "CT", "MGL"
-  name: varchar("name", { length: 100 }).notNull(),
-  color: varchar("color", { length: 7 }).notNull(), // hex color
-  icon: varchar("icon", { length: 50 }).notNull(),
+  id: serial("id").primaryKey(),
+  sku: text("sku").notNull().unique(),
+  brandId: integer("brand_id").notNull(),
+  name: text("name").notNull(),
+  description: text("description"),
+  price: decimal("price"),
+  cost: decimal("cost"),
+  weight: decimal("weight"),
+  dimensions: text("dimensions"),
   isActive: boolean("is_active").notNull().default(true),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at"),
 });
 
-// Carriers/Shipping providers
+export type CatalogProduct = typeof catalogProducts.$inferSelect;
+export type InsertCatalogProduct = typeof catalogProducts.$inferInsert;
+
+// === CHANNELS ===
+export const channels = pgTable("channels", {
+  id: serial("id").primaryKey(),
+  code: text("code").notNull().unique(),
+  name: text("name").notNull(),
+  color: text("color"),
+  icon: text("icon"),
+  isActive: boolean("is_active").notNull().default(true),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at"),
+});
+
+export type Channel = typeof channels.$inferSelect;
+export type InsertChannel = typeof channels.$inferInsert;
+
+// === CARRIERS ===
 export const carriers = pgTable("carriers", {
-  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
-  name: varchar("name", { length: 100 }).notNull(),
-  code: varchar("code", { length: 20 }).unique().notNull(),
+  id: serial("id").primaryKey(),
+  name: text("name").notNull(),
+  code: text("code").notNull().unique(),
   apiEndpoint: text("api_endpoint"),
   isActive: boolean("is_active").notNull().default(true),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at"),
 });
 
-// Orders table
+export type Carrier = typeof carriers.$inferSelect;
+export type InsertCarrier = typeof carriers.$inferInsert;
+
+// === ORDERS ===
 export const orders = pgTable("orders", {
-  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
-  externalId: varchar("external_id", { length: 100 }),
-  channelId: uuid("channel_id").references(() => channels.id).notNull(),
-  customerName: varchar("customer_name", { length: 200 }).notNull(),
-  customerEmail: varchar("customer_email", { length: 255 }),
-  customerPhone: varchar("customer_phone", { length: 20 }),
-  shippingAddress: text("shipping_address").notNull(),
-  products: jsonb("products").notNull(), // array of {sku, name, quantity, price}
-  totalAmount: decimal("total_amount", { precision: 10, scale: 2 }).notNull(),
-  isCombo: boolean("is_combo").notNull().default(false),
-  status: varchar("status", { length: 20 }).notNull().default("unmanaged"), // "unmanaged", "managed", "cancelled"
+  id: serial("id").primaryKey(),
+  orderId: text("order_id").notNull().unique(),
+  channelId: integer("channel_id").notNull(),
+  customerName: text("customer_name"),
+  totalAmount: decimal("total_amount"),
   isManaged: boolean("is_managed").notNull().default(false),
   hasTicket: boolean("has_ticket").notNull().default(false),
-  ticketId: uuid("ticket_id").references(() => tickets.id),
+  status: text("status").notNull().default("pending"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at"),
+});
+
+export type Order = typeof orders.$inferSelect;
+export type InsertOrder = typeof orders.$inferInsert;
+
+// === TICKETS ===
+export const tickets = pgTable("tickets", {
+  id: serial("id").primaryKey(),
+  ticketNumber: text("ticket_number").notNull().unique(),
+  orderId: integer("order_id").notNull(),
+  status: text("status").notNull().default("open"),
   notes: text("notes"),
   createdAt: timestamp("created_at").defaultNow(),
-  updatedAt: timestamp("updated_at").defaultNow(),
+  updatedAt: timestamp("updated_at"),
 });
 
-// Tickets table
-export const tickets = pgTable("tickets", {
-  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
-  ticketNumber: varchar("ticket_number", { length: 50 }).unique().notNull(),
-  customerId: varchar("customer_id", { length: 100 }).notNull(),
-  customerName: varchar("customer_name", { length: 200 }).notNull(),
-  brandId: uuid("brand_id").references(() => brands.id).notNull(),
-  products: jsonb("products").notNull(), // array of products from orders
-  stockStatus: varchar("stock_status", { length: 20 }).notNull().default("pending"), // "ok", "apart", "stock_out"
-  carrierId: uuid("carrier_id").references(() => carriers.id),
-  trackingNumber: varchar("tracking_number", { length: 100 }),
-  status: varchar("status", { length: 20 }).notNull().default("pending"), // "pending", "processing", "shipped", "delivered"
-  createdAt: timestamp("created_at").defaultNow(),
-  updatedAt: timestamp("updated_at").defaultNow(),
-});
+export type Ticket = typeof tickets.$inferSelect;
+export type InsertTicket = typeof tickets.$inferInsert;
 
-// Shipping rules for brand-carrier assignment
+// === SHIPPING RULES ===
 export const shippingRules = pgTable("shipping_rules", {
-  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
-  brandId: uuid("brand_id").references(() => brands.id).notNull(),
-  carrierId: uuid("carrier_id").references(() => carriers.id).notNull(),
-  priority: integer("priority").notNull().default(1),
+  id: serial("id").primaryKey(),
+  name: text("name").notNull(),
+  condition: text("condition").notNull(),
+  carrierId: integer("carrier_id").notNull(),
+  service: text("service"),
+  cost: decimal("cost"),
+  estimatedDays: integer("estimated_days"),
   isActive: boolean("is_active").notNull().default(true),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at"),
 });
 
-// Quick notes
+export type ShippingRule = typeof shippingRules.$inferSelect;
+export type InsertShippingRule = typeof shippingRules.$inferInsert;
+
+// === NOTES ===
 export const notes = pgTable("notes", {
-  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
-  userId: uuid("user_id").references(() => users.id).notNull(),
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull(),
   content: text("content").notNull(),
   createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at"),
 });
 
-// Relations
-export const usersRelations = relations(users, ({ many }) => ({
-  notes: many(notes),
-}));
-
-export const brandsRelations = relations(brands, ({ many }) => ({
-  catalogProducts: many(catalogProducts),
-  tickets: many(tickets),
-  shippingRules: many(shippingRules),
-}));
-
-export const channelsRelations = relations(channels, ({ many }) => ({
-  orders: many(orders),
-}));
-
-export const carriersRelations = relations(carriers, ({ many }) => ({
-  tickets: many(tickets),
-  shippingRules: many(shippingRules),
-}));
-
-export const ordersRelations = relations(orders, ({ one }) => ({
-  channel: one(channels, {
-    fields: [orders.channelId],
-    references: [channels.id],
-  }),
-  ticket: one(tickets, {
-    fields: [orders.ticketId],
-    references: [tickets.id],
-  }),
-}));
-
-export const ticketsRelations = relations(tickets, ({ one, many }) => ({
-  brand: one(brands, {
-    fields: [tickets.brandId],
-    references: [brands.id],
-  }),
-  carrier: one(carriers, {
-    fields: [tickets.carrierId],
-    references: [carriers.id],
-  }),
-  orders: many(orders),
-}));
-
-export const catalogProductsRelations = relations(catalogProducts, ({ one }) => ({
-  brand: one(brands, {
-    fields: [catalogProducts.brandId],
-    references: [brands.id],
-  }),
-}));
-
-export const shippingRulesRelations = relations(shippingRules, ({ one }) => ({
-  brand: one(brands, {
-    fields: [shippingRules.brandId],
-    references: [brands.id],
-  }),
-  carrier: one(carriers, {
-    fields: [shippingRules.carrierId],
-    references: [carriers.id],
-  }),
-}));
-
-export const notesRelations = relations(notes, ({ one }) => ({
-  user: one(users, {
-    fields: [notes.userId],
-    references: [users.id],
-  }),
-}));
-
-// Insert schemas
-export const insertUserSchema = createInsertSchema(users).omit({ id: true, createdAt: true, updatedAt: true });
-export const insertBrandSchema = createInsertSchema(brands).omit({ id: true, createdAt: true });
-export const insertCatalogProductSchema = createInsertSchema(catalogProducts).omit({ id: true, createdAt: true, updatedAt: true });
-export const insertChannelSchema = createInsertSchema(channels).omit({ id: true });
-export const insertCarrierSchema = createInsertSchema(carriers).omit({ id: true });
-export const insertOrderSchema = createInsertSchema(orders).omit({ id: true, createdAt: true, updatedAt: true });
-export const insertTicketSchema = createInsertSchema(tickets).omit({ id: true, createdAt: true, updatedAt: true });
-export const insertShippingRuleSchema = createInsertSchema(shippingRules).omit({ id: true });
-export const insertNoteSchema = createInsertSchema(notes).omit({ id: true, createdAt: true });
-
-// Types
-export type User = typeof users.$inferSelect;
-export type InsertUser = z.infer<typeof insertUserSchema>;
-export type Brand = typeof brands.$inferSelect;
-export type InsertBrand = z.infer<typeof insertBrandSchema>;
-export type CatalogProduct = typeof catalogProducts.$inferSelect;
-export type InsertCatalogProduct = z.infer<typeof insertCatalogProductSchema>;
-export type Channel = typeof channels.$inferSelect;
-export type InsertChannel = z.infer<typeof insertChannelSchema>;
-export type Carrier = typeof carriers.$inferSelect;
-export type InsertCarrier = z.infer<typeof insertCarrierSchema>;
-export type Order = typeof orders.$inferSelect;
-export type InsertOrder = z.infer<typeof insertOrderSchema>;
-export type Ticket = typeof tickets.$inferSelect;
-export type InsertTicket = z.infer<typeof insertTicketSchema>;
-export type ShippingRule = typeof shippingRules.$inferSelect;
-export type InsertShippingRule = z.infer<typeof insertShippingRuleSchema>;
 export type Note = typeof notes.$inferSelect;
-export type InsertNote = z.infer<typeof insertNoteSchema>;
+export type InsertNote = typeof notes.$inferInsert;
+
+// === ZOD SCHEMAS (para validación en rutas) ===
+
+export const insertOrderSchema = z.object({
+  orderId: z.string().min(1, "El ID de la orden es obligatorio"),
+  channelId: z.number().int().positive("El ID del canal debe ser un número positivo"),
+  customerName: z.string().optional(),
+  totalAmount: z.string().optional(),
+  isManaged: z.boolean().optional().default(false),
+  hasTicket: z.boolean().optional().default(false),
+  status: z.string().default("pending"),
+});
+
+export const insertTicketSchema = z.object({
+  ticketNumber: z.string().min(1, "El número de ticket es obligatorio"),
+  orderId: z.number().int().positive("El ID de la orden debe ser un número positivo"),
+  status: z.string().default("open"),
+  notes: z.string().optional(),
+});
+
+export const insertNoteSchema = z.object({
+  userId: z.number().int().positive("El ID de usuario debe ser un número positivo"),
+  content: z.string().min(1, "El contenido es obligatorio"),
+});

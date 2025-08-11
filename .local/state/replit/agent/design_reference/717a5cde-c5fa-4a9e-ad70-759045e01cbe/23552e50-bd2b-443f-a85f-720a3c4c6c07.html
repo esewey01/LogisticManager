@@ -1,0 +1,640 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sistema de Gestión Logística</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        'inter': ['Inter', 'sans-serif'],
+                    },
+                    colors: {
+                        primary: '#1976D2',
+                        secondary: '#424242',
+                        success: '#4CAF50',
+                        warning: '#FF9800',
+                        error: '#F44336',
+                        info: '#2196F3',
+                        surface: '#FFFFFF',
+                        background: '#FAFAFA',
+                        'ww-channel': '#4CAF50',
+                        'ct-channel': '#FF9800',
+                        'mgl-channel': '#2196F3'
+                    }
+                }
+            }
+        };
+    </script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        .sidebar-width {
+            width: 240px;
+        }
+        .content-margin {
+            margin-left: 240px;
+        }
+        .navbar-height {
+            height: 64px;
+        }
+        .content-top {
+            margin-top: 64px;
+        }
+    </style>
+</head>
+<body class="bg-background text-secondary">
+    
+    <!-- @COMPONENT: TopNavbar [user info, notifications, logout] -->
+    <nav class="fixed top-0 left-0 right-0 z-50 bg-surface shadow-md navbar-height">
+        <div class="flex items-center justify-between h-full px-6">
+            <div class="flex items-center space-x-4">
+                <div class="flex items-center space-x-3">
+                    <div class="w-8 h-8 bg-primary rounded-lg flex items-center justify-center">
+                        <i class="fas fa-shipping-fast text-white text-sm"></i>
+                    </div>
+                    <h1 class="text-xl font-semibold text-primary">LogiSys</h1>
+                </div>
+            </div>
+            
+            <div class="flex items-center space-x-4">
+                <!-- API Status Indicators -->
+                <div class="flex items-center space-x-3 text-sm">
+                    <div class="flex items-center space-x-1">
+                        <div class="w-2 h-2 bg-success rounded-full"></div>
+                        <span class="text-gray-600">Shopify</span>
+                    </div>
+                    <div class="flex items-center space-x-1">
+                        <div class="w-2 h-2 bg-error rounded-full"></div>
+                        <span class="text-gray-600">MGL</span>
+                    </div>
+                </div>
+                
+                <!-- User Menu -->
+                <div class="relative" data-implementation="Dropdown menu with click handling">
+                    <button class="flex items-center space-x-2 px-3 py-2 rounded-lg hover:bg-gray-100 transition-colors" data-event="click:toggleUserMenu">
+                        <div class="w-8 h-8 bg-primary rounded-full flex items-center justify-center">
+                            <i class="fas fa-user text-white text-sm"></i>
+                        </div>
+                        <span class="font-medium" data-bind="user.email">logistica@empresa.com</span>
+                        <i class="fas fa-chevron-down text-xs text-gray-500"></i>
+                    </button>
+                    
+                    <!-- User Dropdown Menu (hidden by default) -->
+                    <div class="absolute right-0 mt-2 w-48 bg-surface rounded-lg shadow-lg border border-gray-200 hidden" data-state="userMenuOpen">
+                        <div class="py-2">
+                            <div class="px-4 py-2 text-sm text-gray-600 border-b">
+                                <div class="font-medium" data-bind="user.email">logistica@empresa.com</div>
+                                <div class="text-xs text-gray-500" data-bind="user.role">Usuario</div>
+                            </div>
+                            <button class="w-full text-left px-4 py-2 text-sm hover:bg-gray-100 transition-colors" data-event="click:viewProfile">
+                                <i class="fas fa-user mr-2"></i>
+                                Mi Perfil
+                            </button>
+                            <button class="w-full text-left px-4 py-2 text-sm hover:bg-gray-100 transition-colors text-error" data-event="click:logout">
+                                <i class="fas fa-sign-out-alt mr-2"></i>
+                                Cerrar Sesión
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </nav>
+    <!-- @END_COMPONENT: TopNavbar -->
+
+    <!-- @COMPONENT: Sidebar [navigation menu with role-based visibility] -->
+    <aside class="fixed left-0 top-0 h-full sidebar-width bg-surface shadow-lg z-40 content-top">
+        <div class="p-6">
+            <nav class="space-y-2">
+                <a href="/" class="flex items-center space-x-3 px-4 py-3 rounded-lg bg-primary text-white font-medium transition-colors">
+                    <i class="fas fa-chart-pie w-5"></i>
+                    <span>Dashboard</span>
+                </a>
+                
+                <a href="/pedidos" class="flex items-center space-x-3 px-4 py-3 rounded-lg text-gray-600 hover:bg-gray-100 transition-colors">
+                    <i class="fas fa-shopping-bag w-5"></i>
+                    <span>Pedidos</span>
+                    <span class="ml-auto bg-error text-white text-xs px-2 py-1 rounded-full" data-bind="ordersCount.unmanaged">23</span>
+                </a>
+                
+                <a href="/tickets" class="flex items-center space-x-3 px-4 py-3 rounded-lg text-gray-600 hover:bg-gray-100 transition-colors">
+                    <i class="fas fa-ticket-alt w-5"></i>
+                    <span>Tickets</span>
+                    <span class="ml-auto bg-warning text-white text-xs px-2 py-1 rounded-full" data-bind="ticketsCount.pending">8</span>
+                </a>
+                
+                <a href="/paqueteria" class="flex items-center space-x-3 px-4 py-3 rounded-lg text-gray-600 hover:bg-gray-100 transition-colors">
+                    <i class="fas fa-truck w-5"></i>
+                    <span>Paquetería</span>
+                </a>
+                
+                <!-- Admin Only Section -->
+                <div class="pt-4 border-t border-gray-200" data-visibility="admin-only">
+                    <div class="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2 px-4">
+                        Administración
+                    </div>
+                    
+                    <a href="/admin/usuarios" class="flex items-center space-x-3 px-4 py-3 rounded-lg text-gray-600 hover:bg-gray-100 transition-colors">
+                        <i class="fas fa-users w-5"></i>
+                        <span>Usuarios</span>
+                    </a>
+                    
+                    <a href="/config" class="flex items-center space-x-3 px-4 py-3 rounded-lg text-gray-600 hover:bg-gray-100 transition-colors">
+                        <i class="fas fa-cog w-5"></i>
+                        <span>Configuración</span>
+                    </a>
+                </div>
+            </nav>
+        </div>
+    </aside>
+    <!-- @END_COMPONENT: Sidebar -->
+
+    <!-- @COMPONENT: MainContent [dashboard with summary cards, charts, calendar] -->
+    <main class="content-margin content-top min-h-screen">
+        <div class="p-6">
+            <!-- Page Header -->
+            <div class="mb-8">
+                <h1 class="text-2xl font-semibold text-gray-900 mb-2">Dashboard</h1>
+                <p class="text-gray-600">Resumen general del sistema de gestión logística</p>
+            </div>
+
+            <!-- Summary Cards -->
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+                <!-- Total Orders Card -->
+                <div class="bg-surface rounded-xl shadow-sm border border-gray-200 p-6">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <p class="text-sm font-medium text-gray-600">Total Órdenes</p>
+                            <p class="text-3xl font-bold text-gray-900" data-bind="metrics.totalOrders">1,247</p>
+                            <p class="text-sm text-success">+12% vs mes anterior</p>
+                        </div>
+                        <div class="w-12 h-12 bg-primary bg-opacity-10 rounded-lg flex items-center justify-center">
+                            <i class="fas fa-shopping-bag text-primary text-xl"></i>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Unmanaged Orders Card -->
+                <div class="bg-surface rounded-xl shadow-sm border border-gray-200 p-6">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <p class="text-sm font-medium text-gray-600">Sin Gestionar</p>
+                            <p class="text-3xl font-bold text-error" data-bind="metrics.unmanaged">23</p>
+                            <p class="text-sm text-gray-500">Requieren atención</p>
+                        </div>
+                        <div class="w-12 h-12 bg-error bg-opacity-10 rounded-lg flex items-center justify-center">
+                            <i class="fas fa-exclamation-triangle text-error text-xl"></i>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Total Sales Card -->
+                <div class="bg-surface rounded-xl shadow-sm border border-gray-200 p-6">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <p class="text-sm font-medium text-gray-600">Ventas Totales</p>
+                            <p class="text-3xl font-bold text-gray-900" data-bind="metrics.totalSales">$89,432</p>
+                            <p class="text-sm text-success">+8.2% vs semana anterior</p>
+                        </div>
+                        <div class="w-12 h-12 bg-success bg-opacity-10 rounded-lg flex items-center justify-center">
+                            <i class="fas fa-dollar-sign text-success text-xl"></i>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Delayed Orders Card -->
+                <div class="bg-surface rounded-xl shadow-sm border border-gray-200 p-6">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <p class="text-sm font-medium text-gray-600">En PREVIO</p>
+                            <p class="text-3xl font-bold text-warning" data-bind="metrics.delayed">15</p>
+                            <p class="text-sm text-gray-500">Órdenes retrasadas</p>
+                        </div>
+                        <div class="w-12 h-12 bg-warning bg-opacity-10 rounded-lg flex items-center justify-center">
+                            <i class="fas fa-clock text-warning text-xl"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Channel Summary Cards -->
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+                <!-- WW Channel -->
+                <div class="bg-surface rounded-xl shadow-sm border border-gray-200 p-6">
+                    <div class="flex items-center space-x-4">
+                        <div class="w-12 h-12 bg-ww-channel bg-opacity-10 rounded-lg flex items-center justify-center">
+                            <i class="fas fa-globe text-ww-channel text-xl"></i>
+                        </div>
+                        <div>
+                            <h3 class="font-semibold text-gray-900">WW Channel</h3>
+                            <p class="text-sm text-gray-600">Shopify Store</p>
+                            <div class="flex items-center space-x-4 mt-2">
+                                <span class="text-lg font-bold text-gray-900" data-bind="channels.ww.orders">456</span>
+                                <span class="text-sm text-gray-500">órdenes</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- CT Channel -->
+                <div class="bg-surface rounded-xl shadow-sm border border-gray-200 p-6">
+                    <div class="flex items-center space-x-4">
+                        <div class="w-12 h-12 bg-ct-channel bg-opacity-10 rounded-lg flex items-center justify-center">
+                            <i class="fas fa-store text-ct-channel text-xl"></i>
+                        </div>
+                        <div>
+                            <h3 class="font-semibold text-gray-900">CT Channel</h3>
+                            <p class="text-sm text-gray-600">Catálogo Tienda</p>
+                            <div class="flex items-center space-x-4 mt-2">
+                                <span class="text-lg font-bold text-gray-900" data-bind="channels.ct.orders">289</span>
+                                <span class="text-sm text-gray-500">órdenes</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- MGL Channel -->
+                <div class="bg-surface rounded-xl shadow-sm border border-gray-200 p-6">
+                    <div class="flex items-center space-x-4">
+                        <div class="w-12 h-12 bg-mgl-channel bg-opacity-10 rounded-lg flex items-center justify-center">
+                            <i class="fas fa-shopping-cart text-mgl-channel text-xl"></i>
+                        </div>
+                        <div>
+                            <h3 class="font-semibold text-gray-900">MGL Channel</h3>
+                            <p class="text-sm text-gray-600">Mercado Libre</p>
+                            <div class="flex items-center space-x-4 mt-2">
+                                <span class="text-lg font-bold text-gray-900" data-bind="channels.mgl.orders">502</span>
+                                <span class="text-sm text-gray-500">órdenes</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Content Grid -->
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                <!-- Orders Chart -->
+                <div class="lg:col-span-2 bg-surface rounded-xl shadow-sm border border-gray-200 p-6">
+                    <div class="flex items-center justify-between mb-6">
+                        <h3 class="text-lg font-semibold text-gray-900">Órdenes por Día</h3>
+                        <span class="text-sm text-gray-500">Últimos 7 días</span>
+                    </div>
+                    
+                    <!-- Simple Bar Chart -->
+                    <div class="space-y-4" data-implementation="Replace with Chart.js or similar library">
+                        <!-- @MAP: chartData.map(day => ( -->
+                        <div class="flex items-center space-x-3">
+                            <span class="text-sm font-medium text-gray-600 w-12">Lun</span>
+                            <div class="flex-1 bg-gray-200 rounded-full h-3">
+                                <div class="bg-primary h-3 rounded-full" style="width: 75%"></div>
+                            </div>
+                            <span class="text-sm font-medium text-gray-900 w-8">45</span>
+                        </div>
+                        <div class="flex items-center space-x-3">
+                            <span class="text-sm font-medium text-gray-600 w-12">Mar</span>
+                            <div class="flex-1 bg-gray-200 rounded-full h-3">
+                                <div class="bg-primary h-3 rounded-full" style="width: 60%"></div>
+                            </div>
+                            <span class="text-sm font-medium text-gray-900 w-8">36</span>
+                        </div>
+                        <div class="flex items-center space-x-3">
+                            <span class="text-sm font-medium text-gray-600 w-12">Mié</span>
+                            <div class="flex-1 bg-gray-200 rounded-full h-3">
+                                <div class="bg-primary h-3 rounded-full" style="width: 90%"></div>
+                            </div>
+                            <span class="text-sm font-medium text-gray-900 w-8">54</span>
+                        </div>
+                        <div class="flex items-center space-x-3">
+                            <span class="text-sm font-medium text-gray-600 w-12">Jue</span>
+                            <div class="flex-1 bg-gray-200 rounded-full h-3">
+                                <div class="bg-primary h-3 rounded-full" style="width: 45%"></div>
+                            </div>
+                            <span class="text-sm font-medium text-gray-900 w-8">27</span>
+                        </div>
+                        <div class="flex items-center space-x-3">
+                            <span class="text-sm font-medium text-gray-600 w-12">Vie</span>
+                            <div class="flex-1 bg-gray-200 rounded-full h-3">
+                                <div class="bg-primary h-3 rounded-full" style="width: 85%"></div>
+                            </div>
+                            <span class="text-sm font-medium text-gray-900 w-8">51</span>
+                        </div>
+                        <div class="flex items-center space-x-3">
+                            <span class="text-sm font-medium text-gray-600 w-12">Sáb</span>
+                            <div class="flex-1 bg-gray-200 rounded-full h-3">
+                                <div class="bg-primary h-3 rounded-full" style="width: 35%"></div>
+                            </div>
+                            <span class="text-sm font-medium text-gray-900 w-8">21</span>
+                        </div>
+                        <div class="flex items-center space-x-3">
+                            <span class="text-sm font-medium text-gray-600 w-12">Dom</span>
+                            <div class="flex-1 bg-gray-200 rounded-full h-3">
+                                <div class="bg-primary h-3 rounded-full" style="width: 25%"></div>
+                            </div>
+                            <span class="text-sm font-medium text-gray-900 w-8">15</span>
+                        </div>
+                        <!-- @END_MAP )) -->
+                    </div>
+                </div>
+
+                <!-- Right Column -->
+                <div class="space-y-6">
+                    <!-- Quick Calendar -->
+                    <div class="bg-surface rounded-xl shadow-sm border border-gray-200 p-6">
+                        <h3 class="text-lg font-semibold text-gray-900 mb-4">Calendario</h3>
+                        <div class="text-center mb-4">
+                            <div class="flex items-center justify-between">
+                                <button class="p-1 hover:bg-gray-100 rounded" data-event="click:previousMonth">
+                                    <i class="fas fa-chevron-left text-gray-500"></i>
+                                </button>
+                                <span class="font-medium text-gray-900">Enero 2025</span>
+                                <button class="p-1 hover:bg-gray-100 rounded" data-event="click:nextMonth">
+                                    <i class="fas fa-chevron-right text-gray-500"></i>
+                                </button>
+                            </div>
+                        </div>
+                        
+                        <!-- Calendar Grid -->
+                        <div class="grid grid-cols-7 gap-1 text-center text-sm">
+                            <div class="py-2 text-gray-500 font-medium">L</div>
+                            <div class="py-2 text-gray-500 font-medium">M</div>
+                            <div class="py-2 text-gray-500 font-medium">X</div>
+                            <div class="py-2 text-gray-500 font-medium">J</div>
+                            <div class="py-2 text-gray-500 font-medium">V</div>
+                            <div class="py-2 text-gray-500 font-medium">S</div>
+                            <div class="py-2 text-gray-500 font-medium">D</div>
+                            
+                            <div class="py-2 text-gray-400">30</div>
+                            <div class="py-2 text-gray-400">31</div>
+                            <div class="py-2 hover:bg-gray-100 rounded cursor-pointer">1</div>
+                            <div class="py-2 hover:bg-gray-100 rounded cursor-pointer">2</div>
+                            <div class="py-2 hover:bg-gray-100 rounded cursor-pointer">3</div>
+                            <div class="py-2 hover:bg-gray-100 rounded cursor-pointer">4</div>
+                            <div class="py-2 hover:bg-gray-100 rounded cursor-pointer">5</div>
+                            
+                            <div class="py-2 hover:bg-gray-100 rounded cursor-pointer">6</div>
+                            <div class="py-2 hover:bg-gray-100 rounded cursor-pointer">7</div>
+                            <div class="py-2 hover:bg-gray-100 rounded cursor-pointer">8</div>
+                            <div class="py-2 hover:bg-gray-100 rounded cursor-pointer">9</div>
+                            <div class="py-2 hover:bg-gray-100 rounded cursor-pointer">10</div>
+                            <div class="py-2 hover:bg-gray-100 rounded cursor-pointer">11</div>
+                            <div class="py-2 hover:bg-gray-100 rounded cursor-pointer">12</div>
+                            
+                            <div class="py-2 hover:bg-gray-100 rounded cursor-pointer">13</div>
+                            <div class="py-2 hover:bg-gray-100 rounded cursor-pointer">14</div>
+                            <div class="py-2 bg-primary text-white rounded">15</div>
+                            <div class="py-2 hover:bg-gray-100 rounded cursor-pointer">16</div>
+                            <div class="py-2 hover:bg-gray-100 rounded cursor-pointer">17</div>
+                            <div class="py-2 hover:bg-gray-100 rounded cursor-pointer">18</div>
+                            <div class="py-2 hover:bg-gray-100 rounded cursor-pointer">19</div>
+                            
+                            <div class="py-2 hover:bg-gray-100 rounded cursor-pointer">20</div>
+                            <div class="py-2 hover:bg-gray-100 rounded cursor-pointer">21</div>
+                            <div class="py-2 hover:bg-gray-100 rounded cursor-pointer">22</div>
+                            <div class="py-2 hover:bg-gray-100 rounded cursor-pointer">23</div>
+                            <div class="py-2 hover:bg-gray-100 rounded cursor-pointer">24</div>
+                            <div class="py-2 hover:bg-gray-100 rounded cursor-pointer">25</div>
+                            <div class="py-2 hover:bg-gray-100 rounded cursor-pointer">26</div>
+                            
+                            <div class="py-2 hover:bg-gray-100 rounded cursor-pointer">27</div>
+                            <div class="py-2 hover:bg-gray-100 rounded cursor-pointer">28</div>
+                            <div class="py-2 hover:bg-gray-100 rounded cursor-pointer">29</div>
+                            <div class="py-2 hover:bg-gray-100 rounded cursor-pointer">30</div>
+                            <div class="py-2 hover:bg-gray-100 rounded cursor-pointer">31</div>
+                            <div class="py-2 text-gray-400">1</div>
+                            <div class="py-2 text-gray-400">2</div>
+                        </div>
+                    </div>
+
+                    <!-- Quick Notes -->
+                    <div class="bg-surface rounded-xl shadow-sm border border-gray-200 p-6">
+                        <div class="flex items-center justify-between mb-4">
+                            <h3 class="text-lg font-semibold text-gray-900">Notas Rápidas</h3>
+                            <button class="p-2 hover:bg-gray-100 rounded-lg transition-colors" data-event="click:addNote">
+                                <i class="fas fa-plus text-gray-500"></i>
+                            </button>
+                        </div>
+                        
+                        <div class="space-y-3" data-mock="true">
+                            <!-- @MAP: notes.map(note => ( -->
+                            <div class="p-3 bg-gray-50 rounded-lg">
+                                <div class="flex items-start justify-between">
+                                    <p class="text-sm text-gray-700 flex-1">Revisar stock de productos ELEGATE antes del viernes</p>
+                                    <button class="ml-2 p-1 hover:bg-gray-200 rounded" data-event="click:deleteNote">
+                                        <i class="fas fa-times text-gray-400 text-xs"></i>
+                                    </button>
+                                </div>
+                                <span class="text-xs text-gray-500">Hace 2 horas</span>
+                            </div>
+                            
+                            <div class="p-3 bg-gray-50 rounded-lg">
+                                <div class="flex items-start justify-between">
+                                    <p class="text-sm text-gray-700 flex-1">Contactar proveedor para entrega retrasada - Ticket #TK-2024-001</p>
+                                    <button class="ml-2 p-1 hover:bg-gray-200 rounded" data-event="click:deleteNote">
+                                        <i class="fas fa-times text-gray-400 text-xs"></i>
+                                    </button>
+                                </div>
+                                <span class="text-xs text-gray-500">Ayer</span>
+                            </div>
+                            <!-- @END_MAP )) -->
+                        </div>
+
+                        <button class="w-full mt-4 p-3 border-2 border-dashed border-gray-300 rounded-lg text-gray-500 hover:border-gray-400 hover:text-gray-600 transition-colors" data-event="click:addNote">
+                            <i class="fas fa-plus mr-2"></i>
+                            Agregar nueva nota
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+    <!-- @END_COMPONENT: MainContent -->
+
+    <!-- @COMPONENT: OrderDetailsModal [modal for showing order details] -->
+    <div class="fixed inset-0 bg-black bg-opacity-50 z-50 hidden" data-state="orderModalOpen" data-implementation="Show/hide based on modal state">
+        <div class="flex items-center justify-center min-h-screen p-4">
+            <div class="bg-surface rounded-xl shadow-xl max-w-2xl w-full max-h-screen overflow-y-auto">
+                <!-- Modal Header -->
+                <div class="flex items-center justify-between p-6 border-b border-gray-200">
+                    <h3 class="text-lg font-semibold text-gray-900">Detalles del Pedido</h3>
+                    <button class="p-2 hover:bg-gray-100 rounded-lg transition-colors" data-event="click:closeOrderModal">
+                        <i class="fas fa-times text-gray-500"></i>
+                    </button>
+                </div>
+                
+                <!-- Modal Content -->
+                <div class="p-6">
+                    <!-- Order Header -->
+                    <div class="grid grid-cols-2 gap-4 mb-6">
+                        <div>
+                            <label class="text-sm font-medium text-gray-600">ID Pedido</label>
+                            <p class="text-lg font-semibold text-gray-900" data-bind="selectedOrder.id">#ORD-2024-001</p>
+                        </div>
+                        <div>
+                            <label class="text-sm font-medium text-gray-600">Canal</label>
+                            <div class="flex items-center space-x-2">
+                                <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-ww-channel bg-opacity-10 text-ww-channel">
+                                    <i class="fas fa-globe mr-1"></i>
+                                    WW
+                                </span>
+                            </div>
+                        </div>
+                        <div>
+                            <label class="text-sm font-medium text-gray-600">Cliente</label>
+                            <p class="text-gray-900" data-bind="selectedOrder.customer">María González</p>
+                        </div>
+                        <div>
+                            <label class="text-sm font-medium text-gray-600">Fecha</label>
+                            <p class="text-gray-900" data-bind="selectedOrder.date">15 Enero 2025</p>
+                        </div>
+                    </div>
+
+                    <!-- Customer Info -->
+                    <div class="bg-gray-50 rounded-lg p-4 mb-6">
+                        <h4 class="font-medium text-gray-900 mb-3">Información de Contacto</h4>
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                                <label class="text-sm font-medium text-gray-600">Dirección</label>
+                                <p class="text-gray-900" data-bind="selectedOrder.address">Av. Reforma 123, Col. Centro, CDMX</p>
+                            </div>
+                            <div>
+                                <label class="text-sm font-medium text-gray-600">Teléfono</label>
+                                <p class="text-gray-900" data-bind="selectedOrder.phone">+52 55 1234 5678</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Products -->
+                    <div class="mb-6">
+                        <h4 class="font-medium text-gray-900 mb-3">Productos</h4>
+                        <div class="border border-gray-200 rounded-lg overflow-hidden">
+                            <table class="w-full">
+                                <thead class="bg-gray-50">
+                                    <tr>
+                                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">SKU</th>
+                                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Producto</th>
+                                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Cantidad</th>
+                                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Precio</th>
+                                    </tr>
+                                </thead>
+                                <tbody class="divide-y divide-gray-200" data-mock="true">
+                                    <!-- @MAP: selectedOrder.products.map(product => ( -->
+                                    <tr>
+                                        <td class="px-4 py-3 text-sm font-medium text-gray-900">ELG-001</td>
+                                        <td class="px-4 py-3 text-sm text-gray-600">Crema Facial Hidratante 50ml</td>
+                                        <td class="px-4 py-3 text-sm text-gray-600">2</td>
+                                        <td class="px-4 py-3 text-sm text-gray-600">$450.00</td>
+                                    </tr>
+                                    <tr>
+                                        <td class="px-4 py-3 text-sm font-medium text-gray-900">ELG-002</td>
+                                        <td class="px-4 py-3 text-sm text-gray-600">Serum Vitamin C 30ml</td>
+                                        <td class="px-4 py-3 text-sm text-gray-600">1</td>
+                                        <td class="px-4 py-3 text-sm text-gray-600">$680.00</td>
+                                    </tr>
+                                    <!-- @END_MAP )) -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- Action Buttons -->
+                    <div class="flex items-center justify-end space-x-4">
+                        <button class="px-4 py-2 text-sm font-medium text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors" data-event="click:closeOrderModal">
+                            Cancelar
+                        </button>
+                        <button class="px-4 py-2 text-sm font-medium text-white bg-primary rounded-lg hover:bg-blue-700 transition-colors" data-event="click:createTicket">
+                            Crear Ticket
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <!-- @END_COMPONENT: OrderDetailsModal -->
+
+    <!-- JavaScript for basic interactions -->
+    <script>
+        // TODO: Implement business logic, API calls, and state management
+        
+        (function() {
+            // Basic modal interactions
+            let isUserMenuOpen = false;
+            let isOrderModalOpen = false;
+
+            // User menu toggle
+            document.addEventListener('click', function(e) {
+                if (e.target.closest('[data-event="click:toggleUserMenu"]')) {
+                    isUserMenuOpen = !isUserMenuOpen;
+                    const dropdown = document.querySelector('[data-state="userMenuOpen"]');
+                    if (dropdown) {
+                        dropdown.classList.toggle('hidden', !isUserMenuOpen);
+                    }
+                }
+
+                // Close user menu when clicking outside
+                if (!e.target.closest('[data-event="click:toggleUserMenu"]') && isUserMenuOpen) {
+                    isUserMenuOpen = false;
+                    const dropdown = document.querySelector('[data-state="userMenuOpen"]');
+                    if (dropdown) {
+                        dropdown.classList.add('hidden');
+                    }
+                }
+            });
+
+            // Modal interactions
+            document.addEventListener('click', function(e) {
+                if (e.target.closest('[data-event="click:viewOrderDetails"]')) {
+                    isOrderModalOpen = true;
+                    const modal = document.querySelector('[data-state="orderModalOpen"]');
+                    if (modal) {
+                        modal.classList.remove('hidden');
+                    }
+                }
+
+                if (e.target.closest('[data-event="click:closeOrderModal"]')) {
+                    isOrderModalOpen = false;
+                    const modal = document.querySelector('[data-state="orderModalOpen"]');
+                    if (modal) {
+                        modal.classList.add('hidden');
+                    }
+                }
+            });
+
+            // Escape key to close modals
+            document.addEventListener('keydown', function(e) {
+                if (e.key === 'Escape') {
+                    if (isOrderModalOpen) {
+                        isOrderModalOpen = false;
+                        const modal = document.querySelector('[data-state="orderModalOpen"]');
+                        if (modal) {
+                            modal.classList.add('hidden');
+                        }
+                    }
+                    if (isUserMenuOpen) {
+                        isUserMenuOpen = false;
+                        const dropdown = document.querySelector('[data-state="userMenuOpen"]');
+                        if (dropdown) {
+                            dropdown.classList.add('hidden');
+                        }
+                    }
+                }
+            });
+
+            // Simulate real-time updates (placeholder)
+            function updateMetrics() {
+                // TODO: Fetch real data from API
+                console.log('Updating dashboard metrics...');
+            }
+
+            // Update every 30 seconds
+            setInterval(updateMetrics, 30000);
+        })();
+    </script>
+</body>
+</html>
