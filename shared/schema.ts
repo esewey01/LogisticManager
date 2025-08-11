@@ -1,151 +1,154 @@
-// shared/schema.ts
+// shared/schema.ts — Esquema de base de datos con Drizzle (comentado en español)
+// NOTA: Mantengo los mismos exports originales para no romper imports existentes.
+//       Además agrego alias en español (usuarios, marcas, etc.) por claridad.
+
 import { pgTable, serial, text, boolean, timestamp, integer, decimal } from "drizzle-orm/pg-core";
 import { z } from "zod";
 
-// === USERS ===
+// === USUARIOS ===
+// Tabla de usuarios del sistema: credenciales básicas y metadatos
 export const users = pgTable("users", {
-  id: serial("id").primaryKey(),
-  email: text("email").notNull().unique(),
-  password: text("password").notNull(),
-  firstName: text("first_name"),
-  lastName: text("last_name"),
-  role: text("role").notNull().default("user"),
-  lastLogin: timestamp("last_login"),
+  id: serial("id").primaryKey(),                 // ID autoincremental (PK)
+  email: text("email").notNull().unique(),        // correo único (login)
+  password: text("password").notNull(),          // hash de contraseña
+  firstName: text("first_name"),                 // nombre (opcional)
+  lastName: text("last_name"),                   // apellido (opcional)
+  role: text("role").notNull().default("user"), // rol: user | admin
+  lastLogin: timestamp("last_login"),            // último acceso
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at"),
 });
+export type User = typeof users.$inferSelect;       // tipo de lectura (SELECT)
+export type InsertUser = typeof users.$inferInsert; // tipo de inserción (INSERT)
 
-export type User = typeof users.$inferSelect;
-export type InsertUser = typeof users.$inferInsert;
-
-// === BRANDS ===
+// === MARCAS ===
+// Catálogo de marcas (ej. ELEGATE)
 export const brands = pgTable("brands", {
   id: serial("id").primaryKey(),
-  name: text("name").notNull(),
-  code: text("code").notNull().unique(),
+  name: text("name").notNull(),                  // nombre visible
+  code: text("code").notNull().unique(),         // código corto único
   isActive: boolean("is_active").notNull().default(true),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at"),
 });
-
 export type Brand = typeof brands.$inferSelect;
 export type InsertBrand = typeof brands.$inferInsert;
 
-// === CATALOG PRODUCTS ===
+// === PRODUCTOS DE CATÁLOGO ===
+// Productos que pertenecen a una marca; valores económicos opcionales
 export const catalogProducts = pgTable("catalog_products", {
   id: serial("id").primaryKey(),
-  sku: text("sku").notNull().unique(),
-  brandId: integer("brand_id").notNull(),
-  name: text("name").notNull(),
-  description: text("description"),
-  price: decimal("price"),
-  cost: decimal("cost"),
-  weight: decimal("weight"),
-  dimensions: text("dimensions"),
+  sku: text("sku").notNull().unique(),           // SKU único
+  brandId: integer("brand_id").notNull(),        // referencia a brands.id (no FK explícita aquí)
+  name: text("name").notNull(),                  // nombre del producto
+  description: text("description"),              // descripción (opcional)
+  price: decimal("price"),                        // precio de venta (opcional)
+  cost: decimal("cost"),                          // costo (opcional)
+  weight: decimal("weight"),                      // peso (opcional)
+  dimensions: text("dimensions"),                 // dimensiones (opcional)
   isActive: boolean("is_active").notNull().default(true),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at"),
 });
-
 export type CatalogProduct = typeof catalogProducts.$inferSelect;
 export type InsertCatalogProduct = typeof catalogProducts.$inferInsert;
 
-// === CHANNELS ===
+// === CANALES ===
+// Canales de venta (WW, CT, MGL, etc.)
 export const channels = pgTable("channels", {
   id: serial("id").primaryKey(),
-  code: text("code").notNull().unique(),
-  name: text("name").notNull(),
-  color: text("color"),
-  icon: text("icon"),
+  code: text("code").notNull().unique(),          // código corto único del canal
+  name: text("name").notNull(),                   // nombre del canal
+  color: text("color"),                           // color para UI (hex)
+  icon: text("icon"),                             // icono para UI (clase o nombre)
   isActive: boolean("is_active").notNull().default(true),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at"),
 });
-
 export type Channel = typeof channels.$inferSelect;
 export type InsertChannel = typeof channels.$inferInsert;
 
-// === CARRIERS ===
+// === PAQUETERÍAS ===
+// Transportistas/Carriers (DHL, Estafeta, etc.)
 export const carriers = pgTable("carriers", {
   id: serial("id").primaryKey(),
-  name: text("name").notNull(),
-  code: text("code").notNull().unique(),
-  apiEndpoint: text("api_endpoint"),
+  name: text("name").notNull(),                   // nombre visible
+  code: text("code").notNull().unique(),          // código único (ej. DHL)
+  apiEndpoint: text("api_endpoint"),              // endpoint API (si aplica)
   isActive: boolean("is_active").notNull().default(true),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at"),
 });
-
 export type Carrier = typeof carriers.$inferSelect;
 export type InsertCarrier = typeof carriers.$inferInsert;
 
-// === ORDERS ===
+// === ÓRDENES ===
+// Registro de órdenes integradas por canal
 export const orders = pgTable("orders", {
   id: serial("id").primaryKey(),
-  orderId: text("order_id").notNull().unique(),
-  channelId: integer("channel_id").notNull(),
-  customerName: text("customer_name"),
-  totalAmount: decimal("total_amount"),
-  isManaged: boolean("is_managed").notNull().default(false),
-  hasTicket: boolean("has_ticket").notNull().default(false),
-  status: text("status").notNull().default("pending"),
+  orderId: text("order_id").notNull().unique(),   // ID externo (ej. Shopify)
+  channelId: integer("channel_id").notNull(),     // referencia a channels.id
+  customerName: text("customer_name"),            // nombre del cliente
+  totalAmount: decimal("total_amount"),           // total de la orden
+  isManaged: boolean("is_managed").notNull().default(false), // gestionada por logística
+  hasTicket: boolean("has_ticket").notNull().default(false), // tiene ticket asociado
+  status: text("status").notNull().default("pending"),      // estado interno
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at"),
 });
-
 export type Order = typeof orders.$inferSelect;
 export type InsertOrder = typeof orders.$inferInsert;
 
 // === TICKETS ===
+// Tickets vinculados a órdenes (soporte/gestión)
 export const tickets = pgTable("tickets", {
   id: serial("id").primaryKey(),
-  ticketNumber: text("ticket_number").notNull().unique(),
-  orderId: integer("order_id").notNull(),
-  status: text("status").notNull().default("open"),
-  notes: text("notes"),
+  ticketNumber: text("ticket_number").notNull().unique(), // folio del ticket
+  orderId: integer("order_id").notNull(),                 // referencia a orders.id
+  status: text("status").notNull().default("open"),      // estado del ticket
+  notes: text("notes"),                                    // notas libres
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at"),
 });
-
 export type Ticket = typeof tickets.$inferSelect;
 export type InsertTicket = typeof tickets.$inferInsert;
 
-// === SHIPPING RULES ===
+// === REGLAS DE ENVÍO ===
+// Reglas para seleccionar paquetería/servicio según condiciones
 export const shippingRules = pgTable("shipping_rules", {
   id: serial("id").primaryKey(),
-  name: text("name").notNull(),
-  condition: text("condition").notNull(),
-  carrierId: integer("carrier_id").notNull(),
-  service: text("service"),
-  cost: decimal("cost"),
-  estimatedDays: integer("estimated_days"),
+  name: text("name").notNull(),                   // nombre de la regla
+  condition: text("condition").notNull(),         // expresión/condición (definición libre)
+  carrierId: integer("carrier_id").notNull(),     // referencia a carriers.id
+  service: text("service"),                       // nombre del servicio (si aplica)
+  cost: decimal("cost"),                          // costo estimado
+  estimatedDays: integer("estimated_days"),       // días estimados de entrega
   isActive: boolean("is_active").notNull().default(true),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at"),
 });
-
 export type ShippingRule = typeof shippingRules.$inferSelect;
 export type InsertShippingRule = typeof shippingRules.$inferInsert;
 
-// === NOTES ===
+// === NOTAS ===
+// Notas privadas por usuario (cuaderno personal)
 export const notes = pgTable("notes", {
   id: serial("id").primaryKey(),
-  userId: integer("user_id").notNull(),
-  content: text("content").notNull(),
+  userId: integer("user_id").notNull(),           // referencia a users.id
+  content: text("content").notNull(),             // contenido de la nota
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at"),
 });
-
 export type Note = typeof notes.$inferSelect;
 export type InsertNote = typeof notes.$inferInsert;
 
-// === ZOD SCHEMAS (para validación en rutas) ===
-
+// === ESQUEMAS ZOD (validación en rutas) ===
+// Se usan para validar cuerpo de peticiones en endpoints.
 export const insertOrderSchema = z.object({
   orderId: z.string().min(1, "El ID de la orden es obligatorio"),
   channelId: z.number().int().positive("El ID del canal debe ser un número positivo"),
   customerName: z.string().optional(),
-  totalAmount: z.string().optional(),
+  totalAmount: z.string().optional(), // se acepta como string para evitar issues de decimal
   isManaged: z.boolean().optional().default(false),
   hasTicket: z.boolean().optional().default(false),
   status: z.string().default("pending"),
@@ -162,3 +165,38 @@ export const insertNoteSchema = z.object({
   userId: z.number().int().positive("El ID de usuario debe ser un número positivo"),
   content: z.string().min(1, "El contenido es obligatorio"),
 });
+
+// === Alias en español (opcionales) ===
+// Permiten importar en español sin romper los nombres originales.
+export {
+  users as usuarios,
+  brands as marcas,
+  catalogProducts as productosCatalogo,
+  channels as canales,
+  carriers as paqueterias,
+  orders as ordenes,
+  tickets as ticketsTabla,
+  shippingRules as reglasEnvio,
+  notes as notas,
+};
+
+export type {
+  User as Usuario,
+  InsertUser as InsertarUsuario,
+  Brand as Marca,
+  InsertBrand as InsertarMarca,
+  CatalogProduct as ProductoCatalogo,
+  InsertCatalogProduct as InsertarProductoCatalogo,
+  Channel as Canal,
+  InsertChannel as InsertarCanal,
+  Carrier as Paqueteria,
+  InsertCarrier as InsertarPaqueteria,
+  Order as Orden,
+  InsertOrder as InsertarOrden,
+  Ticket as TicketTipo,
+  InsertTicket as InsertarTicket,
+  ShippingRule as ReglaEnvio,
+  InsertShippingRule as InsertarReglaEnvio,
+  Note as Nota,
+  InsertNote as InsertarNota,
+};

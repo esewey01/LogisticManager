@@ -1,346 +1,430 @@
+// Capa de acceso a datos (Data Access Layer) — Versión comentada en español
+// Mantiene compatibilidad exportando `storage` con los mismos métodos
+// y agrega alias `almacenamiento` por legibilidad en español.
+
 import {
-  users,
-  brands,
-  catalogProducts,
-  channels,
-  carriers,
-  orders,
-  tickets,
-  shippingRules,
-  notes,
-  type User,
-  type InsertUser,
-  type Brand,
-  type InsertBrand,
-  type CatalogProduct,
-  type InsertCatalogProduct,
-  type Channel,
-  type InsertChannel,
-  type Carrier,
-  type InsertCarrier,
-  type Order,
-  type InsertOrder,
-  type Ticket,
-  type InsertTicket,
-  type ShippingRule,
-  type InsertShippingRule,
-  type Note,
-  type InsertNote,
+  // Tablas
+  users as tablaUsuarios,
+  brands as tablaMarcas,
+  catalogProducts as tablaProductosCatalogo,
+  channels as tablaCanales,
+  carriers as tablaPaqueterias,
+  orders as tablaOrdenes,
+  tickets as tablaTickets,
+  shippingRules as tablaReglasEnvio,
+  notes as tablaNotas,
+  // Tipos (alias en español)
+  type User as Usuario,
+  type InsertUser as InsertarUsuario,
+  type Brand as Marca,
+  type InsertBrand as InsertarMarca,
+  type CatalogProduct as ProductoCatalogo,
+  type InsertCatalogProduct as InsertarProductoCatalogo,
+  type Channel as Canal,
+  type InsertChannel as InsertarCanal,
+  type Carrier as Paqueteria,
+  type InsertCarrier as InsertarPaqueteria,
+  type Order as Orden,
+  type InsertOrder as InsertarOrden,
+  type Ticket as Ticket,
+  type InsertTicket as InsertarTicket,
+  type ShippingRule as ReglaEnvio,
+  type InsertShippingRule as InsertarReglaEnvio,
+  type Note as Nota,
+  type InsertNote as InsertarNota,
 } from "@shared/schema";
-import { db } from "./db";
-import { eq, and, desc, asc, like, sql, count } from "drizzle-orm";
 
+import { db as baseDatos } from "./db";
+import { eq, and, desc, asc, sql, count } from "drizzle-orm";
+
+// --- Interfaz original (compatibilidad) ---
 export interface IStorage {
-  // User operations
-  getUser(id: string): Promise<User | undefined>;
-  getUserByEmail(email: string): Promise<User | undefined>;
-  createUser(user: InsertUser): Promise<User>;
-  updateUser(id: string, updates: Partial<InsertUser>): Promise<User>;
-  getAllUsers(): Promise<User[]>;
+  // Operaciones de usuario
+  getUser(id: number): Promise<Usuario | undefined>;
+  getUserByEmail(email: string): Promise<Usuario | undefined>;
+  createUser(user: InsertarUsuario): Promise<Usuario>;
+  updateUser(id: number, updates: Partial<InsertarUsuario>): Promise<Usuario>;
+  getAllUsers(): Promise<Usuario[]>;
 
-  // Brand operations
-  getBrands(): Promise<Brand[]>;
-  getBrand(id: string): Promise<Brand | undefined>;
-  createBrand(brand: InsertBrand): Promise<Brand>;
-  updateBrand(id: string, updates: Partial<InsertBrand>): Promise<Brand>;
+  // Marcas
+  getBrands(): Promise<Marca[]>;
+  getBrand(id: number): Promise<Marca | undefined>;
+  createBrand(brand: InsertarMarca): Promise<Marca>;
+  updateBrand(id: number, updates: Partial<InsertarMarca>): Promise<Marca>;
 
-  // Catalog operations
-  getCatalogProducts(brandId?: string): Promise<CatalogProduct[]>;
-  createCatalogProduct(product: InsertCatalogProduct): Promise<CatalogProduct>;
-  updateCatalogProduct(id: string, updates: Partial<InsertCatalogProduct>): Promise<CatalogProduct>;
+  // Catálogo
+  getCatalogProducts(brandId?: number): Promise<ProductoCatalogo[]>;
+  createCatalogProduct(product: InsertarProductoCatalogo): Promise<ProductoCatalogo>;
+  updateCatalogProduct(id: number, updates: Partial<InsertarProductoCatalogo>): Promise<ProductoCatalogo>;
 
-  // Channel operations
-  getChannels(): Promise<Channel[]>;
-  getChannel(id: string): Promise<Channel | undefined>;
-  createChannel(channel: InsertChannel): Promise<Channel>;
+  // Canales
+  getChannels(): Promise<Canal[]>;
+  getChannel(id: number): Promise<Canal | undefined>;
+  createChannel(channel: InsertarCanal): Promise<Canal>;
 
-  // Carrier operations
-  getCarriers(): Promise<Carrier[]>;
-  getCarrier(id: string): Promise<Carrier | undefined>;
-  createCarrier(carrier: InsertCarrier): Promise<Carrier>;
+  // Paqueterías
+  getCarriers(): Promise<Paqueteria[]>;
+  getCarrier(id: number): Promise<Paqueteria | undefined>;
+  createCarrier(carrier: InsertarPaqueteria): Promise<Paqueteria>;
 
-  // Order operations
-  getOrders(filters?: { channelId?: string; managed?: boolean; hasTicket?: boolean }): Promise<Order[]>;
-  getOrder(id: string): Promise<Order | undefined>;
-  createOrder(order: InsertOrder): Promise<Order>;
-  updateOrder(id: string, updates: Partial<InsertOrder>): Promise<Order>;
-  getOrdersByCustomer(customerName: string): Promise<Order[]>;
+  // Órdenes
+  getOrders(filters?: { channelId?: number; managed?: boolean; hasTicket?: boolean }): Promise<Orden[]>;
+  getOrder(id: number): Promise<Orden | undefined>;
+  createOrder(order: InsertarOrden): Promise<Orden>;
+  updateOrder(id: number, updates: Partial<InsertarOrden>): Promise<Orden>;
+  getOrdersByCustomer(customerName: string): Promise<Orden[]>;
 
-  // Ticket operations
+  // Tickets
   getTickets(): Promise<Ticket[]>;
-  getTicket(id: string): Promise<Ticket | undefined>;
-  createTicket(ticket: InsertTicket): Promise<Ticket>;
-  updateTicket(id: string, updates: Partial<InsertTicket>): Promise<Ticket>;
+  getTicket(id: number): Promise<Ticket | undefined>;
+  createTicket(ticket: InsertarTicket): Promise<Ticket>;
+  updateTicket(id: number, updates: Partial<InsertarTicket>): Promise<Ticket>;
 
-  // Shipping rules
-  getShippingRules(): Promise<ShippingRule[]>;
-  createShippingRule(rule: InsertShippingRule): Promise<ShippingRule>;
+  // Reglas de envío
+  getShippingRules(): Promise<ReglaEnvio[]>;
+  createShippingRule(rule: InsertarReglaEnvio): Promise<ReglaEnvio>;
 
-  // Notes operations
-  getNotes(userId?: string): Promise<Note[]>;
-  createNote(note: InsertNote): Promise<Note>;
-  deleteNote(id: string): Promise<void>;
+  // Notas
+  getNotes(userId?: number): Promise<Nota[]>;
+  createNote(note: InsertarNota): Promise<Nota>;
+  deleteNote(id: number): Promise<void>;
 
-  // Dashboard metrics
+  // Métricas de dashboard
   getDashboardMetrics(): Promise<{
     totalOrders: number;
     unmanaged: number;
     totalSales: number;
     delayed: number;
-    channelStats: { channelId: string; orders: number; channelName: string; channelCode: string }[];
+    channelStats: { channelId: number; orders: number; channelName: string; channelCode: string }[];
   }>;
 }
 
+/**
+ * Implementación concreta utilizando Drizzle ORM y PostgreSQL.
+ * Todos los métodos están comentados en español para claridad.
+ */
 export class DatabaseStorage implements IStorage {
-  async getUser(id: string): Promise<User | undefined> {
-    const [user] = await db.select().from(users).where(eq(users.id, id));
-    return user;
+  // ==== USUARIOS ====
+
+  /** Obtiene un usuario por su ID. */
+  async getUser(id: number): Promise<Usuario | undefined> {
+    const [usuario] = await baseDatos.select().from(tablaUsuarios).where(eq(tablaUsuarios.id, id));
+    return usuario;
   }
 
-  async getUserByEmail(email: string): Promise<User | undefined> {
-    const [user] = await db.select().from(users).where(eq(users.email, email));
-    return user;
+  /** Busca un usuario por correo electrónico. */
+  async getUserByEmail(email: string): Promise<Usuario | undefined> {
+    const [usuario] = await baseDatos.select().from(tablaUsuarios).where(eq(tablaUsuarios.email, email));
+    return usuario;
   }
 
-  async createUser(insertUser: InsertUser): Promise<User> {
-    const [user] = await db.insert(users).values(insertUser).returning();
-    return user;
+  /** Crea un nuevo usuario. */
+  async createUser(datos: InsertarUsuario): Promise<Usuario> {
+    const [usuario] = await baseDatos.insert(tablaUsuarios).values(datos).returning();
+    return usuario;
   }
 
-  async updateUser(id: string, updates: Partial<InsertUser>): Promise<User> {
-    const [user] = await db
-      .update(users)
+  /** Actualiza campos de un usuario existente. */
+  async updateUser(id: number, updates: Partial<InsertarUsuario>): Promise<Usuario> {
+    const [usuario] = await baseDatos
+      .update(tablaUsuarios)
       .set({ ...updates, updatedAt: new Date() })
-      .where(eq(users.id, id))
+      .where(eq(tablaUsuarios.id, id))
       .returning();
-    return user;
+    return usuario;
   }
 
-  async getAllUsers(): Promise<User[]> {
-    return await db.select().from(users).orderBy(asc(users.email));
+  /** Lista todos los usuarios ordenados por correo. */
+  async getAllUsers(): Promise<Usuario[]> {
+    return await baseDatos.select().from(tablaUsuarios).orderBy(asc(tablaUsuarios.email));
   }
 
-  async getBrands(): Promise<Brand[]> {
-    return await db.select().from(brands).where(eq(brands.isActive, true)).orderBy(asc(brands.name));
-  }
+  // ==== MARCAS ====
 
-  async getBrand(id: string): Promise<Brand | undefined> {
-    const [brand] = await db.select().from(brands).where(eq(brands.id, id));
-    return brand;
-  }
-
-  async createBrand(brand: InsertBrand): Promise<Brand> {
-    const [newBrand] = await db.insert(brands).values(brand).returning();
-    return newBrand;
-  }
-
-  async updateBrand(id: string, updates: Partial<InsertBrand>): Promise<Brand> {
-    const [brand] = await db
-      .update(brands)
-      .set(updates)
-      .where(eq(brands.id, id))
-      .returning();
-    return brand;
-  }
-
-  async getCatalogProducts(brandId?: string): Promise<CatalogProduct[]> {
-    const query = db.select().from(catalogProducts);
-    if (brandId) {
-      return await query.where(eq(catalogProducts.brandId, brandId)).orderBy(asc(catalogProducts.sku));
-    }
-    return await query.orderBy(asc(catalogProducts.sku));
-  }
-
-  async createCatalogProduct(product: InsertCatalogProduct): Promise<CatalogProduct> {
-    const [newProduct] = await db.insert(catalogProducts).values(product).returning();
-    return newProduct;
-  }
-
-  async updateCatalogProduct(id: string, updates: Partial<InsertCatalogProduct>): Promise<CatalogProduct> {
-    const [product] = await db
-      .update(catalogProducts)
-      .set({ ...updates, updatedAt: new Date() })
-      .where(eq(catalogProducts.id, id))
-      .returning();
-    return product;
-  }
-
-  async getChannels(): Promise<Channel[]> {
-    return await db.select().from(channels).where(eq(channels.isActive, true)).orderBy(asc(channels.name));
-  }
-
-  async getChannel(id: string): Promise<Channel | undefined> {
-    const [channel] = await db.select().from(channels).where(eq(channels.id, id));
-    return channel;
-  }
-
-  async createChannel(channel: InsertChannel): Promise<Channel> {
-    const [newChannel] = await db.insert(channels).values(channel).returning();
-    return newChannel;
-  }
-
-  async getCarriers(): Promise<Carrier[]> {
-    return await db.select().from(carriers).where(eq(carriers.isActive, true)).orderBy(asc(carriers.name));
-  }
-
-  async getCarrier(id: string): Promise<Carrier | undefined> {
-    const [carrier] = await db.select().from(carriers).where(eq(carriers.id, id));
-    return carrier;
-  }
-
-  async createCarrier(carrier: InsertCarrier): Promise<Carrier> {
-    const [newCarrier] = await db.insert(carriers).values(carrier).returning();
-    return newCarrier;
-  }
-
-  async getOrders(filters?: { channelId?: string; managed?: boolean; hasTicket?: boolean }): Promise<Order[]> {
-    let query = db.select().from(orders);
-    const conditions = [];
-    
-    if (filters?.channelId) {
-      conditions.push(eq(orders.channelId, filters.channelId));
-    }
-    if (filters?.managed !== undefined) {
-      conditions.push(eq(orders.isManaged, filters.managed));
-    }
-    if (filters?.hasTicket !== undefined) {
-      conditions.push(eq(orders.hasTicket, filters.hasTicket));
-    }
-
-    if (conditions.length > 0) {
-      query = query.where(and(...conditions));
-    }
-
-    return await query.orderBy(desc(orders.createdAt));
-  }
-
-  async getOrder(id: string): Promise<Order | undefined> {
-    const [order] = await db.select().from(orders).where(eq(orders.id, id));
-    return order;
-  }
-
-  async createOrder(order: InsertOrder): Promise<Order> {
-    const [newOrder] = await db.insert(orders).values(order).returning();
-    return newOrder;
-  }
-
-  async updateOrder(id: string, updates: Partial<InsertOrder>): Promise<Order> {
-    const [order] = await db
-      .update(orders)
-      .set({ ...updates, updatedAt: new Date() })
-      .where(eq(orders.id, id))
-      .returning();
-    return order;
-  }
-
-  async getOrdersByCustomer(customerName: string): Promise<Order[]> {
-    return await db
+  /** Devuelve las marcas activas ordenadas por nombre. */
+  async getBrands(): Promise<Marca[]> {
+    return await baseDatos
       .select()
-      .from(orders)
-      .where(eq(orders.customerName, customerName))
-      .orderBy(desc(orders.createdAt));
+      .from(tablaMarcas)
+      .where(eq(tablaMarcas.isActive, true))
+      .orderBy(asc(tablaMarcas.name));
   }
 
+  /** Obtiene una marca por ID. */
+  async getBrand(id: number): Promise<Marca | undefined> {
+    const [marca] = await baseDatos.select().from(tablaMarcas).where(eq(tablaMarcas.id, id));
+    return marca;
+  }
+
+  /** Crea una nueva marca. */
+  async createBrand(datos: InsertarMarca): Promise<Marca> {
+    const [marcaNueva] = await baseDatos.insert(tablaMarcas).values(datos).returning();
+    return marcaNueva;
+  }
+
+  /** Actualiza una marca. */
+  async updateBrand(id: number, updates: Partial<InsertarMarca>): Promise<Marca> {
+    const [marca] = await baseDatos
+      .update(tablaMarcas)
+      .set(updates)
+      .where(eq(tablaMarcas.id, id))
+      .returning();
+    return marca;
+  }
+
+  // ==== CATÁLOGO ====
+
+  /** Lista productos de catálogo; puede filtrar por ID de marca. */
+  async getCatalogProducts(brandId?: number): Promise<ProductoCatalogo[]> {
+    const consulta = baseDatos.select().from(tablaProductosCatalogo);
+    if (brandId) {
+      return await consulta
+        .where(eq(tablaProductosCatalogo.brandId, brandId))
+        .orderBy(asc(tablaProductosCatalogo.sku));
+    }
+    return await consulta.orderBy(asc(tablaProductosCatalogo.sku));
+  }
+
+  /** Crea un producto de catálogo. */
+  async createCatalogProduct(datos: InsertarProductoCatalogo): Promise<ProductoCatalogo> {
+    const [productoNuevo] = await baseDatos.insert(tablaProductosCatalogo).values(datos).returning();
+    return productoNuevo;
+  }
+
+  /** Actualiza un producto de catálogo. */
+  async updateCatalogProduct(id: number, updates: Partial<InsertarProductoCatalogo>): Promise<ProductoCatalogo> {
+    const [producto] = await baseDatos
+      .update(tablaProductosCatalogo)
+      .set({ ...updates, updatedAt: new Date() })
+      .where(eq(tablaProductosCatalogo.id, id))
+      .returning();
+    return producto;
+  }
+
+  // ==== CANALES ====
+
+  /** Devuelve canales activos ordenados por nombre. */
+  async getChannels(): Promise<Canal[]> {
+    return await baseDatos
+      .select()
+      .from(tablaCanales)
+      .where(eq(tablaCanales.isActive, true))
+      .orderBy(asc(tablaCanales.name));
+  }
+
+  /** Obtiene un canal por ID. */
+  async getChannel(id: number): Promise<Canal | undefined> {
+    const [canal] = await baseDatos.select().from(tablaCanales).where(eq(tablaCanales.id, id));
+    return canal;
+  }
+
+  /** Crea un canal. */
+  async createChannel(datos: InsertarCanal): Promise<Canal> {
+    const [canalNuevo] = await baseDatos.insert(tablaCanales).values(datos).returning();
+    return canalNuevo;
+  }
+
+  // ==== PAQUETERÍAS ====
+
+  /** Devuelve paqueterías activas ordenadas por nombre. */
+  async getCarriers(): Promise<Paqueteria[]> {
+    return await baseDatos
+      .select()
+      .from(tablaPaqueterias)
+      .where(eq(tablaPaqueterias.isActive, true))
+      .orderBy(asc(tablaPaqueterias.name));
+  }
+
+  /** Obtiene una paquetería por ID. */
+  async getCarrier(id: number): Promise<Paqueteria | undefined> {
+    const [paq] = await baseDatos.select().from(tablaPaqueterias).where(eq(tablaPaqueterias.id, id));
+    return paq;
+  }
+
+  /** Crea una paquetería. */
+  async createCarrier(datos: InsertarPaqueteria): Promise<Paqueteria> {
+    const [paqueteriaNueva] = await baseDatos.insert(tablaPaqueterias).values(datos).returning();
+    return paqueteriaNueva;
+  }
+
+  // ==== ÓRDENES ====
+
+  /** Lista órdenes con filtros opcionales (canal, gestionada, con ticket). */
+  async getOrders(filtros?: { channelId?: number; managed?: boolean; hasTicket?: boolean }): Promise<Orden[]> {
+    const condiciones: any[] = [];
+
+    if (filtros?.channelId !== undefined) condiciones.push(eq(tablaOrdenes.channelId, filtros.channelId));
+    if (filtros?.managed !== undefined) condiciones.push(eq(tablaOrdenes.isManaged, filtros.managed));
+    if (filtros?.hasTicket !== undefined) condiciones.push(eq(tablaOrdenes.hasTicket, filtros.hasTicket));
+
+    if (condiciones.length > 0) {
+      return await baseDatos
+        .select()
+        .from(tablaOrdenes)
+        .where(and(...condiciones))
+        .orderBy(desc(tablaOrdenes.createdAt));
+    }
+
+    return await baseDatos
+      .select()
+      .from(tablaOrdenes)
+      .orderBy(desc(tablaOrdenes.createdAt));
+  }
+
+
+  /** Obtiene una orden por ID. */
+  async getOrder(id: number): Promise<Orden | undefined> {
+    const [orden] = await baseDatos.select().from(tablaOrdenes).where(eq(tablaOrdenes.id, id));
+    return orden;
+  }
+
+  /** Crea una orden. */
+  async createOrder(datos: InsertarOrden): Promise<Orden> {
+    const [ordenNueva] = await baseDatos.insert(tablaOrdenes).values(datos).returning();
+    return ordenNueva;
+  }
+
+  /** Actualiza una orden. */
+  async updateOrder(id: number, updates: Partial<InsertarOrden>): Promise<Orden> {
+    const [orden] = await baseDatos
+      .update(tablaOrdenes)
+      .set({ ...updates, updatedAt: new Date() })
+      .where(eq(tablaOrdenes.id, id))
+      .returning();
+    return orden;
+  }
+
+  /** Lista órdenes por nombre de cliente. */
+  async getOrdersByCustomer(nombreCliente: string): Promise<Orden[]> {
+    return await baseDatos
+      .select()
+      .from(tablaOrdenes)
+      .where(eq(tablaOrdenes.customerName, nombreCliente))
+      .orderBy(desc(tablaOrdenes.createdAt));
+  }
+
+  // ==== TICKETS ====
+
+  /** Lista tickets ordenados por fecha de creación descendente. */
   async getTickets(): Promise<Ticket[]> {
-    return await db.select().from(tickets).orderBy(desc(tickets.createdAt));
+    return await baseDatos.select().from(tablaTickets).orderBy(desc(tablaTickets.createdAt));
   }
 
-  async getTicket(id: string): Promise<Ticket | undefined> {
-    const [ticket] = await db.select().from(tickets).where(eq(tickets.id, id));
+  /** Obtiene un ticket por ID. */
+  async getTicket(id: number): Promise<Ticket | undefined> {
+    const [ticket] = await baseDatos.select().from(tablaTickets).where(eq(tablaTickets.id, id));
     return ticket;
   }
 
-  async createTicket(ticket: InsertTicket): Promise<Ticket> {
-    const [newTicket] = await db.insert(tickets).values(ticket).returning();
-    return newTicket;
+  /** Crea un ticket. */
+  async createTicket(datos: InsertarTicket): Promise<Ticket> {
+    const [ticketNuevo] = await baseDatos.insert(tablaTickets).values(datos).returning();
+    return ticketNuevo;
   }
 
-  async updateTicket(id: string, updates: Partial<InsertTicket>): Promise<Ticket> {
-    const [ticket] = await db
-      .update(tickets)
+  /** Actualiza un ticket. */
+  async updateTicket(id: number, updates: Partial<InsertarTicket>): Promise<Ticket> {
+    const [ticket] = await baseDatos
+      .update(tablaTickets)
       .set({ ...updates, updatedAt: new Date() })
-      .where(eq(tickets.id, id))
+      .where(eq(tablaTickets.id, id))
       .returning();
     return ticket;
   }
 
-  async getShippingRules(): Promise<ShippingRule[]> {
-    return await db.select().from(shippingRules).where(eq(shippingRules.isActive, true));
+  // ==== REGLAS DE ENVÍO ====
+
+  /** Devuelve reglas de envío activas. */
+  async getShippingRules(): Promise<ReglaEnvio[]> {
+    return await baseDatos.select().from(tablaReglasEnvio).where(eq(tablaReglasEnvio.isActive, true));
   }
 
-  async createShippingRule(rule: InsertShippingRule): Promise<ShippingRule> {
-    const [newRule] = await db.insert(shippingRules).values(rule).returning();
-    return newRule;
+  /** Crea una regla de envío. */
+  async createShippingRule(regla: InsertarReglaEnvio): Promise<ReglaEnvio> {
+    const [nuevaRegla] = await baseDatos.insert(tablaReglasEnvio).values(regla).returning();
+    return nuevaRegla;
   }
 
-  async getNotes(userId?: string): Promise<Note[]> {
-    const query = db.select().from(notes);
+  // ==== NOTAS ====
+
+  /** Lista notas; si se pasa userId, filtra por usuario. */
+  async getNotes(userId?: number): Promise<Nota[]> {
+    const consulta = baseDatos.select().from(tablaNotas);
     if (userId) {
-      return await query.where(eq(notes.userId, userId)).orderBy(desc(notes.createdAt));
+      return await consulta.where(eq(tablaNotas.userId, userId)).orderBy(desc(tablaNotas.createdAt));
     }
-    return await query.orderBy(desc(notes.createdAt));
+    return await consulta.orderBy(desc(tablaNotas.createdAt));
   }
 
-  async createNote(note: InsertNote): Promise<Note> {
-    const [newNote] = await db.insert(notes).values(note).returning();
-    return newNote;
+  /** Crea una nota. */
+  async createNote(nota: InsertarNota): Promise<Nota> {
+    const [nuevaNota] = await baseDatos.insert(tablaNotas).values(nota).returning();
+    return nuevaNota;
   }
 
-  async deleteNote(id: string): Promise<void> {
-    await db.delete(notes).where(eq(notes.id, id));
+  /** Elimina una nota por ID. */
+  async deleteNote(id: number): Promise<void> {
+    await baseDatos.delete(tablaNotas).where(eq(tablaNotas.id, id));
   }
 
+  // ==== MÉTRICAS DE DASHBOARD ====
+
+  /**
+   * Calcula métricas agregadas para el dashboard.
+   * - totalOrders: total de órdenes
+   * - unmanaged: órdenes no gestionadas (isManaged = false)
+   * - totalSales: suma de montos
+   * - delayed: usa status='unmanaged' como proxy de retrasadas
+   * - channelStats: totales por canal
+   */
+  // Métricas de dashboard
   async getDashboardMetrics(): Promise<{
     totalOrders: number;
     unmanaged: number;
     totalSales: number;
     delayed: number;
-    channelStats: { channelId: string; orders: number; channelName: string; channelCode: string }[];
+    channelStats: { channelId: number; orders: number; channelName: string; channelCode: string }[];
   }> {
-    // Total orders
-    const [totalOrdersResult] = await db.select({ count: count() }).from(orders);
-    const totalOrders = totalOrdersResult.count;
+    // Total de órdenes
+    const [totalOrdersResult] = await baseDatos.select({ count: count() }).from(tablaOrdenes);
+    const totalOrders = totalOrdersResult.count as number;
 
-    // Unmanaged orders
-    const [unmanagedResult] = await db
+    // Órdenes no gestionadas
+    const [unmanagedResult] = await baseDatos
       .select({ count: count() })
-      .from(orders)
-      .where(eq(orders.isManaged, false));
-    const unmanaged = unmanagedResult.count;
+      .from(tablaOrdenes)
+      .where(eq(tablaOrdenes.isManaged, false));
+    const unmanaged = unmanagedResult.count as number;
 
-    // Total sales
-    const [salesResult] = await db
-      .select({ total: sql`COALESCE(SUM(${orders.totalAmount}), 0)` })
-      .from(orders);
+    // Ventas totales (SUM)
+    const [salesResult] = await baseDatos
+      .select({ total: sql`COALESCE(SUM(${tablaOrdenes.totalAmount}), 0)` })
+      .from(tablaOrdenes);
     const totalSales = Number(salesResult.total) || 0;
 
-    // Delayed orders (using status = 'unmanaged' as proxy for delayed)
-    const [delayedResult] = await db
+    // Retrasadas (proxy por status = 'unmanaged')
+    const [delayedResult] = await baseDatos
       .select({ count: count() })
-      .from(orders)
-      .where(eq(orders.status, "unmanaged"));
-    const delayed = delayedResult.count;
+      .from(tablaOrdenes)
+      .where(eq(tablaOrdenes.status, "unmanaged"));
+    const delayed = delayedResult.count as number;
 
-    // Channel stats
-    const channelStats = await db
+    // Estadísticas por canal
+    const channelStats = await baseDatos
       .select({
-        channelId: orders.channelId,
+        channelId: tablaOrdenes.channelId,
         orders: count(),
-        channelName: channels.name,
-        channelCode: channels.code,
+        channelName: tablaCanales.name,
+        channelCode: tablaCanales.code,
       })
-      .from(orders)
-      .innerJoin(channels, eq(orders.channelId, channels.id))
-      .groupBy(orders.channelId, channels.name, channels.code);
+      .from(tablaOrdenes)
+      .innerJoin(tablaCanales, eq(tablaOrdenes.channelId, tablaCanales.id))
+      .groupBy(tablaOrdenes.channelId, tablaCanales.name, tablaCanales.code);
 
-    return {
-      totalOrders,
-      unmanaged,
-      totalSales,
-      delayed,
-      channelStats,
-    };
+    return { totalOrders, unmanaged, totalSales, delayed, channelStats };
   }
 }
 
+// Instancia lista para usar (compatibilidad y alias en español)
 export const storage = new DatabaseStorage();
+export const almacenamiento = storage;

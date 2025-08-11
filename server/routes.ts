@@ -1,358 +1,358 @@
+/*
+
+Auth: POST /api/auth/login, POST /api/auth/logout, GET /api/auth/user
+
+Dashboard: GET /api/dashboard/metrics
+
+Órdenes: GET /api/orders, GET /api/orders/:id, POST /api/orders, PATCH /api/orders/:id
+
+Tickets: GET /api/tickets, POST /api/tickets
+
+Catálogos: GET /api/channels, GET /api/brands, GET /api/carriers
+
+Notas: GET /api/notes, POST /api/notes, DELETE /api/notes/:id
+
+Admin: GET /api/admin/users
+
+Integraciones (demo): GET /api/integrations/shopify/sync, GET /api/integrations/mercadolibre/simulate
+
+*/
+
+
 import type { Express } from "express";
 import { createServer, type Server } from "http";
-import { storage } from "./storage";
+import { storage as almacenamiento } from "./storage"; // almacenamiento de datos (DAO)
 import bcrypt from "bcrypt";
 import session from "express-session";
 import MemoryStore from "memorystore";
 import { z } from "zod";
 import { insertOrderSchema, insertTicketSchema, insertNoteSchema } from "@shared/schema";
 
-const MemoryStoreSession = MemoryStore(session);
+// Adaptador de store en memoria para sesiones (con limpieza automática)
+const AlmacenSesionesMemoria = MemoryStore(session);
 
-// Login schema
-const loginSchema = z.object({
+// Esquema de validación para login
+const esquemaLogin = z.object({
   email: z.string().email(),
   password: z.string().min(1),
 });
 
-// Middleware to check authentication
-const requireAuth = (req: any, res: any, next: any) => {
+// Middleware: requiere usuario autenticado
+const requiereAutenticacion = (req: any, res: any, next: any) => {
   if (!req.session.userId) {
-    return res.status(401).json({ message: "Unauthorized" });
+    return res.status(401).json({ message: "No autorizado" });
   }
   next();
 };
 
-// Middleware to check admin role
-const requireAdmin = async (req: any, res: any, next: any) => {
+// Middleware: requiere rol admin
+const requiereAdmin = async (req: any, res: any, next: any) => {
   if (!req.session.userId) {
-    return res.status(401).json({ message: "Unauthorized" });
+    return res.status(401).json({ message: "No autorizado" });
   }
-  
-  const user = await storage.getUser(req.session.userId);
-  if (!user || user.role !== "admin") {
-    return res.status(403).json({ message: "Admin access required" });
+
+  const usuario = await almacenamiento.getUser(req.session.userId);
+  if (!usuario || usuario.role !== "admin") {
+    return res.status(403).json({ message: "Se requiere rol administrador" });
   }
-  
+
   next();
 };
 
+// Función principal: registra rutas y configura sesión; devuelve el servidor HTTP
 export async function registerRoutes(app: Express): Promise<Server> {
-  // Session middleware
+  // Configuración de sesión (cookie firmada con SESSION_SECRET)
   app.use(session({
-    secret: process.env.SESSION_SECRET || "dev-secret-key",
+    secret: process.env.SESSION_SECRET || "dev-secret-key", // en prod ¡debe ser fuerte!
     resave: false,
     saveUninitialized: false,
-    store: new MemoryStoreSession({
-      checkPeriod: 86400000 // prune expired entries every 24h
+    store: new AlmacenSesionesMemoria({
+      checkPeriod: 86_400_000, // limpia expirados cada 24h
     }),
     cookie: {
-      secure: process.env.NODE_ENV === "production",
-      httpOnly: true,
-      maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
-    }
+      secure: process.env.NODE_ENV === "production", // solo por HTTPS en prod
+      httpOnly: true,                                 // inaccesible desde JS del navegador
+      maxAge: 7 * 24 * 60 * 60 * 1000,                // 7 días
+    },
   }));
 
-  // Initialize default data
-  await initializeDefaultData();
+  // Crea datos base si no existen (usuarios, canales, paqueterías, marcas)
+  await inicializarDatosPorDefecto();
 
-  // Auth routes
+  // ---------- Rutas de Autenticación ----------
   app.post("/api/auth/login", async (req, res) => {
     try {
-      const { email, password } = loginSchema.parse(req.body);
-      
-      const user = await storage.getUserByEmail(email);
-      if (!user) {
-        return res.status(401).json({ message: "Invalid credentials" });
-      }
+      const { email, password } = esquemaLogin.parse(req.body);
 
-      const isValidPassword = await bcrypt.compare(password, user.password);
-      if (!isValidPassword) {
-        return res.status(401).json({ message: "Invalid credentials" });
-      }
+      const usuario = await almacenamiento.getUserByEmail(email);
+      if (!usuario) return res.status(401).json({ message: "Credenciales inválidas" });
 
-      // Update last login
-      await storage.updateUser(user.id, { lastLogin: new Date() });
+      const passwordValida = await bcrypt.compare(password, usuario.password);
+      if (!passwordValida) return res.status(401).json({ message: "Credenciales inválidas" });
 
-      (req.session as any).userId = user.id;
-      res.json({ user: { id: user.id, email: user.email, role: user.role } });
-    } catch (error) {
-      res.status(400).json({ message: "Invalid request data" });
+      // Actualiza último acceso
+      await almacenamiento.updateUser(usuario.id, { lastLogin: new Date() });
+
+      (req.session as any).userId = usuario.id;
+      res.json({ user: { id: usuario.id, email: usuario.email, role: usuario.role } });
+    } catch {
+      res.status(400).json({ message: "Datos de solicitud inválidos" });
     }
   });
 
   app.post("/api/auth/logout", (req, res) => {
     req.session.destroy(() => {
-      res.json({ message: "Logged out" });
+      res.json({ message: "Sesión cerrada" });
     });
   });
 
-  app.get("/api/auth/user", requireAuth, async (req: any, res) => {
+  app.get("/api/auth/user", requiereAutenticacion, async (req: any, res) => {
     try {
-      const user = await storage.getUser(req.session.userId);
-      if (!user) {
-        return res.status(404).json({ message: "User not found" });
-      }
-      res.json({ id: user.id, email: user.email, role: user.role });
-    } catch (error) {
-      res.status(500).json({ message: "Server error" });
+      const usuario = await almacenamiento.getUser(req.session.userId);
+      if (!usuario) return res.status(404).json({ message: "Usuario no encontrado" });
+      res.json({ id: usuario.id, email: usuario.email, role: usuario.role });
+    } catch {
+      res.status(500).json({ message: "Error del servidor" });
     }
   });
 
-  // Dashboard routes
-  app.get("/api/dashboard/metrics", requireAuth, async (req, res) => {
+  // ---------- Dashboard ----------
+  app.get("/api/dashboard/metrics", requiereAutenticacion, async (_req, res) => {
     try {
-      const metrics = await storage.getDashboardMetrics();
-      res.json(metrics);
-    } catch (error) {
-      res.status(500).json({ message: "Failed to fetch metrics" });
+      const metricas = await almacenamiento.getDashboardMetrics();
+      res.json(metricas);
+    } catch {
+      res.status(500).json({ message: "No se pudieron obtener métricas" });
     }
   });
 
-  // Orders routes
-  app.get("/api/orders", requireAuth, async (req, res) => {
+  // ---------- Órdenes ----------
+  app.get("/api/orders", requiereAutenticacion, async (req, res) => {
     try {
       const { channelId, managed, hasTicket } = req.query;
-      const filters: any = {};
-      
-      if (channelId) filters.channelId = channelId as string;
-      if (managed !== undefined) filters.managed = managed === "true";
-      if (hasTicket !== undefined) filters.hasTicket = hasTicket === "true";
 
-      const orders = await storage.getOrders(filters);
-      res.json(orders);
-    } catch (error) {
-      res.status(500).json({ message: "Failed to fetch orders" });
-    }
-  });
+      const filtros: {
+        channelId?: number;
+        managed?: boolean;
+        hasTicket?: boolean;
+      } = {};
 
-  app.get("/api/orders/:id", requireAuth, async (req, res) => {
-    try {
-      const order = await storage.getOrder(req.params.id);
-      if (!order) {
-        return res.status(404).json({ message: "Order not found" });
+      if (channelId !== undefined) {
+        const channelIdNum = Number(channelId);
+        if (!Number.isNaN(channelIdNum)) filtros.channelId = channelIdNum;
       }
-      res.json(order);
-    } catch (error) {
-      res.status(500).json({ message: "Failed to fetch order" });
+      if (managed !== undefined) filtros.managed = managed === "true";
+      if (hasTicket !== undefined) filtros.hasTicket = hasTicket === "true";
+
+      const ordenes = await almacenamiento.getOrders(filtros);
+      res.json(ordenes);
+    } catch {
+      res.status(500).json({ message: "No se pudieron obtener órdenes" });
     }
   });
 
-  app.post("/api/orders", requireAuth, async (req, res) => {
+
+  app.get("/api/orders/:id", requiereAutenticacion, async (req, res) => {
     try {
-      const orderData = insertOrderSchema.parse(req.body);
-      const order = await storage.createOrder(orderData);
-      res.status(201).json(order);
-    } catch (error) {
-      res.status(400).json({ message: "Invalid order data" });
+      const id = Number(req.params.id);
+      if (Number.isNaN(id)) return res.status(400).json({ message: "ID de orden inválido" });
+
+      const orden = await almacenamiento.getOrder(id);
+      if (!orden) return res.status(404).json({ message: "Orden no encontrada" });
+      res.json(orden);
+    } catch {
+      res.status(500).json({ message: "No se pudo obtener la orden" });
     }
   });
 
-  app.patch("/api/orders/:id", requireAuth, async (req, res) => {
+  app.post("/api/orders", requiereAutenticacion, async (req, res) => {
     try {
-      const updates = req.body;
-      const order = await storage.updateOrder(req.params.id, updates);
-      res.json(order);
-    } catch (error) {
-      res.status(400).json({ message: "Failed to update order" });
+      const datosOrden = insertOrderSchema.parse(req.body); // validación Zod
+      const orden = await almacenamiento.createOrder(datosOrden);
+      res.status(201).json(orden);
+    } catch {
+      res.status(400).json({ message: "Datos de orden inválidos" });
     }
   });
 
-  // Tickets routes
-  app.get("/api/tickets", requireAuth, async (req, res) => {
+  app.patch("/api/orders/:id", requiereAutenticacion, async (req, res) => {
     try {
-      const tickets = await storage.getTickets();
+      const id = Number(req.params.id);
+      if (Number.isNaN(id)) return res.status(400).json({ message: "ID de orden inválido" });
+
+      const orden = await almacenamiento.updateOrder(id, req.body);
+      res.json(orden);
+    } catch {
+      res.status(400).json({ message: "No se pudo actualizar la orden" });
+    }
+  });
+
+  // ---------- Tickets ----------
+  app.get("/api/tickets", requiereAutenticacion, async (_req, res) => {
+    try {
+      const tickets = await almacenamiento.getTickets();
       res.json(tickets);
-    } catch (error) {
-      res.status(500).json({ message: "Failed to fetch tickets" });
+    } catch {
+      res.status(500).json({ message: "No se pudieron obtener tickets" });
     }
   });
 
-  app.post("/api/tickets", requireAuth, async (req, res) => {
+  app.post("/api/tickets", requiereAutenticacion, async (req, res) => {
     try {
-      const ticketData = insertTicketSchema.parse(req.body);
-      // Generate ticket number
-      const ticketNumber = `TK-${new Date().getFullYear()}-${String(Date.now()).slice(-6)}`;
-      
-      const ticket = await storage.createTicket({
-        ...ticketData,
-        ticketNumber,
+      const datosTicket = insertTicketSchema.parse(req.body);
+      // Genera número de ticket
+      const numeroTicket = `TK-${new Date().getFullYear()}-${String(Date.now()).slice(-6)}`;
+
+      const ticket = await almacenamiento.createTicket({
+        ...datosTicket,
+        ticketNumber: numeroTicket,
       });
       res.status(201).json(ticket);
-    } catch (error) {
-      res.status(400).json({ message: "Invalid ticket data" });
+    } catch {
+      res.status(400).json({ message: "Datos de ticket inválidos" });
     }
   });
 
-  // Channels routes
-  app.get("/api/channels", requireAuth, async (req, res) => {
+  // ---------- Catálogos: Canales, Marcas, Paqueterías ----------
+  app.get("/api/channels", requiereAutenticacion, async (_req, res) => {
     try {
-      const channels = await storage.getChannels();
-      res.json(channels);
-    } catch (error) {
-      res.status(500).json({ message: "Failed to fetch channels" });
+      const canales = await almacenamiento.getChannels();
+      res.json(canales);
+    } catch {
+      res.status(500).json({ message: "No se pudieron obtener canales" });
     }
   });
 
-  // Brands routes
-  app.get("/api/brands", requireAuth, async (req, res) => {
+  app.get("/api/brands", requiereAutenticacion, async (_req, res) => {
     try {
-      const brands = await storage.getBrands();
-      res.json(brands);
-    } catch (error) {
-      res.status(500).json({ message: "Failed to fetch brands" });
+      const marcas = await almacenamiento.getBrands();
+      res.json(marcas);
+    } catch {
+      res.status(500).json({ message: "No se pudieron obtener marcas" });
     }
   });
 
-  // Carriers routes
-  app.get("/api/carriers", requireAuth, async (req, res) => {
+  app.get("/api/carriers", requiereAutenticacion, async (_req, res) => {
     try {
-      const carriers = await storage.getCarriers();
-      res.json(carriers);
-    } catch (error) {
-      res.status(500).json({ message: "Failed to fetch carriers" });
+      const paqueterias = await almacenamiento.getCarriers();
+      res.json(paqueterias);
+    } catch {
+      res.status(500).json({ message: "No se pudieron obtener paqueterías" });
     }
   });
 
-  // Notes routes
-  app.get("/api/notes", requireAuth, async (req: any, res) => {
+  // ---------- Notas ----------
+  app.get("/api/notes", requiereAutenticacion, async (req: any, res) => {
     try {
-      const notes = await storage.getNotes(req.session.userId);
-      res.json(notes);
-    } catch (error) {
-      res.status(500).json({ message: "Failed to fetch notes" });
+      const notas = await almacenamiento.getNotes(req.session.userId);
+      res.json(notas);
+    } catch {
+      res.status(500).json({ message: "No se pudieron obtener notas" });
     }
   });
 
-  app.post("/api/notes", requireAuth, async (req: any, res) => {
+  app.post("/api/notes", requiereAutenticacion, async (req: any, res) => {
     try {
-      const noteData = insertNoteSchema.parse({
+      const datosNota = insertNoteSchema.parse({
         ...req.body,
         userId: req.session.userId,
       });
-      const note = await storage.createNote(noteData);
-      res.status(201).json(note);
-    } catch (error) {
-      res.status(400).json({ message: "Invalid note data" });
+      const nota = await almacenamiento.createNote(datosNota);
+      res.status(201).json(nota);
+    } catch {
+      res.status(400).json({ message: "Datos de nota inválidos" });
     }
   });
 
-  app.delete("/api/notes/:id", requireAuth, async (req, res) => {
+  app.delete("/api/notes/:id", requiereAutenticacion, async (req, res) => {
     try {
-      await storage.deleteNote(req.params.id);
+      const id = Number(req.params.id);
+      if (Number.isNaN(id)) return res.status(400).json({ message: "ID de nota inválido" });
+
+      await almacenamiento.deleteNote(id);
       res.status(204).send();
-    } catch (error) {
-      res.status(500).json({ message: "Failed to delete note" });
+    } catch {
+      res.status(500).json({ message: "No se pudo eliminar la nota" });
     }
   });
 
-  // Admin routes
-  app.get("/api/admin/users", requireAdmin, async (req, res) => {
+
+  // ---------- Admin ----------
+  app.get("/api/admin/users", requiereAdmin, async (_req, res) => {
     try {
-      const users = await storage.getAllUsers();
-      res.json(users);
-    } catch (error) {
-      res.status(500).json({ message: "Failed to fetch users" });
+      const usuarios = await almacenamiento.getAllUsers();
+      res.json(usuarios);
+    } catch {
+      res.status(500).json({ message: "No se pudieron obtener usuarios" });
     }
   });
 
-  // Simulated API integrations
-  app.get("/api/integrations/shopify/sync", requireAuth, async (req, res) => {
-    // Simulate Shopify integration
-    res.json({ message: "Shopify sync initiated", status: "success" });
+  // ---------- Integraciones simuladas ----------
+  app.get("/api/integrations/shopify/sync", requiereAutenticacion, async (_req, res) => {
+    res.json({ message: "Sincronización Shopify iniciada", status: "success" });
   });
 
-  app.get("/api/integrations/mercadolibre/simulate", requireAuth, async (req, res) => {
-    // Simulate MercadoLibre integration
-    res.json({ message: "MercadoLibre simulation", status: "pending" });
+  app.get("/api/integrations/mercadolibre/simulate", requiereAutenticacion, async (_req, res) => {
+    res.json({ message: "Simulación MercadoLibre", status: "pending" });
   });
 
-  const httpServer = createServer(app);
-  return httpServer;
+  // Crea y devuelve el servidor HTTP a quien llama (index.ts)
+  const servidorHttp = createServer(app);
+  return servidorHttp;
 }
 
-// Initialize default data
-async function initializeDefaultData() {
+// --------- Inicialización de datos por defecto ---------
+async function inicializarDatosPorDefecto() {
   try {
-    // Create default users if they don't exist
-    const logisticUser = await storage.getUserByEmail("logistica@empresa.com");
-    if (!logisticUser) {
-      const hashedPassword = await bcrypt.hash("123456", 10);
-      await storage.createUser({
+    // Usuarios base
+    const usuarioLogistica = await almacenamiento.getUserByEmail("logistica@empresa.com");
+    if (!usuarioLogistica) {
+      const passwordHasheada = await bcrypt.hash("123456", 10); // ⚠️ demo
+      await almacenamiento.createUser({
         email: "logistica@empresa.com",
-        password: hashedPassword,
+        password: passwordHasheada,
         firstName: "Usuario",
         lastName: "Logística",
         role: "user",
       });
     }
 
-    const adminUser = await storage.getUserByEmail("admin@empresa.com");
-    if (!adminUser) {
-      const hashedPassword = await bcrypt.hash("admin123", 10);
-      await storage.createUser({
+    const usuarioAdmin = await almacenamiento.getUserByEmail("admin@empresa.com");
+    if (!usuarioAdmin) {
+      const passwordHasheada = await bcrypt.hash("admin123", 10); // ⚠️ demo
+      await almacenamiento.createUser({
         email: "admin@empresa.com",
-        password: hashedPassword,
+        password: passwordHasheada,
         firstName: "Admin",
         lastName: "Sistema",
         role: "admin",
       });
     }
 
-    // Create default channels
-    const channels = await storage.getChannels();
-    if (channels.length === 0) {
-      await storage.createChannel({
-        code: "WW",
-        name: "WW Channel",
-        color: "#4CAF50",
-        icon: "fas fa-globe",
-      });
-      await storage.createChannel({
-        code: "CT",
-        name: "CT Channel",
-        color: "#FF9800",
-        icon: "fas fa-store",
-      });
-      await storage.createChannel({
-        code: "MGL",
-        name: "MGL Channel",
-        color: "#2196F3",
-        icon: "fas fa-shopping-cart",
-      });
+    // Canales base
+    const canales = await almacenamiento.getChannels();
+    if (canales.length === 0) {
+      await almacenamiento.createChannel({ code: "WW", name: "WW Channel", color: "#4CAF50", icon: "fas fa-globe" });
+      await almacenamiento.createChannel({ code: "CT", name: "CT Channel", color: "#FF9800", icon: "fas fa-store" });
+      await almacenamiento.createChannel({ code: "MGL", name: "MGL Channel", color: "#2196F3", icon: "fas fa-shopping-cart" });
     }
 
-    // Create default carriers
-    const carriers = await storage.getCarriers();
-    if (carriers.length === 0) {
-      await storage.createCarrier({
-        name: "Estafeta",
-        code: "ESTAFETA",
-        apiEndpoint: "https://api.estafeta.com",
-      });
-      await storage.createCarrier({
-        name: "DHL",
-        code: "DHL",
-        apiEndpoint: "https://api.dhl.com",
-      });
-      await storage.createCarrier({
-        name: "Express PL",
-        code: "EXPRESS_PL",
-        apiEndpoint: "https://api.expresspl.com",
-      });
+    // Paqueterías base
+    const paqueterias = await almacenamiento.getCarriers();
+    if (paqueterias.length === 0) {
+      await almacenamiento.createCarrier({ name: "Estafeta", code: "ESTAFETA", apiEndpoint: "https://api.estafeta.com" });
+      await almacenamiento.createCarrier({ name: "DHL", code: "DHL", apiEndpoint: "https://api.dhl.com" });
+      await almacenamiento.createCarrier({ name: "Express PL", code: "EXPRESS_PL", apiEndpoint: "https://api.expresspl.com" });
     }
 
-    // Create default brands
-    const brands = await storage.getBrands();
-    if (brands.length === 0) {
-      await storage.createBrand({
-        name: "ELEGATE",
-        code: "ELG",
-      });
+    // Marcas base
+    const marcas = await almacenamiento.getBrands();
+    if (marcas.length === 0) {
+      await almacenamiento.createBrand({ name: "ELEGATE", code: "ELG" });
     }
 
-    console.log("Default data initialized successfully");
+    console.log("Datos por defecto inicializados correctamente");
   } catch (error) {
-    console.error("Failed to initialize default data:", error);
+    console.error("Fallo en la inicialización de datos por defecto:", error);
   }
 }

@@ -1,3 +1,7 @@
+// Utilidades de integración Vite ↔ Express — Versión comentada en español
+// Mantiene las mismas exportaciones: log, setupVite, serveStatic
+// para no romper los imports existentes en index.ts
+
 import express, { type Express } from "express";
 import fs from "fs";
 import path from "path";
@@ -6,80 +10,113 @@ import { type Server } from "http";
 import viteConfig from "../vite.config";
 import { nanoid } from "nanoid";
 
+// Logger base de Vite (para reutilizar formato y niveles)
 const viteLogger = createLogger();
 
+/**
+ * log — Imprime mensajes con hora y etiqueta de origen.
+ * @param message Mensaje a imprimir
+ * @param source  Módulo que origina el mensaje (por defecto "express")
+ */
 export function log(message: string, source = "express") {
-  const formattedTime = new Date().toLocaleTimeString("en-US", {
+  const horaFormateada = new Date().toLocaleTimeString("en-US", {
     hour: "numeric",
     minute: "2-digit",
     second: "2-digit",
     hour12: true,
   });
 
-  console.log(`${formattedTime} [${source}] ${message}`);
+  //ORIGINAL/console.log(`${horaFormateada} [${source}] ${message}`);
+  console.log(`${horaFormateada} ${message}`);
 }
 
+/**
+ * setupVite — Modo desarrollo: monta Vite como middleware dentro de Express.
+ * - Habilita HMR (recarga en caliente) reutilizando el mismo servidor HTTP.
+ * - Transforma index.html en tiempo real y controla caché del entry point.
+ */
 export async function setupVite(app: Express, server: Server) {
-  const serverOptions = {
+  // Opciones del servidor de Vite en modo middleware
+  const opcionesServidor = {
     middlewareMode: true,
     hmr: { server },
     allowedHosts: true as const,
   };
 
+  // Crea la instancia de Vite con la configuración del proyecto
   const vite = await createViteServer({
     ...viteConfig,
-    configFile: false,
+    configFile: false, // usamos el objeto importado, no buscar vite.config.* en disco
     customLogger: {
       ...viteLogger,
+      // Si Vite reporta un error crítico, mostramos y salimos (evita estados raros)
       error: (msg, options) => {
         viteLogger.error(msg, options);
         process.exit(1);
       },
     },
-    server: serverOptions,
-    appType: "custom",
+    server: opcionesServidor,
+    appType: "custom", // indicamos que el servidor de la app lo controlamos nosotros
   });
 
+  // Inyecta los middlewares de Vite en Express (sirve assets, HMR, etc.)
   app.use(vite.middlewares);
+
+  // Para cualquier ruta, servimos el index.html procesado por Vite
   app.use("*", async (req, res, next) => {
     const url = req.originalUrl;
 
     try {
-      const clientTemplate = path.resolve(
-        import.meta.dirname,
+      // Ruta al index.html del cliente (sin build, archivo fuente)
+      const rutaPlantilla = path.resolve(
+        (import.meta as any).dirname,
         "..",
         "client",
         "index.html",
       );
 
-      // always reload the index.html file from disk incase it changes
-      let template = await fs.promises.readFile(clientTemplate, "utf-8");
-      template = template.replace(
+      // Siempre recargamos desde disco por si el archivo cambió
+      let plantilla = await fs.promises.readFile(rutaPlantilla, "utf-8");
+
+      // Evita caché del entry point del cliente agregando un query param aleatorio
+      plantilla = plantilla.replace(
         `src="/src/main.tsx"`,
         `src="/src/main.tsx?v=${nanoid()}"`,
       );
-      const page = await vite.transformIndexHtml(url, template);
-      res.status(200).set({ "Content-Type": "text/html" }).end(page);
+
+      // Deja que Vite transforme/injecte lo necesario en el HTML
+      const pagina = await vite.transformIndexHtml(url, plantilla);
+
+      res.status(200).set({ "Content-Type": "text/html" }).end(pagina);
     } catch (e) {
+      // Mejora el stack trace para DX y delega al manejador de errores de Express
       vite.ssrFixStacktrace(e as Error);
       next(e);
     }
   });
 }
 
+/**
+ * serveStatic — Modo producción: sirve archivos estáticos ya construidos.
+ * - Requiere haber corrido el build del cliente previamente.
+ * - Ofrece fallback a index.html para rutas de SPA.
+ */
 export function serveStatic(app: Express) {
-  const distPath = path.resolve(import.meta.dirname, "public");
+  // Carpeta con el build estático del cliente
+  const rutaDist = path.resolve((import.meta as any).dirname, "public");
 
-  if (!fs.existsSync(distPath)) {
+  // Validación: si no existe la carpeta de build, avisamos claramente
+  if (!fs.existsSync(rutaDist)) {
     throw new Error(
-      `Could not find the build directory: ${distPath}, make sure to build the client first`,
+      `No se encontró el directorio de build: ${rutaDist}. Asegúrate de compilar el cliente primero.`,
     );
   }
 
-  app.use(express.static(distPath));
+  // Sirve archivos estáticos (JS/CSS/imagenes) desde /public
+  app.use(express.static(rutaDist));
 
-  // fall through to index.html if the file doesn't exist
+  // Fallback: si no hay archivo físico, responde index.html (SPA routing)
   app.use("*", (_req, res) => {
-    res.sendFile(path.resolve(distPath, "index.html"));
+    res.sendFile(path.resolve(rutaDist, "index.html"));
   });
 }

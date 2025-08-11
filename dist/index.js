@@ -14,35 +14,53 @@ import { createServer } from "http";
 var schema_exports = {};
 __export(schema_exports, {
   brands: () => brands,
+  canales: () => channels,
   carriers: () => carriers,
   catalogProducts: () => catalogProducts,
   channels: () => channels,
   insertNoteSchema: () => insertNoteSchema,
   insertOrderSchema: () => insertOrderSchema,
   insertTicketSchema: () => insertTicketSchema,
+  marcas: () => brands,
+  notas: () => notes,
   notes: () => notes,
+  ordenes: () => orders,
   orders: () => orders,
+  paqueterias: () => carriers,
+  productosCatalogo: () => catalogProducts,
+  reglasEnvio: () => shippingRules,
   shippingRules: () => shippingRules,
   tickets: () => tickets,
-  users: () => users
+  ticketsTabla: () => tickets,
+  users: () => users,
+  usuarios: () => users
 });
 import { pgTable, serial, text, boolean, timestamp, integer, decimal } from "drizzle-orm/pg-core";
 import { z } from "zod";
 var users = pgTable("users", {
   id: serial("id").primaryKey(),
+  // ID autoincremental (PK)
   email: text("email").notNull().unique(),
+  // correo único (login)
   password: text("password").notNull(),
+  // hash de contraseña
   firstName: text("first_name"),
+  // nombre (opcional)
   lastName: text("last_name"),
+  // apellido (opcional)
   role: text("role").notNull().default("user"),
+  // rol: user | admin
   lastLogin: timestamp("last_login"),
+  // último acceso
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at")
 });
 var brands = pgTable("brands", {
   id: serial("id").primaryKey(),
   name: text("name").notNull(),
+  // nombre visible
   code: text("code").notNull().unique(),
+  // código corto único
   isActive: boolean("is_active").notNull().default(true),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at")
@@ -50,13 +68,21 @@ var brands = pgTable("brands", {
 var catalogProducts = pgTable("catalog_products", {
   id: serial("id").primaryKey(),
   sku: text("sku").notNull().unique(),
+  // SKU único
   brandId: integer("brand_id").notNull(),
+  // referencia a brands.id (no FK explícita aquí)
   name: text("name").notNull(),
+  // nombre del producto
   description: text("description"),
+  // descripción (opcional)
   price: decimal("price"),
+  // precio de venta (opcional)
   cost: decimal("cost"),
+  // costo (opcional)
   weight: decimal("weight"),
+  // peso (opcional)
   dimensions: text("dimensions"),
+  // dimensiones (opcional)
   isActive: boolean("is_active").notNull().default(true),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at")
@@ -64,9 +90,13 @@ var catalogProducts = pgTable("catalog_products", {
 var channels = pgTable("channels", {
   id: serial("id").primaryKey(),
   code: text("code").notNull().unique(),
+  // código corto único del canal
   name: text("name").notNull(),
+  // nombre del canal
   color: text("color"),
+  // color para UI (hex)
   icon: text("icon"),
+  // icono para UI (clase o nombre)
   isActive: boolean("is_active").notNull().default(true),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at")
@@ -74,8 +104,11 @@ var channels = pgTable("channels", {
 var carriers = pgTable("carriers", {
   id: serial("id").primaryKey(),
   name: text("name").notNull(),
+  // nombre visible
   code: text("code").notNull().unique(),
+  // código único (ej. DHL)
   apiEndpoint: text("api_endpoint"),
+  // endpoint API (si aplica)
   isActive: boolean("is_active").notNull().default(true),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at")
@@ -83,32 +116,49 @@ var carriers = pgTable("carriers", {
 var orders = pgTable("orders", {
   id: serial("id").primaryKey(),
   orderId: text("order_id").notNull().unique(),
+  // ID externo (ej. Shopify)
   channelId: integer("channel_id").notNull(),
+  // referencia a channels.id
   customerName: text("customer_name"),
+  // nombre del cliente
   totalAmount: decimal("total_amount"),
+  // total de la orden
   isManaged: boolean("is_managed").notNull().default(false),
+  // gestionada por logística
   hasTicket: boolean("has_ticket").notNull().default(false),
+  // tiene ticket asociado
   status: text("status").notNull().default("pending"),
+  // estado interno
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at")
 });
 var tickets = pgTable("tickets", {
   id: serial("id").primaryKey(),
   ticketNumber: text("ticket_number").notNull().unique(),
+  // folio del ticket
   orderId: integer("order_id").notNull(),
+  // referencia a orders.id
   status: text("status").notNull().default("open"),
+  // estado del ticket
   notes: text("notes"),
+  // notas libres
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at")
 });
 var shippingRules = pgTable("shipping_rules", {
   id: serial("id").primaryKey(),
   name: text("name").notNull(),
+  // nombre de la regla
   condition: text("condition").notNull(),
+  // expresión/condición (definición libre)
   carrierId: integer("carrier_id").notNull(),
+  // referencia a carriers.id
   service: text("service"),
+  // nombre del servicio (si aplica)
   cost: decimal("cost"),
+  // costo estimado
   estimatedDays: integer("estimated_days"),
+  // días estimados de entrega
   isActive: boolean("is_active").notNull().default(true),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at")
@@ -116,7 +166,9 @@ var shippingRules = pgTable("shipping_rules", {
 var notes = pgTable("notes", {
   id: serial("id").primaryKey(),
   userId: integer("user_id").notNull(),
+  // referencia a users.id
   content: text("content").notNull(),
+  // contenido de la nota
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at")
 });
@@ -125,6 +177,7 @@ var insertOrderSchema = z.object({
   channelId: z.number().int().positive("El ID del canal debe ser un n\xFAmero positivo"),
   customerName: z.string().optional(),
   totalAmount: z.string().optional(),
+  // se acepta como string para evitar issues de decimal
   isManaged: z.boolean().optional().default(false),
   hasTicket: z.boolean().optional().default(false),
   status: z.string().default("pending")
@@ -145,7 +198,7 @@ import { Pool } from "pg";
 import { drizzle } from "drizzle-orm/node-postgres";
 import "dotenv/config";
 if (!process.env.DATABASE_URL) {
-  throw new Error("DATABASE_URL must be set. Did you forget to provision a database?");
+  throw new Error("DATABASE_URL no definida/encontrada");
 }
 var pool = new Pool({
   connectionString: process.env.DATABASE_URL
@@ -155,145 +208,189 @@ var db = drizzle(pool, { schema: schema_exports });
 // server/storage.ts
 import { eq, and, desc, asc, sql, count } from "drizzle-orm";
 var DatabaseStorage = class {
+  // ==== USUARIOS ====
+  /** Obtiene un usuario por su ID. */
   async getUser(id) {
-    const [user] = await db.select().from(users).where(eq(users.id, id));
-    return user;
+    const [usuario] = await db.select().from(users).where(eq(users.id, id));
+    return usuario;
   }
+  /** Busca un usuario por correo electrónico. */
   async getUserByEmail(email) {
-    const [user] = await db.select().from(users).where(eq(users.email, email));
-    return user;
+    const [usuario] = await db.select().from(users).where(eq(users.email, email));
+    return usuario;
   }
-  async createUser(insertUser) {
-    const [user] = await db.insert(users).values(insertUser).returning();
-    return user;
+  /** Crea un nuevo usuario. */
+  async createUser(datos) {
+    const [usuario] = await db.insert(users).values(datos).returning();
+    return usuario;
   }
+  /** Actualiza campos de un usuario existente. */
   async updateUser(id, updates) {
-    const [user] = await db.update(users).set({ ...updates, updatedAt: /* @__PURE__ */ new Date() }).where(eq(users.id, id)).returning();
-    return user;
+    const [usuario] = await db.update(users).set({ ...updates, updatedAt: /* @__PURE__ */ new Date() }).where(eq(users.id, id)).returning();
+    return usuario;
   }
+  /** Lista todos los usuarios ordenados por correo. */
   async getAllUsers() {
     return await db.select().from(users).orderBy(asc(users.email));
   }
+  // ==== MARCAS ====
+  /** Devuelve las marcas activas ordenadas por nombre. */
   async getBrands() {
     return await db.select().from(brands).where(eq(brands.isActive, true)).orderBy(asc(brands.name));
   }
+  /** Obtiene una marca por ID. */
   async getBrand(id) {
-    const [brand] = await db.select().from(brands).where(eq(brands.id, id));
-    return brand;
+    const [marca] = await db.select().from(brands).where(eq(brands.id, id));
+    return marca;
   }
-  async createBrand(brand) {
-    const [newBrand] = await db.insert(brands).values(brand).returning();
-    return newBrand;
+  /** Crea una nueva marca. */
+  async createBrand(datos) {
+    const [marcaNueva] = await db.insert(brands).values(datos).returning();
+    return marcaNueva;
   }
+  /** Actualiza una marca. */
   async updateBrand(id, updates) {
-    const [brand] = await db.update(brands).set(updates).where(eq(brands.id, id)).returning();
-    return brand;
+    const [marca] = await db.update(brands).set(updates).where(eq(brands.id, id)).returning();
+    return marca;
   }
+  // ==== CATÁLOGO ====
+  /** Lista productos de catálogo; puede filtrar por ID de marca. */
   async getCatalogProducts(brandId) {
-    const query = db.select().from(catalogProducts);
+    const consulta = db.select().from(catalogProducts);
     if (brandId) {
-      return await query.where(eq(catalogProducts.brandId, brandId)).orderBy(asc(catalogProducts.sku));
+      return await consulta.where(eq(catalogProducts.brandId, brandId)).orderBy(asc(catalogProducts.sku));
     }
-    return await query.orderBy(asc(catalogProducts.sku));
+    return await consulta.orderBy(asc(catalogProducts.sku));
   }
-  async createCatalogProduct(product) {
-    const [newProduct] = await db.insert(catalogProducts).values(product).returning();
-    return newProduct;
+  /** Crea un producto de catálogo. */
+  async createCatalogProduct(datos) {
+    const [productoNuevo] = await db.insert(catalogProducts).values(datos).returning();
+    return productoNuevo;
   }
+  /** Actualiza un producto de catálogo. */
   async updateCatalogProduct(id, updates) {
-    const [product] = await db.update(catalogProducts).set({ ...updates, updatedAt: /* @__PURE__ */ new Date() }).where(eq(catalogProducts.id, id)).returning();
-    return product;
+    const [producto] = await db.update(catalogProducts).set({ ...updates, updatedAt: /* @__PURE__ */ new Date() }).where(eq(catalogProducts.id, id)).returning();
+    return producto;
   }
+  // ==== CANALES ====
+  /** Devuelve canales activos ordenados por nombre. */
   async getChannels() {
     return await db.select().from(channels).where(eq(channels.isActive, true)).orderBy(asc(channels.name));
   }
+  /** Obtiene un canal por ID. */
   async getChannel(id) {
-    const [channel] = await db.select().from(channels).where(eq(channels.id, id));
-    return channel;
+    const [canal] = await db.select().from(channels).where(eq(channels.id, id));
+    return canal;
   }
-  async createChannel(channel) {
-    const [newChannel] = await db.insert(channels).values(channel).returning();
-    return newChannel;
+  /** Crea un canal. */
+  async createChannel(datos) {
+    const [canalNuevo] = await db.insert(channels).values(datos).returning();
+    return canalNuevo;
   }
+  // ==== PAQUETERÍAS ====
+  /** Devuelve paqueterías activas ordenadas por nombre. */
   async getCarriers() {
     return await db.select().from(carriers).where(eq(carriers.isActive, true)).orderBy(asc(carriers.name));
   }
+  /** Obtiene una paquetería por ID. */
   async getCarrier(id) {
-    const [carrier] = await db.select().from(carriers).where(eq(carriers.id, id));
-    return carrier;
+    const [paq] = await db.select().from(carriers).where(eq(carriers.id, id));
+    return paq;
   }
-  async createCarrier(carrier) {
-    const [newCarrier] = await db.insert(carriers).values(carrier).returning();
-    return newCarrier;
+  /** Crea una paquetería. */
+  async createCarrier(datos) {
+    const [paqueteriaNueva] = await db.insert(carriers).values(datos).returning();
+    return paqueteriaNueva;
   }
-  async getOrders(filters) {
-    let query = db.select().from(orders);
-    const conditions = [];
-    if (filters?.channelId) {
-      conditions.push(eq(orders.channelId, filters.channelId));
+  // ==== ÓRDENES ====
+  /** Lista órdenes con filtros opcionales (canal, gestionada, con ticket). */
+  async getOrders(filtros) {
+    const condiciones = [];
+    if (filtros?.channelId !== void 0) condiciones.push(eq(orders.channelId, filtros.channelId));
+    if (filtros?.managed !== void 0) condiciones.push(eq(orders.isManaged, filtros.managed));
+    if (filtros?.hasTicket !== void 0) condiciones.push(eq(orders.hasTicket, filtros.hasTicket));
+    if (condiciones.length > 0) {
+      return await db.select().from(orders).where(and(...condiciones)).orderBy(desc(orders.createdAt));
     }
-    if (filters?.managed !== void 0) {
-      conditions.push(eq(orders.isManaged, filters.managed));
-    }
-    if (filters?.hasTicket !== void 0) {
-      conditions.push(eq(orders.hasTicket, filters.hasTicket));
-    }
-    if (conditions.length > 0) {
-      query = query.where(and(...conditions));
-    }
-    return await query.orderBy(desc(orders.createdAt));
+    return await db.select().from(orders).orderBy(desc(orders.createdAt));
   }
+  /** Obtiene una orden por ID. */
   async getOrder(id) {
-    const [order] = await db.select().from(orders).where(eq(orders.id, id));
-    return order;
+    const [orden] = await db.select().from(orders).where(eq(orders.id, id));
+    return orden;
   }
-  async createOrder(order) {
-    const [newOrder] = await db.insert(orders).values(order).returning();
-    return newOrder;
+  /** Crea una orden. */
+  async createOrder(datos) {
+    const [ordenNueva] = await db.insert(orders).values(datos).returning();
+    return ordenNueva;
   }
+  /** Actualiza una orden. */
   async updateOrder(id, updates) {
-    const [order] = await db.update(orders).set({ ...updates, updatedAt: /* @__PURE__ */ new Date() }).where(eq(orders.id, id)).returning();
-    return order;
+    const [orden] = await db.update(orders).set({ ...updates, updatedAt: /* @__PURE__ */ new Date() }).where(eq(orders.id, id)).returning();
+    return orden;
   }
-  async getOrdersByCustomer(customerName) {
-    return await db.select().from(orders).where(eq(orders.customerName, customerName)).orderBy(desc(orders.createdAt));
+  /** Lista órdenes por nombre de cliente. */
+  async getOrdersByCustomer(nombreCliente) {
+    return await db.select().from(orders).where(eq(orders.customerName, nombreCliente)).orderBy(desc(orders.createdAt));
   }
+  // ==== TICKETS ====
+  /** Lista tickets ordenados por fecha de creación descendente. */
   async getTickets() {
     return await db.select().from(tickets).orderBy(desc(tickets.createdAt));
   }
+  /** Obtiene un ticket por ID. */
   async getTicket(id) {
     const [ticket] = await db.select().from(tickets).where(eq(tickets.id, id));
     return ticket;
   }
-  async createTicket(ticket) {
-    const [newTicket] = await db.insert(tickets).values(ticket).returning();
-    return newTicket;
+  /** Crea un ticket. */
+  async createTicket(datos) {
+    const [ticketNuevo] = await db.insert(tickets).values(datos).returning();
+    return ticketNuevo;
   }
+  /** Actualiza un ticket. */
   async updateTicket(id, updates) {
     const [ticket] = await db.update(tickets).set({ ...updates, updatedAt: /* @__PURE__ */ new Date() }).where(eq(tickets.id, id)).returning();
     return ticket;
   }
+  // ==== REGLAS DE ENVÍO ====
+  /** Devuelve reglas de envío activas. */
   async getShippingRules() {
     return await db.select().from(shippingRules).where(eq(shippingRules.isActive, true));
   }
-  async createShippingRule(rule) {
-    const [newRule] = await db.insert(shippingRules).values(rule).returning();
-    return newRule;
+  /** Crea una regla de envío. */
+  async createShippingRule(regla) {
+    const [nuevaRegla] = await db.insert(shippingRules).values(regla).returning();
+    return nuevaRegla;
   }
+  // ==== NOTAS ====
+  /** Lista notas; si se pasa userId, filtra por usuario. */
   async getNotes(userId) {
-    const query = db.select().from(notes);
+    const consulta = db.select().from(notes);
     if (userId) {
-      return await query.where(eq(notes.userId, userId)).orderBy(desc(notes.createdAt));
+      return await consulta.where(eq(notes.userId, userId)).orderBy(desc(notes.createdAt));
     }
-    return await query.orderBy(desc(notes.createdAt));
+    return await consulta.orderBy(desc(notes.createdAt));
   }
-  async createNote(note) {
-    const [newNote] = await db.insert(notes).values(note).returning();
-    return newNote;
+  /** Crea una nota. */
+  async createNote(nota) {
+    const [nuevaNota] = await db.insert(notes).values(nota).returning();
+    return nuevaNota;
   }
+  /** Elimina una nota por ID. */
   async deleteNote(id) {
     await db.delete(notes).where(eq(notes.id, id));
   }
+  // ==== MÉTRICAS DE DASHBOARD ====
+  /**
+   * Calcula métricas agregadas para el dashboard.
+   * - totalOrders: total de órdenes
+   * - unmanaged: órdenes no gestionadas (isManaged = false)
+   * - totalSales: suma de montos
+   * - delayed: usa status='unmanaged' como proxy de retrasadas
+   * - channelStats: totales por canal
+   */
+  // Métricas de dashboard
   async getDashboardMetrics() {
     const [totalOrdersResult] = await db.select({ count: count() }).from(orders);
     const totalOrders = totalOrdersResult.count;
@@ -309,13 +406,7 @@ var DatabaseStorage = class {
       channelName: channels.name,
       channelCode: channels.code
     }).from(orders).innerJoin(channels, eq(orders.channelId, channels.id)).groupBy(orders.channelId, channels.name, channels.code);
-    return {
-      totalOrders,
-      unmanaged,
-      totalSales,
-      delayed,
-      channelStats
-    };
+    return { totalOrders, unmanaged, totalSales, delayed, channelStats };
   }
 };
 var storage = new DatabaseStorage();
@@ -325,291 +416,264 @@ import bcrypt from "bcrypt";
 import session from "express-session";
 import MemoryStore from "memorystore";
 import { z as z2 } from "zod";
-var MemoryStoreSession = MemoryStore(session);
-var loginSchema = z2.object({
+var AlmacenSesionesMemoria = MemoryStore(session);
+var esquemaLogin = z2.object({
   email: z2.string().email(),
   password: z2.string().min(1)
 });
-var requireAuth = (req, res, next) => {
+var requiereAutenticacion = (req, res, next) => {
   if (!req.session.userId) {
-    return res.status(401).json({ message: "Unauthorized" });
+    return res.status(401).json({ message: "No autorizado" });
   }
   next();
 };
-var requireAdmin = async (req, res, next) => {
+var requiereAdmin = async (req, res, next) => {
   if (!req.session.userId) {
-    return res.status(401).json({ message: "Unauthorized" });
+    return res.status(401).json({ m: "No autorizado" });
   }
-  const user = await storage.getUser(req.session.userId);
-  if (!user || user.role !== "admin") {
-    return res.status(403).json({ message: "Admin access required" });
+  const usuario = await storage.getUser(req.session.userId);
+  if (!usuario || usuario.role !== "admin") {
+    return res.status(403).json({ message: "Se requiere rol administrador" });
   }
   next();
 };
-async function registerRoutes(app2) {
-  app2.use(session({
+async function registerRoutes(app) {
+  app.use(session({
     secret: process.env.SESSION_SECRET || "dev-secret-key",
+    // en prod ¡debe ser fuerte!
     resave: false,
     saveUninitialized: false,
-    store: new MemoryStoreSession({
+    store: new AlmacenSesionesMemoria({
       checkPeriod: 864e5
-      // prune expired entries every 24h
+      // limpia expirados cada 24h
     }),
     cookie: {
       secure: process.env.NODE_ENV === "production",
+      // solo por HTTPS en prod
       httpOnly: true,
+      // inaccesible desde JS del navegador
       maxAge: 7 * 24 * 60 * 60 * 1e3
-      // 7 days
+      // 7 días
     }
   }));
-  await initializeDefaultData();
-  app2.post("/api/auth/login", async (req, res) => {
+  await inicializarDatosPorDefecto();
+  app.post("/api/auth/login", async (req, res) => {
     try {
-      const { email, password } = loginSchema.parse(req.body);
-      const user = await storage.getUserByEmail(email);
-      if (!user) {
-        return res.status(401).json({ message: "Invalid credentials" });
-      }
-      const isValidPassword = await bcrypt.compare(password, user.password);
-      if (!isValidPassword) {
-        return res.status(401).json({ message: "Invalid credentials" });
-      }
-      await storage.updateUser(user.id, { lastLogin: /* @__PURE__ */ new Date() });
-      req.session.userId = user.id;
-      res.json({ user: { id: user.id, email: user.email, role: user.role } });
-    } catch (error) {
-      res.status(400).json({ message: "Invalid request data" });
+      const { email, password } = esquemaLogin.parse(req.body);
+      const usuario = await storage.getUserByEmail(email);
+      if (!usuario) return res.status(401).json({ message: "Credenciales inv\xE1lidas" });
+      const passwordValida = await bcrypt.compare(password, usuario.password);
+      if (!passwordValida) return res.status(401).json({ message: "Credenciales inv\xE1lidas" });
+      await storage.updateUser(usuario.id, { lastLogin: /* @__PURE__ */ new Date() });
+      req.session.userId = usuario.id;
+      res.json({ user: { id: usuario.id, email: usuario.email, role: usuario.role } });
+    } catch {
+      res.status(400).json({ message: "Datos de solicitud inv\xE1lidos" });
     }
   });
-  app2.post("/api/auth/logout", (req, res) => {
+  app.post("/api/auth/logout", (req, res) => {
     req.session.destroy(() => {
-      res.json({ message: "Logged out" });
+      res.json({ message: "Sesi\xF3n cerrada" });
     });
   });
-  app2.get("/api/auth/user", requireAuth, async (req, res) => {
+  app.get("/api/auth/user", requiereAutenticacion, async (req, res) => {
     try {
-      const user = await storage.getUser(req.session.userId);
-      if (!user) {
-        return res.status(404).json({ message: "User not found" });
-      }
-      res.json({ id: user.id, email: user.email, role: user.role });
-    } catch (error) {
-      res.status(500).json({ message: "Server error" });
+      const usuario = await storage.getUser(req.session.userId);
+      if (!usuario) return res.status(404).json({ message: "Usuario no encontrado" });
+      res.json({ id: usuario.id, email: usuario.email, role: usuario.role });
+    } catch {
+      res.status(500).json({ message: "Error del servidor" });
     }
   });
-  app2.get("/api/dashboard/metrics", requireAuth, async (req, res) => {
+  app.get("/api/dashboard/metrics", requiereAutenticacion, async (_req, res) => {
     try {
-      const metrics = await storage.getDashboardMetrics();
-      res.json(metrics);
-    } catch (error) {
-      res.status(500).json({ message: "Failed to fetch metrics" });
+      const metricas = await storage.getDashboardMetrics();
+      res.json(metricas);
+    } catch {
+      res.status(500).json({ message: "No se pudieron obtener m\xE9tricas" });
     }
   });
-  app2.get("/api/orders", requireAuth, async (req, res) => {
+  app.get("/api/orders", requiereAutenticacion, async (req, res) => {
     try {
       const { channelId, managed, hasTicket } = req.query;
-      const filters = {};
-      if (channelId) filters.channelId = channelId;
-      if (managed !== void 0) filters.managed = managed === "true";
-      if (hasTicket !== void 0) filters.hasTicket = hasTicket === "true";
-      const orders2 = await storage.getOrders(filters);
-      res.json(orders2);
-    } catch (error) {
-      res.status(500).json({ message: "Failed to fetch orders" });
-    }
-  });
-  app2.get("/api/orders/:id", requireAuth, async (req, res) => {
-    try {
-      const order = await storage.getOrder(req.params.id);
-      if (!order) {
-        return res.status(404).json({ message: "Order not found" });
+      const filtros = {};
+      if (channelId !== void 0) {
+        const channelIdNum = Number(channelId);
+        if (!Number.isNaN(channelIdNum)) filtros.channelId = channelIdNum;
       }
-      res.json(order);
-    } catch (error) {
-      res.status(500).json({ message: "Failed to fetch order" });
+      if (managed !== void 0) filtros.managed = managed === "true";
+      if (hasTicket !== void 0) filtros.hasTicket = hasTicket === "true";
+      const ordenes = await storage.getOrders(filtros);
+      res.json(ordenes);
+    } catch {
+      res.status(500).json({ message: "No se pudieron obtener \xF3rdenes" });
     }
   });
-  app2.post("/api/orders", requireAuth, async (req, res) => {
+  app.get("/api/orders/:id", requiereAutenticacion, async (req, res) => {
     try {
-      const orderData = insertOrderSchema.parse(req.body);
-      const order = await storage.createOrder(orderData);
-      res.status(201).json(order);
-    } catch (error) {
-      res.status(400).json({ message: "Invalid order data" });
+      const id = Number(req.params.id);
+      if (Number.isNaN(id)) return res.status(400).json({ message: "ID de orden inv\xE1lido" });
+      const orden = await storage.getOrder(id);
+      if (!orden) return res.status(404).json({ message: "Orden no encontrada" });
+      res.json(orden);
+    } catch {
+      res.status(500).json({ message: "No se pudo obtener la orden" });
     }
   });
-  app2.patch("/api/orders/:id", requireAuth, async (req, res) => {
+  app.post("/api/orders", requiereAutenticacion, async (req, res) => {
     try {
-      const updates = req.body;
-      const order = await storage.updateOrder(req.params.id, updates);
-      res.json(order);
-    } catch (error) {
-      res.status(400).json({ message: "Failed to update order" });
+      const datosOrden = insertOrderSchema.parse(req.body);
+      const orden = await storage.createOrder(datosOrden);
+      res.status(201).json(orden);
+    } catch {
+      res.status(400).json({ message: "Datos de orden inv\xE1lidos" });
     }
   });
-  app2.get("/api/tickets", requireAuth, async (req, res) => {
+  app.patch("/api/orders/:id", requiereAutenticacion, async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      if (Number.isNaN(id)) return res.status(400).json({ message: "ID de orden inv\xE1lido" });
+      const orden = await storage.updateOrder(id, req.body);
+      res.json(orden);
+    } catch {
+      res.status(400).json({ message: "No se pudo actualizar la orden" });
+    }
+  });
+  app.get("/api/tickets", requiereAutenticacion, async (_req, res) => {
     try {
       const tickets2 = await storage.getTickets();
       res.json(tickets2);
-    } catch (error) {
-      res.status(500).json({ message: "Failed to fetch tickets" });
+    } catch {
+      res.status(500).json({ message: "No se pudieron obtener tickets" });
     }
   });
-  app2.post("/api/tickets", requireAuth, async (req, res) => {
+  app.post("/api/tickets", requiereAutenticacion, async (req, res) => {
     try {
-      const ticketData = insertTicketSchema.parse(req.body);
-      const ticketNumber = `TK-${(/* @__PURE__ */ new Date()).getFullYear()}-${String(Date.now()).slice(-6)}`;
+      const datosTicket = insertTicketSchema.parse(req.body);
+      const numeroTicket = `TK-${(/* @__PURE__ */ new Date()).getFullYear()}-${String(Date.now()).slice(-6)}`;
       const ticket = await storage.createTicket({
-        ...ticketData,
-        ticketNumber
+        ...datosTicket,
+        ticketNumber: numeroTicket
       });
       res.status(201).json(ticket);
-    } catch (error) {
-      res.status(400).json({ message: "Invalid ticket data" });
+    } catch {
+      res.status(400).json({ message: "Datos de ticket inv\xE1lidos" });
     }
   });
-  app2.get("/api/channels", requireAuth, async (req, res) => {
+  app.get("/api/channels", requiereAutenticacion, async (_req, res) => {
     try {
-      const channels2 = await storage.getChannels();
-      res.json(channels2);
-    } catch (error) {
-      res.status(500).json({ message: "Failed to fetch channels" });
+      const canales = await storage.getChannels();
+      res.json(canales);
+    } catch {
+      res.status(500).json({ message: "No se pudieron obtener canales" });
     }
   });
-  app2.get("/api/brands", requireAuth, async (req, res) => {
+  app.get("/api/brands", requiereAutenticacion, async (_req, res) => {
     try {
-      const brands2 = await storage.getBrands();
-      res.json(brands2);
-    } catch (error) {
-      res.status(500).json({ message: "Failed to fetch brands" });
+      const marcas = await storage.getBrands();
+      res.json(marcas);
+    } catch {
+      res.status(500).json({ message: "No se pudieron obtener marcas" });
     }
   });
-  app2.get("/api/carriers", requireAuth, async (req, res) => {
+  app.get("/api/carriers", requiereAutenticacion, async (_req, res) => {
     try {
-      const carriers2 = await storage.getCarriers();
-      res.json(carriers2);
-    } catch (error) {
-      res.status(500).json({ message: "Failed to fetch carriers" });
+      const paqueterias = await storage.getCarriers();
+      res.json(paqueterias);
+    } catch {
+      res.status(500).json({ message: "No se pudieron obtener paqueter\xEDas" });
     }
   });
-  app2.get("/api/notes", requireAuth, async (req, res) => {
+  app.get("/api/notes", requiereAutenticacion, async (req, res) => {
     try {
-      const notes2 = await storage.getNotes(req.session.userId);
-      res.json(notes2);
-    } catch (error) {
-      res.status(500).json({ message: "Failed to fetch notes" });
+      const notas = await storage.getNotes(req.session.userId);
+      res.json(notas);
+    } catch {
+      res.status(500).json({ message: "No se pudieron obtener notas" });
     }
   });
-  app2.post("/api/notes", requireAuth, async (req, res) => {
+  app.post("/api/notes", requiereAutenticacion, async (req, res) => {
     try {
-      const noteData = insertNoteSchema.parse({
+      const datosNota = insertNoteSchema.parse({
         ...req.body,
         userId: req.session.userId
       });
-      const note = await storage.createNote(noteData);
-      res.status(201).json(note);
-    } catch (error) {
-      res.status(400).json({ message: "Invalid note data" });
+      const nota = await storage.createNote(datosNota);
+      res.status(201).json(nota);
+    } catch {
+      res.status(400).json({ message: "Datos de nota inv\xE1lidos" });
     }
   });
-  app2.delete("/api/notes/:id", requireAuth, async (req, res) => {
+  app.delete("/api/notes/:id", requiereAutenticacion, async (req, res) => {
     try {
-      await storage.deleteNote(req.params.id);
+      const id = Number(req.params.id);
+      if (Number.isNaN(id)) return res.status(400).json({ message: "ID de nota inv\xE1lido" });
+      await storage.deleteNote(id);
       res.status(204).send();
-    } catch (error) {
-      res.status(500).json({ message: "Failed to delete note" });
+    } catch {
+      res.status(500).json({ message: "No se pudo eliminar la nota" });
     }
   });
-  app2.get("/api/admin/users", requireAdmin, async (req, res) => {
+  app.get("/api/admin/users", requiereAdmin, async (_req, res) => {
     try {
-      const users2 = await storage.getAllUsers();
-      res.json(users2);
-    } catch (error) {
-      res.status(500).json({ message: "Failed to fetch users" });
+      const usuarios = await storage.getAllUsers();
+      res.json(usuarios);
+    } catch {
+      res.status(500).json({ message: "No se pudieron obtener usuarios" });
     }
   });
-  app2.get("/api/integrations/shopify/sync", requireAuth, async (req, res) => {
-    res.json({ message: "Shopify sync initiated", status: "success" });
+  app.get("/api/integrations/shopify/sync", requiereAutenticacion, async (_req, res) => {
+    res.json({ message: "Sincronizaci\xF3n Shopify iniciada", status: "success" });
   });
-  app2.get("/api/integrations/mercadolibre/simulate", requireAuth, async (req, res) => {
-    res.json({ message: "MercadoLibre simulation", status: "pending" });
+  app.get("/api/integrations/mercadolibre/simulate", requiereAutenticacion, async (_req, res) => {
+    res.json({ message: "Simulaci\xF3n MercadoLibre", status: "pending" });
   });
-  const httpServer = createServer(app2);
-  return httpServer;
+  const servidorHttp = createServer(app);
+  return servidorHttp;
 }
-async function initializeDefaultData() {
+async function inicializarDatosPorDefecto() {
   try {
-    const logisticUser = await storage.getUserByEmail("logistica@empresa.com");
-    if (!logisticUser) {
-      const hashedPassword = await bcrypt.hash("123456", 10);
+    const usuarioLogistica = await storage.getUserByEmail("logistica@empresa.com");
+    if (!usuarioLogistica) {
+      const passwordHasheada = await bcrypt.hash("123456", 10);
       await storage.createUser({
         email: "logistica@empresa.com",
-        password: hashedPassword,
+        password: passwordHasheada,
         firstName: "Usuario",
         lastName: "Log\xEDstica",
         role: "user"
       });
     }
-    const adminUser = await storage.getUserByEmail("admin@empresa.com");
-    if (!adminUser) {
-      const hashedPassword = await bcrypt.hash("admin123", 10);
+    const usuarioAdmin = await storage.getUserByEmail("admin@empresa.com");
+    if (!usuarioAdmin) {
+      const passwordHasheada = await bcrypt.hash("admin123", 10);
       await storage.createUser({
         email: "admin@empresa.com",
-        password: hashedPassword,
+        password: passwordHasheada,
         firstName: "Admin",
         lastName: "Sistema",
         role: "admin"
       });
     }
-    const channels2 = await storage.getChannels();
-    if (channels2.length === 0) {
-      await storage.createChannel({
-        code: "WW",
-        name: "WW Channel",
-        color: "#4CAF50",
-        icon: "fas fa-globe"
-      });
-      await storage.createChannel({
-        code: "CT",
-        name: "CT Channel",
-        color: "#FF9800",
-        icon: "fas fa-store"
-      });
-      await storage.createChannel({
-        code: "MGL",
-        name: "MGL Channel",
-        color: "#2196F3",
-        icon: "fas fa-shopping-cart"
-      });
+    const canales = await storage.getChannels();
+    if (canales.length === 0) {
+      await storage.createChannel({ code: "WW", name: "WW Channel", color: "#4CAF50", icon: "fas fa-globe" });
+      await storage.createChannel({ code: "CT", name: "CT Channel", color: "#FF9800", icon: "fas fa-store" });
+      await storage.createChannel({ code: "MGL", name: "MGL Channel", color: "#2196F3", icon: "fas fa-shopping-cart" });
     }
-    const carriers2 = await storage.getCarriers();
-    if (carriers2.length === 0) {
-      await storage.createCarrier({
-        name: "Estafeta",
-        code: "ESTAFETA",
-        apiEndpoint: "https://api.estafeta.com"
-      });
-      await storage.createCarrier({
-        name: "DHL",
-        code: "DHL",
-        apiEndpoint: "https://api.dhl.com"
-      });
-      await storage.createCarrier({
-        name: "Express PL",
-        code: "EXPRESS_PL",
-        apiEndpoint: "https://api.expresspl.com"
-      });
+    const paqueterias = await storage.getCarriers();
+    if (paqueterias.length === 0) {
+      await storage.createCarrier({ name: "Estafeta", code: "ESTAFETA", apiEndpoint: "https://api.estafeta.com" });
+      await storage.createCarrier({ name: "DHL", code: "DHL", apiEndpoint: "https://api.dhl.com" });
+      await storage.createCarrier({ name: "Express PL", code: "EXPRESS_PL", apiEndpoint: "https://api.expresspl.com" });
     }
-    const brands2 = await storage.getBrands();
-    if (brands2.length === 0) {
-      await storage.createBrand({
-        name: "ELEGATE",
-        code: "ELG"
-      });
+    const marcas = await storage.getBrands();
+    if (marcas.length === 0) {
+      await storage.createBrand({ name: "ELEGATE", code: "ELG" });
     }
-    console.log("Default data initialized successfully");
+    console.log("Datos por defecto inicializados correctamente");
   } catch (error) {
-    console.error("Failed to initialize default data:", error);
+    console.error("Fallo en la inicializaci\xF3n de datos por defecto:", error);
   }
 }
 
@@ -624,20 +688,13 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import runtimeErrorOverlay from "@replit/vite-plugin-runtime-error-modal";
 var __filename = fileURLToPath(import.meta.url);
 var __dirname = path.dirname(__filename);
 var vite_config_default = defineConfig({
   plugins: [
-    react(),
-    runtimeErrorOverlay(),
-    // Plugins de Replit (cartographer) solo en Replit;
-    // localmente NO los cargues:
-    ...process.env.NODE_ENV !== "production" && process.env.REPL_ID ? [
-      await import("@replit/vite-plugin-cartographer").then(
-        (m) => m.cartographer()
-      )
-    ] : []
+    react()
+    // (eliminado) @replit/vite-plugin-runtime-error-modal
+    // (eliminado) @replit/vite-plugin-cartographer
   ],
   resolve: {
     alias: {
@@ -660,16 +717,16 @@ var vite_config_default = defineConfig({
 import { nanoid } from "nanoid";
 var viteLogger = createLogger();
 function log(message, source = "express") {
-  const formattedTime = (/* @__PURE__ */ new Date()).toLocaleTimeString("en-US", {
+  const horaFormateada = (/* @__PURE__ */ new Date()).toLocaleTimeString("en-US", {
     hour: "numeric",
     minute: "2-digit",
     second: "2-digit",
     hour12: true
   });
-  console.log(`${formattedTime} [${source}] ${message}`);
+  console.log(`${horaFormateada} ${message}`);
 }
-async function setupVite(app2, server) {
-  const serverOptions = {
+async function setupVite(app, server) {
+  const opcionesServidor = {
     middlewareMode: true,
     hmr: { server },
     allowedHosts: true
@@ -677,95 +734,98 @@ async function setupVite(app2, server) {
   const vite = await createViteServer({
     ...vite_config_default,
     configFile: false,
+    // usamos el objeto importado, no buscar vite.config.* en disco
     customLogger: {
       ...viteLogger,
+      // Si Vite reporta un error crítico, mostramos y salimos (evita estados raros)
       error: (msg, options) => {
         viteLogger.error(msg, options);
         process.exit(1);
       }
     },
-    server: serverOptions,
+    server: opcionesServidor,
     appType: "custom"
+    // indicamos que el servidor de la app lo controlamos nosotros
   });
-  app2.use(vite.middlewares);
-  app2.use("*", async (req, res, next) => {
+  app.use(vite.middlewares);
+  app.use("*", async (req, res, next) => {
     const url = req.originalUrl;
     try {
-      const clientTemplate = path2.resolve(
+      const rutaPlantilla = path2.resolve(
         import.meta.dirname,
         "..",
         "client",
         "index.html"
       );
-      let template = await fs.promises.readFile(clientTemplate, "utf-8");
-      template = template.replace(
+      let plantilla = await fs.promises.readFile(rutaPlantilla, "utf-8");
+      plantilla = plantilla.replace(
         `src="/src/main.tsx"`,
         `src="/src/main.tsx?v=${nanoid()}"`
       );
-      const page = await vite.transformIndexHtml(url, template);
-      res.status(200).set({ "Content-Type": "text/html" }).end(page);
+      const pagina = await vite.transformIndexHtml(url, plantilla);
+      res.status(200).set({ "Content-Type": "text/html" }).end(pagina);
     } catch (e) {
       vite.ssrFixStacktrace(e);
       next(e);
     }
   });
 }
-function serveStatic(app2) {
-  const distPath = path2.resolve(import.meta.dirname, "public");
-  if (!fs.existsSync(distPath)) {
+function serveStatic(app) {
+  const rutaDist = path2.resolve(import.meta.dirname, "public");
+  if (!fs.existsSync(rutaDist)) {
     throw new Error(
-      `Could not find the build directory: ${distPath}, make sure to build the client first`
+      `No se encontr\xF3 el directorio de build: ${rutaDist}. Aseg\xFArate de compilar el cliente primero.`
     );
   }
-  app2.use(express.static(distPath));
-  app2.use("*", (_req, res) => {
-    res.sendFile(path2.resolve(distPath, "index.html"));
+  app.use(express.static(rutaDist));
+  app.use("*", (_req, res) => {
+    res.sendFile(path2.resolve(rutaDist, "index.html"));
   });
 }
 
 // server/index.ts
-var app = express2();
-app.use(express2.json());
-app.use(express2.urlencoded({ extended: false }));
-app.use((req, res, next) => {
-  const start = Date.now();
-  const path3 = req.path;
-  let capturedJsonResponse = void 0;
-  const originalResJson = res.json;
-  res.json = function(bodyJson, ...args) {
-    capturedJsonResponse = bodyJson;
-    return originalResJson.apply(res, [bodyJson, ...args]);
+var aplicacion = express2();
+aplicacion.use(express2.json());
+aplicacion.use(express2.urlencoded({ extended: false }));
+aplicacion.use((req, res, next) => {
+  const inicio = Date.now();
+  const ruta = req.path;
+  let respuestaJsonCapturada = void 0;
+  const funcionOriginalResJson = res.json;
+  res.json = function(cuerpoJson, ...args) {
+    respuestaJsonCapturada = cuerpoJson;
+    return funcionOriginalResJson.apply(res, [cuerpoJson, ...args]);
   };
   res.on("finish", () => {
-    const duration = Date.now() - start;
-    if (path3.startsWith("/api")) {
-      let logLine = `${req.method} ${path3} ${res.statusCode} in ${duration}ms`;
-      if (capturedJsonResponse) {
-        logLine += ` :: ${JSON.stringify(capturedJsonResponse)}`;
+    const duracion = Date.now() - inicio;
+    if (ruta.startsWith("/api")) {
+      let lineaLog = `${req.method} ${ruta} ${res.statusCode} en ${duracion}ms`;
+      if (respuestaJsonCapturada) {
+        lineaLog += ` :: ${JSON.stringify(respuestaJsonCapturada)}`;
       }
-      if (logLine.length > 80) {
-        logLine = logLine.slice(0, 79) + "\u2026";
+      if (lineaLog.length > 80) {
+        lineaLog = lineaLog.slice(0, 79) + "\u2026";
       }
-      log(logLine);
+      log(lineaLog);
     }
   });
   next();
 });
 (async () => {
-  const server = await registerRoutes(app);
-  app.use((err, _req, res, _next) => {
-    const status = err.status || err.statusCode || 500;
-    const message = err.message || "Internal Server Error";
-    res.status(status).json({ message });
+  const servidor = await registerRoutes(aplicacion);
+  aplicacion.use((err, _req, res, _next) => {
+    const estado = err.status || err.statusCode || 500;
+    const mensaje = err.message || "Error interno del servidor";
+    res.status(estado).json({ mensaje });
     throw err;
   });
-  if (app.get("env") === "development") {
-    await setupVite(app, server);
+  if (aplicacion.get("env") === "development") {
+    await setupVite(aplicacion, servidor);
   } else {
-    serveStatic(app);
+    serveStatic(aplicacion);
   }
-  const port = parseInt(process.env.PORT || "5000", 10);
-  server.listen({ port, host: "0.0.0.0" }, () => {
-    log(`serving on port ${port}`);
+  const puerto = parseInt(process.env.PORT || "5000", 10);
+  servidor.listen({ port: puerto, host: "0.0.0.0" }, () => {
+    log(`Servidor trabajando en el puerto ${puerto}`);
   });
 })();

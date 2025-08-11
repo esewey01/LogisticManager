@@ -1,69 +1,94 @@
+// index.ts — 
+/*====================
+CREA LA APLICACION EXPRESS, CONFIGURA MIDDLEWARE PARA RECIBIR DATOS EN JSON Y FORMULAROS REGISTRA LAS RUTAS DE LA API (register Routes) 
+
+=================*/
+
+
+
+
+// Importa Express y tipos para Tiposcript
 import express, { type Request, Response, NextFunction } from "express";
+
+// Importa función que registra todas las rutas de la API
 import { registerRoutes } from "./routes";
+
+// Importa utilidades para integrar Vite (frontend) y servir archivos
 import { setupVite, serveStatic, log } from "./vite";
 
-const app = express();
-app.use(express.json());
-app.use(express.urlencoded({ extended: false }));
+// Crea la aplicación Express
+const aplicacion = express();
 
-app.use((req, res, next) => {
-  const start = Date.now();
-  const path = req.path;
-  let capturedJsonResponse: Record<string, any> | undefined = undefined;
+// Middleware para parsear JSON en peticiones
+aplicacion.use(express.json());
 
-  const originalResJson = res.json;
-  res.json = function (bodyJson, ...args) {
-    capturedJsonResponse = bodyJson;
-    return originalResJson.apply(res, [bodyJson, ...args]);
+// Middleware para parsear datos de formularios (application/x-www-form-urlencoded)
+aplicacion.use(express.urlencoded({ extended: false }));
+
+// Middleware de logging personalizado
+aplicacion.use((req, res, next) => {
+  const inicio = Date.now(); // marca de tiempo al recibir la petición
+  const ruta = req.path;
+  let respuestaJsonCapturada: Record<string, any> | undefined = undefined;
+
+  // Guardamos la función original de res.json
+  const funcionOriginalResJson = res.json;
+
+  // Sobreescribimos res.json para capturar lo que responde la API
+  res.json = function (cuerpoJson, ...args) {
+    respuestaJsonCapturada = cuerpoJson;
+    return funcionOriginalResJson.apply(res, [cuerpoJson, ...args]);
   };
 
+  // Cuando la respuesta termine...
   res.on("finish", () => {
-    const duration = Date.now() - start;
-    if (path.startsWith("/api")) {
-      let logLine = `${req.method} ${path} ${res.statusCode} in ${duration}ms`;
-      if (capturedJsonResponse) {
-        logLine += ` :: ${JSON.stringify(capturedJsonResponse)}`;
+    const duracion = Date.now() - inicio;
+    if (ruta.startsWith("/api")) {
+      let lineaLog = `${req.method} ${ruta} ${res.statusCode} en ${duracion}ms`;
+
+      // Agrega el JSON devuelto (si existe)
+      if (respuestaJsonCapturada) {
+        lineaLog += ` :: ${JSON.stringify(respuestaJsonCapturada)}`;
       }
 
-      if (logLine.length > 80) {
-        logLine = logLine.slice(0, 79) + "…";
+      // Limita la longitud del log a 80 caracteres
+      if (lineaLog.length > 80) {
+        lineaLog = lineaLog.slice(0, 79) + "…";
       }
 
-      log(logLine);
+      log(lineaLog); // imprime el log
     }
   });
 
-  next();
+  next(); // continúa al siguiente middleware
 });
 
+// Función autoejecutable async
 (async () => {
-  const server = await registerRoutes(app);
+  // Registra todas las rutas y obtiene el servidor HTTP
+  const servidor = await registerRoutes(aplicacion);
 
-  app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
-    const status = err.status || err.statusCode || 500;
-    const message = err.message || "Internal Server Error";
+  // Middleware de manejo de errores centralizado
+  aplicacion.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
+    const estado = err.status || err.statusCode || 500;
+    const mensaje = err.message || "Error interno del servidor";
 
-    res.status(status).json({ message });
-    throw err;
+    res.status(estado).json({ mensaje });
+    throw err; // lanza para depuración
   });
 
-  // importantly only setup vite in development and after
-  // setting up all the other routes so the catch-all route
-  // doesn't interfere with the other routes
-  if (app.get("env") === "development") {
-    await setupVite(app, server);
+  // Configura Vite solo en desarrollo, después de las rutas
+  if (aplicacion.get("env") === "development") {
+    await setupVite(aplicacion, servidor);
   } else {
-    serveStatic(app);
+    serveStatic(aplicacion);
   }
 
-  // ALWAYS serve the app on the port specified in the environment variable PORT
-  // Other ports are firewalled. Default to 5000 if not specified.
-  // this serves both the API and the client.
-  // It is the only port that is not firewalled.
-  const port = parseInt(process.env.PORT || '5000', 10);
+  // Determina el puerto (de env o 5000 por defecto)
+  const puerto = parseInt(process.env.PORT || '5000', 10);
 
-  // Opción A (objeto sin reusePort)
-  server.listen({ port, host: "0.0.0.0" }, () => {
-    log(`serving on port ${port}`);
-});
+  // Inicia el servidor en todas las interfaces de red (0.0.0.0)
+  servidor.listen({ port: puerto, host: "0.0.0.0" }, () => {
+    log(`Servidor trabajando en el puerto ${puerto}`);
+  });
 })();
