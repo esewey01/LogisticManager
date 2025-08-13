@@ -1,4 +1,4 @@
-// index.ts — 
+// index.ts —
 /*====================
 CREA LA APLICACION EXPRESS, CONFIGURA MIDDLEWARE PARA RECIBIR DATOS EN JSON Y FORMULAROS REGISTRA LAS RUTAS DE LA API (register Routes) 
 
@@ -11,10 +11,9 @@ if (typeof _g.fetch !== "function") {
   _g.fetch = fetchOrig as any;
 }
 
-
-
 // Importa Express y tipos para Tiposcript
 import express, { type Request, Response, NextFunction } from "express";
+import cors from "cors";
 
 // Importa función que registra todas las rutas de la API
 import { registerRoutes } from "./routes";
@@ -28,11 +27,28 @@ const aplicacion = express();
 // Middleware para parsear JSON en peticiones
 aplicacion.use(express.json());
 
-// Middleware para parsear datos de formularios (application/x-www-form-urlencoded)
-aplicacion.use(express.urlencoded({ extended: false }));
+// Middleware para parsear datos de formularios (application/x-www-form-urlencoded)  
+aplicacion.use(express.urlencoded({ extended: true }));
 
-// Middleware de logging personalizado
+// Configuración CORS para Replit
+// Frontend y backend se sirven del mismo dominio en Replit, pero configuramos CORS por seguridad
+const ORIGENES_PERMITIDOS = [
+  // Dominio principal del repl (reemplazar con tu dominio real)
+  'https://19e4afbd-e2d9-41f4-8a9e-9ffbd5c8eb95-00-2tumva9wp0aqg.kirk.replit.dev',
+  // Otros posibles dominios de Replit para este proyecto
+  'https://19e4afbd-e2d9-41f4-8a9e-9ffbd5c8eb95-00-2tumva9wp0aqg.kirk.replit.dev:5000'
+];
+
+aplicacion.use(cors({
+  origin: ORIGENES_PERMITIDOS,
+  credentials: true // Permite cookies/sesiones cross-origin
+}));
+
+// Middleware de logging personalizado - registra todas las peticiones
 aplicacion.use((req, res, next) => {
+  // Log simple de todas las peticiones recibidas
+  console.log(`➡️ Petición recibida: ${req.method} ${req.url}`);
+  
   const inicio = Date.now(); // marca de tiempo al recibir la petición
   const ruta = req.path;
   let respuestaJsonCapturada: Record<string, any> | undefined = undefined;
@@ -75,13 +91,15 @@ aplicacion.use((req, res, next) => {
   const servidor = await registerRoutes(aplicacion);
 
   // Middleware de manejo de errores centralizado
-  aplicacion.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
-    const estado = err.status || err.statusCode || 500;
-    const mensaje = err.message || "Error interno del servidor";
+  aplicacion.use(
+    (err: any, _req: Request, res: Response, _next: NextFunction) => {
+      const estado = err.status || err.statusCode || 500;
+      const mensaje = err.message || "Error interno del servidor";
 
-    res.status(estado).json({ mensaje });
-    throw err; // lanza para depuración
-  });
+      res.status(estado).json({ mensaje });
+      throw err; // lanza para depuración
+    },
+  );
 
   // Configura Vite solo en desarrollo, después de las rutas
   if (aplicacion.get("env") === "development") {
@@ -91,10 +109,11 @@ aplicacion.use((req, res, next) => {
   }
 
   // Determina el puerto (de env o 5000 por defecto)
-  const puerto = parseInt(process.env.PORT || '5000', 10);
+  const puerto = parseInt(process.env.PORT || "5000", 10);
 
-  // Inicia el servidor en todas las interfaces de red (0.0.0.0)
+  // Inicia el servidor en todas las interfaces de red (0.0.0.0) para compatibilidad con Replit
   servidor.listen({ port: puerto, host: "0.0.0.0" }, () => {
-    log(`Servidor trabajando en el puerto ${puerto}`);
+    log(`🚀 Servidor trabajando en el puerto ${puerto}`);
+    log(`🌐 Accesible en: https://19e4afbd-e2d9-41f4-8a9e-9ffbd5c8eb95-00-2tumva9wp0aqg.kirk.replit.dev`);
   });
 })();

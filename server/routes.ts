@@ -30,7 +30,8 @@ import {
   insertTicketSchema,
   insertNoteSchema,
 } from "@shared/schema";
-import { syncShopifyOrders } from "./syncShopifyOrders"; //archivo de sincrinizacion
+import { syncShopifyOrders } from "./syncShopifyOrders"; // archivo de sincrinizacion
+import { getShopifyCredentials } from "./shopifyEnv"; // Helper para múltiples tiendas
 
 // Adaptador de store en memoria para sesiones (con limpieza automática)
 const AlmacenSesionesMemoria = MemoryStore(session);
@@ -68,104 +69,105 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Configuración para proxy (Replit usa proxy reverso)
   app.set("trust proxy", 1);
 
+  // --- Debug: ping muy temprano (ver si entran peticiones al backend) ---
+  app.get("/debug/ping", (req, res) => {
+    console.log(
+      " /debug/ping hit ::",
+      req.method,
+      req.url,
+      "UA:",
+      req.headers["user-agent"],
+    );
+    res.json({
+      ok: true,
+      time: new Date().toISOString(),
+      url: req.url,
+    });
+  });
+  // ----------------------------------------------------------------------
+
   // Configuración de sesión (cookie firmada con SESSION_SECRET)
+  app.set("trust proxy", 1);
   app.use(
     session({
-      secret: process.env.SESSION_SECRET || "dev-secret-key", // en prod ¡debe ser fuerte!
+      secret: process.env.SESSION_SECRET || "dev-secret-key",
       resave: false,
       saveUninitialized: false,
-      store: new AlmacenSesionesMemoria({
-        checkPeriod: 86_400_000, // limpia expirados cada 24h
-      }),
+      store: new AlmacenSesionesMemoria({ checkPeriod: 86_400_000 }),
       cookie: {
-        secure: true, // Replit siempre usa HTTPS
-        httpOnly: true, // inaccesible desde JS del navegador
-        sameSite: "none", // Necesario para iframes/cross-origin en Replit
-        maxAge: 7 * 24 * 60 * 60 * 1000, // 7 días
+        secure: true, // Replit sirve sobre HTTPS
+        httpOnly: true,
+        sameSite: "none", // <-- necesario si frontend y backend no son mismo origen
+        maxAge: 7 * 24 * 60 * 60 * 1000,
       },
     }),
   );
 
-  // SOLO PARA VALIDAR LA RESPUESTA
-  app.get(
-    "/api/integrations/shopify/ping",
-    requiereAutenticacion,
-    async (_req, res) => {
-      try {
-        const shop = process.env.SHOPIFY_SHOP_NAME;
-        const token = process.env.SHOPIFY_ACCESS_TOKEN;
-        const ver = process.env.SHOPIFY_API_VERSION || "2024-07";
+  // Endpoint de salud de la API  
+  app.get("/api/health", (req, res) => {
+    console.log("💚 Health check solicitado");
+    res.json({
+      ok: true,
+      ts: Date.now()
+    });
+  });
 
-        // Validación de formato de dominio
-        const hasProto =
-          shop?.startsWith("http://") || shop?.startsWith("https://");
-        if (hasProto) {
-          return res.status(400).json({
-            ok: false,
-            error:
-              "SHOPIFY_SHOP_NAME debe ser SOLO el dominio *.myshopify.com, sin https://",
-            example: "mi-tienda.myshopify.com",
-            got: shop,
-          });
-        }
+  // PING SHOPIFY CON SOPORTE PARA MÚLTIPLES TIENDAS
+  // Temporalmente sin autenticación para pruebas - luego agregar requiereAutenticacion
+  app.get("/api/integrations/shopify/ping", async (req, res) => {
+    try {
+      // Obtener parámetro de tienda (por defecto '1')  
+      const storeParam = req.query.store as string || '1';
+      console.log(`🏪 Shopify ping solicitado para tienda ${storeParam}`);
+      
+      // Usar helper para obtener credenciales según la tienda
+      const { shop, token, apiVersion, storeNumber } = getShopifyCredentials(storeParam);
 
-        if (!shop || !token) {
-          return res.status(500).json({
-            ok: false,
-            error: "Faltan variables de entorno",
-            vars_seen: {
-              SHOPIFY_SHOP_NAME: !!shop,
-              SHOPIFY_ACCESS_TOKEN: !!token,
-              SHOPIFY_API_VERSION: ver,
-            },
-          });
-        }
+      // Construir URL de la API de Shopify
+      const url = `https://${shop}/admin/api/${apiVersion}/shop.json`;
 
-        const url = `https://${shop}/admin/api/${ver}/shop.json`;
+      // Realizar petición a Shopify
+      const r = await fetch(url, {
+        headers: {
+          "X-Shopify-Access-Token": token,
+          "User-Agent": "LogisticManager/1.0 (+node)",
+        },
+      });
 
-        // Opcional: test DNS previo para errores más claros
-        // (Requiere Node 'dns'. Si no quieres, omite este bloque)
-        /*
-      const { promises: dns } = await import("dns");
-      try { await dns.lookup(shop); } catch (e:any) {
-        return res.status(500).json({ ok:false, error:`DNS lookup falló para ${shop}`, detail: e?.message });
-      }
-      */
-
-        const r = await fetch(url, {
-          headers: {
-            "X-Shopify-Access-Token": token,
-            "User-Agent": "LogisticManager/1.0 (+node)",
-          },
-        });
-
-        const bodyText = await r.text();
-        if (!r.ok) {
-          return res.status(r.status).json({
-            ok: false,
-            status: r.status,
-            statusText: r.statusText,
-            body: bodyText.slice(0, 500), // limitar tamaño
-          });
-        }
-
-        const data = JSON.parse(bodyText);
-        return res.json({
-          ok: true,
-          shop: data?.shop?.myshopify_domain || data?.shop?.domain || null,
-          apiVersion: ver,
-        });
-      } catch (e: any) {
-        // Captura causa real (proxy, cert, ECONNRESET, etc.)
-        const causeMsg = e?.cause?.message || e?.code || null;
-        res.status(500).json({
+      const bodyText = await r.text();
+      
+      // Si hay error de Shopify, responder con detalles completos
+      if (!r.ok) {
+        console.log(`❌ Error Shopify tienda ${storeNumber}: ${r.status} ${r.statusText}`);
+        return res.status(r.status).json({
           ok: false,
-          error: e.message,
-          cause: causeMsg,
+          store: storeNumber,
+          status: r.status,
+          statusText: r.statusText,
+          body: bodyText.slice(0, 500), // primeros 500 caracteres del error
         });
       }
-    },
-  );
+
+      // Parsear respuesta exitosa
+      const data = JSON.parse(bodyText);
+      console.log(`✅ Shopify tienda ${storeNumber} conectada: ${data?.shop?.myshopify_domain}`);
+      
+      return res.json({
+        ok: true,
+        store: storeNumber,
+        shop: data?.shop?.myshopify_domain || data?.shop?.domain || null,
+        apiVersion: apiVersion,
+      });
+    } catch (e: any) {
+      // Manejo de errores: credenciales faltantes, formato incorrecto, etc.
+      console.log(`❌ Error en Shopify ping: ${e.message}`);
+      res.status(500).json({
+        ok: false,
+        error: e.message,
+        cause: e?.cause?.message || e?.code || null,
+      });
+    }
+  });
 
   // ---------- Rutas de Integración Shopify ----------
 
@@ -181,13 +183,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
           status: "success",
         });
       } catch (e: any) {
-        res
-          .status(500)
-          .json({
-            message: "Falló la sincronización",
-            error: e.message,
-            status: "error",
-          });
+        res.status(500).json({
+          message: "Falló la sincronización",
+          error: e.message,
+          status: "error",
+        });
       }
     },
   );

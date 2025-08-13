@@ -5,6 +5,7 @@ LogiSys is a comprehensive logistics management web application designed for a c
 # User Preferences
 
 Preferred communication style: Simple, everyday language.
+Last migration completed: August 13, 2025 - Successfully migrated from Replit Agent with multi-store Shopify support.
 
 # System Architecture
 

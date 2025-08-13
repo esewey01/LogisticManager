@@ -1,0 +1,107 @@
+Quiero que revises y ajustes mi proyecto Node.js/Express para que funcione en Replit con sesiones y con dos tiendas de Shopify definidas por variables *_1 y *_2. Por favor:
+
+**Modo de trabajo**
+- Explica TODO en español.
+- Agrega comentarios en el código en español, claros y breves.
+- No borres Secrets; usa los que ya existen.
+
+**1) Middleware base y logs**
+- En server/index.ts (o el archivo principal donde se crea `app`), antes de registrar rutas:
+  - Asegura `app.use(express.json())` y `app.use(express.urlencoded({ extended: true }))`.
+  - Agrega un middleware de log que imprima método y URL de cada request.
+  - Confirma que el servidor escucha en `process.env.PORT || 5000` y host `0.0.0.0`.
+
+**2) Sesiones detrás de proxy y cookies**
+- En server/routes.ts (donde está `app.use(session(...))`):
+  - Agrega `app.set('trust proxy', 1)`.
+  - Configura la cookie de sesión así:
+    ```
+    cookie: {
+      secure: true,        // Replit usa HTTPS
+      httpOnly: true,
+      sameSite: 'none',    // necesario si frontend y backend no comparten exactamente el mismo origen
+      maxAge: 7 * 24 * 60 * 60 * 1000
+    }
+    ```
+  - Mantén `SESSION_SECRET` desde Secrets.
+
+**3) CORS solo si es necesario**
+- En server/index.ts (o donde se montan middlewares globales), justo DESPUÉS de `express.json()` y ANTES de registrar las rutas:
+  - Instala e importa `cors`.
+  - Implementa:
+    ```
+    import cors from 'cors';
+
+    const ORIGENES_PERMITIDOS = [
+      // Reemplaza estas URLs por las que muestra Replit en este proyecto
+      'https://<TU-REPL>.repl.co',
+      'https://<TU-REPL>.<usuario>.repl.co'
+    ];
+
+    app.use(cors({
+      origin: ORIGENES_PERMITIDOS,
+      credentials: true
+    }));
+    ```
+  - Si el frontend y backend se sirven del MISMO dominio (mismo host), deja CORS pero con `origin` igual a ese host. Documenta en comentarios qué origen usaste.
+
+**4) Base de datos Neon**
+- En server/db.ts:
+  - Usa SOLO `process.env.DATABASE_URL` y configura:
+    ```
+    new Pool({
+      connectionString: process.env.DATABASE_URL,
+      ssl: { rejectUnauthorized: false }
+    })
+    ```
+  - Elimina cualquier uso de PGHOST/PGUSER/PGPORT/PGDATABASE.
+- Ejecuta migraciones (Drizzle o Prisma) para asegurar que existen tablas requeridas (incluida `users`).
+
+**5) Shopify: dos tiendas con *_1 y *_2**
+- Variables existentes en Secrets:
+  - SHOPIFY_SHOP_NAME_1, SHOPIFY_ACCESS_TOKEN_1, SHOPIFY_API_VERSION_1
+  - SHOPIFY_SHOP_NAME_2, SHOPIFY_ACCESS_TOKEN_2, SHOPIFY_API_VERSION_2
+- Crea un helper en server (p. ej. `server/shopifyEnv.ts`) con esta lógica:
+  - Selecciona set 1 o 2 según `req.query.store` (por defecto 1).
+  - Valida que `SHOPIFY_SHOP_NAME_X` sea SOLO dominio `*.myshopify.com` (sin https://).
+  - Usa una API version por default si falta (ej. "2024-07").
+  - Devuelve `{ shop, token, apiVersion }` o lanza error legible en español.
+
+- En la ruta `GET /api/integrations/shopify/ping`:
+  - Quita `requiereAutenticacion` TEMPORALMENTE para probar; luego lo vuelves a poner.
+  - Usa el helper anterior para construir la URL:
+    `https://${shop}/admin/api/${apiVersion}/shop.json`
+  - Llama con fetch y header `"X-Shopify-Access-Token": token`.
+  - Si hay error, responde con JSON detallado (status, statusText y primeros 500 chars de body).
+  - Responde con `{ ok:true, shop: ..., apiVersion: ... }` si funciona.
+  - Agrega comentarios en español explicando la selección por tienda.
+
+**6) Frontend y credenciales**
+- En el cliente (login y demás fetch):
+  - Asegura que TODOS los fetch a `/api/...` incluyan:
+    ```
+    credentials: 'include'
+    ```
+    y headers `Content-Type: application/json` cuando haya body.
+  - Usa rutas relativas (`/api/...`) para que el navegador use el mismo origen del Repl.
+
+**7) Endpoints de diagnóstico**
+- Agrega:
+  - `GET /debug/ping` → responde `{ ok:true, time, url }` e imprime un console.log.
+  - `GET /api/health` → responde `{ ok:true, ts }`.
+- Verifica que ambos funcionen desde el preview externo y desde el integrado.
+
+**8) Verificación final**
+- Muestra en la consola:
+  - Logs de `➡️ Petición recibida: ...` al hacer:
+    - `GET /debug/ping`
+    - `POST /api/auth/login` con JSON `{email,password}`
+    - `GET /api/auth/user`
+    - `GET /api/integrations/shopify/ping?store=1`
+    - `GET /api/integrations/shopify/ping?store=2`
+- Confirma en la respuesta de Shopify si devuelve 200; si no, muestra claramente el status y el body de error de Shopify.
+- Deja TODO comentado en español y explícame los cambios realizados, los orígenes configurados en CORS, y cómo cambiar `?store=1|2`.
+
+IMPORTANTE:
+- No toques ni borres mis Secrets.
+- Todo en español (respuestas y comentarios).
