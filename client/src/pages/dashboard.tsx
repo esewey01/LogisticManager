@@ -12,40 +12,48 @@ export default function Dashboard() {
   const [newNote, setNewNote] = useState("");
   const queryClient = useQueryClient();
 
+  // Consulta de métricas generales del dashboard (refresca cada 30s)
   const { data: metrics, isLoading: metricsLoading } = useQuery({
     queryKey: ["/api/dashboard/metrics"],
     refetchInterval: 30000,
   });
 
+  // Consulta de lista de notas rápidas
   const { data: notes = [] } = useQuery({
     queryKey: ["/api/notes"],
   });
 
+  // Mutación para agregar una nueva nota
   const addNoteMutation = useMutation({
     mutationFn: async (content: string) => {
       await apiRequest("POST", "/api/notes", { content });
     },
     onSuccess: () => {
+      // Refresca la lista de notas después de agregar
       queryClient.invalidateQueries({ queryKey: ["/api/notes"] });
       setNewNote("");
     },
   });
 
+  // Mutación para eliminar una nota existente
   const deleteNoteMutation = useMutation({
     mutationFn: async (noteId: string) => {
       await apiRequest("DELETE", `/api/notes/${noteId}`);
     },
     onSuccess: () => {
+      // Refresca la lista de notas después de eliminar
       queryClient.invalidateQueries({ queryKey: ["/api/notes"] });
     },
   });
 
+  // Acción para agregar una nota si no está vacía
   const handleAddNote = () => {
     if (newNote.trim()) {
       addNoteMutation.mutate(newNote.trim());
     }
   };
 
+  // Pantalla de carga mientras se obtienen métricas
   if (metricsLoading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -56,13 +64,13 @@ export default function Dashboard() {
 
   return (
     <div>
-      {/* Page Header */}
+      {/* Encabezado de la página */}
       <div className="mb-8">
         <h1 className="text-2xl font-semibold text-gray-900 mb-2">Dashboard</h1>
         <p className="text-gray-600">Resumen general del sistema de gestión logística</p>
       </div>
 
-      {/* Summary Cards */}
+      {/* Tarjetas de resumen general */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
         <Card>
           <CardContent className="p-6">
@@ -127,7 +135,7 @@ export default function Dashboard() {
         </Card>
       </div>
 
-      {/* Channel Summary Cards */}
+      {/* Tarjetas de resumen por canal */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
         {metrics?.channelStats?.map((channel) => (
           <Card key={channel.channelId}>
@@ -156,16 +164,16 @@ export default function Dashboard() {
         ))}
       </div>
 
-      {/* Content Grid */}
+      {/* Contenedor principal con gráfico y notas */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Orders Chart */}
+        {/* Gráfico de órdenes */}
         <div className="lg:col-span-2">
           <OrdersChart />
         </div>
 
-        {/* Right Column */}
+        {/* Columna lateral derecha */}
         <div className="space-y-6">
-          {/* Quick Notes */}
+          {/* Bloque de Notas Rápidas */}
           <Card>
             <CardHeader>
               <div className="flex items-center justify-between">
@@ -182,6 +190,7 @@ export default function Dashboard() {
               </div>
             </CardHeader>
             <CardContent className="space-y-4">
+              {/* Formulario para escribir una nueva nota */}
               <div className="space-y-2">
                 <Textarea
                   placeholder="Escribe una nota rápida..."
@@ -191,6 +200,7 @@ export default function Dashboard() {
                 />
               </div>
 
+              {/* Lista de notas existentes */}
               <div className="space-y-3">
                 {notes.length === 0 ? (
                   <p className="text-sm text-gray-500 text-center py-4">
@@ -226,6 +236,7 @@ export default function Dashboard() {
   );
 }
 
+// Devuelve el color asignado a cada canal
 function getChannelColor(code: string): string {
   switch (code) {
     case "WW": return "#4CAF50";
@@ -235,6 +246,7 @@ function getChannelColor(code: string): string {
   }
 }
 
+// Devuelve el ícono asignado a cada canal
 function getChannelIcon(code: string): string {
   switch (code) {
     case "WW": return "fas fa-globe";
