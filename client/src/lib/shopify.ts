@@ -1,7 +1,7 @@
-// server/lib/shopify.ts
-const shop = process.env.SHOPIFY_SHOP_NAME_2!;
-const token = process.env.SHOPIFY_ACCESS_TOKEN_2!;
-const apiVersion = process.env.SHOPIFY_API_VERSION_2 || "2024-07";
+// client/src/lib/shopify.ts
+const shop = process.env.SHOPIFY_SHOP_NAME!;
+const token = process.env.SHOPIFY_ACCESS_TOKEN!;
+const apiVersion = process.env.SHOPIFY_API_VERSION || "2024-07";
 
 if (!shop || !token) {
   throw new Error("Faltan SHOPIFY_SHOP/SHOPIFY_ADMIN_TOKEN en el entorno");

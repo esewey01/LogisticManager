@@ -62,6 +62,9 @@ const requiereAdmin = async (req: any, res: any, next: any) => {
 
 // Función principal: registra rutas y configura sesión; devuelve el servidor HTTP
 export async function registerRoutes(app: Express): Promise<Server> {
+  // Configuración para proxy (Replit usa proxy reverso)
+  app.set('trust proxy', 1);
+  
   // Configuración de sesión (cookie firmada con SESSION_SECRET)
   app.use(session({
     secret: process.env.SESSION_SECRET || "dev-secret-key", // en prod ¡debe ser fuerte!
@@ -71,25 +74,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
       checkPeriod: 86_400_000, // limpia expirados cada 24h
     }),
     cookie: {
-      secure: process.env.NODE_ENV === "production", // solo por HTTPS en prod
-      httpOnly: true,                                 // inaccesible desde JS del navegador
-      maxAge: 7 * 24 * 60 * 60 * 1000,                // 7 días
+      secure: true, // Replit siempre usa HTTPS
+      httpOnly: true, // inaccesible desde JS del navegador
+      sameSite: 'lax', // Protección CSRF compatible con Replit
+      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 días
     },
   }));
 
   // SOLO PARA VALIDAR LA RESPUESTA
   app.get("/api/integrations/shopify/ping", requiereAutenticacion, async (_req, res) => {
     try {
-      const shop = process.env.SHOPIFY_SHOP_NAME_2;
-      const token = process.env.SHOPIFY_ACCESS_TOKEN_2;
-      const ver = process.env.SHOPIFY_API_VERSION_2 || "2024-07";
+      const shop = process.env.SHOPIFY_SHOP_NAME;
+      const token = process.env.SHOPIFY_ACCESS_TOKEN;
+      const ver = process.env.SHOPIFY_API_VERSION || "2024-07";
 
       // Validación de formato de dominio
       const hasProto = shop?.startsWith("http://") || shop?.startsWith("https://");
       if (hasProto) {
         return res.status(400).json({
           ok: false,
-          error: "SHOPIFY_SHOP_NAME_2 debe ser SOLO el dominio *.myshopify.com, sin https://",
+          error: "SHOPIFY_SHOP_NAME debe ser SOLO el dominio *.myshopify.com, sin https://",
           example: "mi-tienda.myshopify.com",
           got: shop
         });
@@ -99,7 +103,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(500).json({
           ok: false,
           error: "Faltan variables de entorno",
-          vars_seen: { SHOPIFY_SHOP_NAME_2: !!shop, SHOPIFY_ACCESS_TOKEN_2: !!token, SHOPIFY_API_VERSION_2: ver }
+          vars_seen: { SHOPIFY_SHOP_NAME: !!shop, SHOPIFY_ACCESS_TOKEN: !!token, SHOPIFY_API_VERSION: ver }
         });
       }
 

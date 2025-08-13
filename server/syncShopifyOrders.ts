@@ -1,12 +1,37 @@
 // server/syncShopifyOrders.ts
-import { shopifyGet } from "../client/src/lib/shopify";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
 import { orders, channels } from "@shared/schema"; // según tus alias del bundler
 
-const pool = new Pool({ connectionString: process.env.DATABASE_URL });
-const db = drizzle(pool, { schema: { orders, channels } as any });
+const pool = new Pool({ 
+  connectionString: process.env.DATABASE_URL,
+  ssl: { rejectUnauthorized: false }
+});
+const db = drizzle(pool, { schema: { orders, channels } });
+
+// Función para realizar peticiones a Shopify desde el servidor
+async function shopifyGet(path: string) {
+  const shop = process.env.SHOPIFY_SHOP_NAME;
+  const token = process.env.SHOPIFY_ACCESS_TOKEN;
+  const apiVersion = process.env.SHOPIFY_API_VERSION || "2024-07";
+  
+  if (!shop || !token) {
+    throw new Error("Faltan SHOPIFY_SHOP_NAME/SHOPIFY_ACCESS_TOKEN en el entorno");
+  }
+  
+  const base = `https://${shop}/admin/api/${apiVersion}`;
+  const res = await fetch(`${base}${path}`, {
+    headers: { "X-Shopify-Access-Token": token }
+  });
+  
+  if (!res.ok) {
+    const txt = await res.text();
+    throw new Error(`Shopify ${res.status} ${res.statusText} :: ${txt}`);
+  }
+  
+  return res.json();
+}
 
 async function getChannelIdByCode(code: string) {
   // Mapear por ahora todo a "WW" si existe; si no, crea tu mapping real por canal
@@ -35,9 +60,10 @@ export async function syncShopifyOrders({ limit = 50 } = {}) {
     };
 
     // upsert simple por orderId
-    const existing = await db.query.orders.findFirst({ where: (t, { eq }) => eq(t.orderId, row.orderId) });
-    if (existing) {
-      await db.update(orders).set({ ...row, updatedAt: new Date() }).where(eq(orders.id, existing.id));
+    const existing = await db.select().from(orders).where(eq(orders.orderId, row.orderId)).limit(1);
+    const existingOrder = existing[0];
+    if (existingOrder) {
+      await db.update(orders).set({ ...row, updatedAt: new Date() }).where(eq(orders.id, existingOrder.id));
       upserted++;
     } else {
       await db.insert(orders).values(row);

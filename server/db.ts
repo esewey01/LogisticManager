@@ -11,9 +11,10 @@ if (!process.env.DATABASE_URL) {
   throw new Error('DATABASE_URL no definida/encontrada');
 }
 
-// Conexión a PostgreSQL local
+// Conexión a PostgreSQL con configuración SSL para Neon
 export const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
+  ssl: { rejectUnauthorized: false }, // Neon requiere SSL
 });
 
 // Drizzle ORM con soporte para Node.js + PostgreSQL
