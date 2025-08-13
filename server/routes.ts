@@ -18,7 +18,6 @@ Integraciones (demo): GET /api/integrations/shopify/sync, GET /api/integrations/
 
 */
 
-
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage as almacenamiento } from "./storage"; // almacenamiento de datos (DAO)
@@ -26,8 +25,12 @@ import bcrypt from "bcrypt";
 import session from "express-session";
 import MemoryStore from "memorystore";
 import { z } from "zod";
-import { insertOrderSchema, insertTicketSchema, insertNoteSchema } from "@shared/schema";
-import { syncShopifyOrders } from "./syncShopifyOrders";//archivo de sincrinizacion
+import {
+  insertOrderSchema,
+  insertTicketSchema,
+  insertNoteSchema,
+} from "@shared/schema";
+import { syncShopifyOrders } from "./syncShopifyOrders"; //archivo de sincrinizacion
 
 // Adaptador de store en memoria para sesiones (con limpieza automática)
 const AlmacenSesionesMemoria = MemoryStore(session);
@@ -63,107 +66,131 @@ const requiereAdmin = async (req: any, res: any, next: any) => {
 // Función principal: registra rutas y configura sesión; devuelve el servidor HTTP
 export async function registerRoutes(app: Express): Promise<Server> {
   // Configuración para proxy (Replit usa proxy reverso)
-  app.set('trust proxy', 1);
-  
+  app.set("trust proxy", 1);
+
   // Configuración de sesión (cookie firmada con SESSION_SECRET)
-  app.use(session({
-    secret: process.env.SESSION_SECRET || "dev-secret-key", // en prod ¡debe ser fuerte!
-    resave: false,
-    saveUninitialized: false,
-    store: new AlmacenSesionesMemoria({
-      checkPeriod: 86_400_000, // limpia expirados cada 24h
+  app.use(
+    session({
+      secret: process.env.SESSION_SECRET || "dev-secret-key", // en prod ¡debe ser fuerte!
+      resave: false,
+      saveUninitialized: false,
+      store: new AlmacenSesionesMemoria({
+        checkPeriod: 86_400_000, // limpia expirados cada 24h
+      }),
+      cookie: {
+        secure: true, // Replit siempre usa HTTPS
+        httpOnly: true, // inaccesible desde JS del navegador
+        sameSite: "none", // Necesario para iframes/cross-origin en Replit
+        maxAge: 7 * 24 * 60 * 60 * 1000, // 7 días
+      },
     }),
-    cookie: {
-      secure: true, // Replit siempre usa HTTPS
-      httpOnly: true, // inaccesible desde JS del navegador
-      sameSite: 'lax', // Protección CSRF compatible con Replit
-      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 días
-    },
-  }));
+  );
 
   // SOLO PARA VALIDAR LA RESPUESTA
-  app.get("/api/integrations/shopify/ping", requiereAutenticacion, async (_req, res) => {
-    try {
-      const shop = process.env.SHOPIFY_SHOP_NAME;
-      const token = process.env.SHOPIFY_ACCESS_TOKEN;
-      const ver = process.env.SHOPIFY_API_VERSION || "2024-07";
+  app.get(
+    "/api/integrations/shopify/ping",
+    requiereAutenticacion,
+    async (_req, res) => {
+      try {
+        const shop = process.env.SHOPIFY_SHOP_NAME;
+        const token = process.env.SHOPIFY_ACCESS_TOKEN;
+        const ver = process.env.SHOPIFY_API_VERSION || "2024-07";
 
-      // Validación de formato de dominio
-      const hasProto = shop?.startsWith("http://") || shop?.startsWith("https://");
-      if (hasProto) {
-        return res.status(400).json({
-          ok: false,
-          error: "SHOPIFY_SHOP_NAME debe ser SOLO el dominio *.myshopify.com, sin https://",
-          example: "mi-tienda.myshopify.com",
-          got: shop
-        });
-      }
+        // Validación de formato de dominio
+        const hasProto =
+          shop?.startsWith("http://") || shop?.startsWith("https://");
+        if (hasProto) {
+          return res.status(400).json({
+            ok: false,
+            error:
+              "SHOPIFY_SHOP_NAME debe ser SOLO el dominio *.myshopify.com, sin https://",
+            example: "mi-tienda.myshopify.com",
+            got: shop,
+          });
+        }
 
-      if (!shop || !token) {
-        return res.status(500).json({
-          ok: false,
-          error: "Faltan variables de entorno",
-          vars_seen: { SHOPIFY_SHOP_NAME: !!shop, SHOPIFY_ACCESS_TOKEN: !!token, SHOPIFY_API_VERSION: ver }
-        });
-      }
+        if (!shop || !token) {
+          return res.status(500).json({
+            ok: false,
+            error: "Faltan variables de entorno",
+            vars_seen: {
+              SHOPIFY_SHOP_NAME: !!shop,
+              SHOPIFY_ACCESS_TOKEN: !!token,
+              SHOPIFY_API_VERSION: ver,
+            },
+          });
+        }
 
-      const url = `https://${shop}/admin/api/${ver}/shop.json`;
+        const url = `https://${shop}/admin/api/${ver}/shop.json`;
 
-      // Opcional: test DNS previo para errores más claros
-      // (Requiere Node 'dns'. Si no quieres, omite este bloque)
-      /*
+        // Opcional: test DNS previo para errores más claros
+        // (Requiere Node 'dns'. Si no quieres, omite este bloque)
+        /*
       const { promises: dns } = await import("dns");
       try { await dns.lookup(shop); } catch (e:any) {
         return res.status(500).json({ ok:false, error:`DNS lookup falló para ${shop}`, detail: e?.message });
       }
       */
 
-      const r = await fetch(url, {
-        headers: {
-          "X-Shopify-Access-Token": token,
-          "User-Agent": "LogisticManager/1.0 (+node)"
-        }
-      });
+        const r = await fetch(url, {
+          headers: {
+            "X-Shopify-Access-Token": token,
+            "User-Agent": "LogisticManager/1.0 (+node)",
+          },
+        });
 
-      const bodyText = await r.text();
-      if (!r.ok) {
-        return res.status(r.status).json({
+        const bodyText = await r.text();
+        if (!r.ok) {
+          return res.status(r.status).json({
+            ok: false,
+            status: r.status,
+            statusText: r.statusText,
+            body: bodyText.slice(0, 500), // limitar tamaño
+          });
+        }
+
+        const data = JSON.parse(bodyText);
+        return res.json({
+          ok: true,
+          shop: data?.shop?.myshopify_domain || data?.shop?.domain || null,
+          apiVersion: ver,
+        });
+      } catch (e: any) {
+        // Captura causa real (proxy, cert, ECONNRESET, etc.)
+        const causeMsg = e?.cause?.message || e?.code || null;
+        res.status(500).json({
           ok: false,
-          status: r.status,
-          statusText: r.statusText,
-          body: bodyText.slice(0, 500) // limitar tamaño
+          error: e.message,
+          cause: causeMsg,
         });
       }
-
-      const data = JSON.parse(bodyText);
-      return res.json({
-        ok: true,
-        shop: data?.shop?.myshopify_domain || data?.shop?.domain || null,
-        apiVersion: ver
-      });
-
-    } catch (e: any) {
-      // Captura causa real (proxy, cert, ECONNRESET, etc.)
-      const causeMsg = e?.cause?.message || e?.code || null;
-      res.status(500).json({
-        ok: false,
-        error: e.message,
-        cause: causeMsg
-      });
-    }
-  });
-
+    },
+  );
 
   // ---------- Rutas de Integración Shopify ----------
 
-  app.get("/api/integrations/shopify/sync", requiereAutenticacion, async (_req, res) => {
-    try {
-      const r = await syncShopifyOrders({ limit: 50 });
-      res.json({ message: "Sincronización Shopify OK", ...r, status: "success" });
-    } catch (e: any) {
-      res.status(500).json({ message: "Falló la sincronización", error: e.message, status: "error" });
-    }
-  });
+  app.get(
+    "/api/integrations/shopify/sync",
+    requiereAutenticacion,
+    async (_req, res) => {
+      try {
+        const r = await syncShopifyOrders({ limit: 50 });
+        res.json({
+          message: "Sincronización Shopify OK",
+          ...r,
+          status: "success",
+        });
+      } catch (e: any) {
+        res
+          .status(500)
+          .json({
+            message: "Falló la sincronización",
+            error: e.message,
+            status: "error",
+          });
+      }
+    },
+  );
 
   // Crea datos base si no existen (usuarios, canales, paqueterías, marcas)
   await inicializarDatosPorDefecto();
@@ -171,19 +198,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // ---------- Rutas de Autenticación ----------
   app.post("/api/auth/login", async (req, res) => {
     try {
+      console.log("Body recibido en login:", req.body);
       const { email, password } = esquemaLogin.parse(req.body);
 
       const usuario = await almacenamiento.getUserByEmail(email);
-      if (!usuario) return res.status(401).json({ message: "Credenciales inválidas" });
+      if (!usuario)
+        return res.status(401).json({ message: "Credenciales inválidas" });
 
       const passwordValida = await bcrypt.compare(password, usuario.password);
-      if (!passwordValida) return res.status(401).json({ message: "Credenciales inválidas" });
+      if (!passwordValida)
+        return res.status(401).json({ message: "Credenciales inválidas" });
 
       // Actualiza último acceso
       await almacenamiento.updateUser(usuario.id, { lastLogin: new Date() });
 
       (req.session as any).userId = usuario.id;
-      res.json({ user: { id: usuario.id, email: usuario.email, role: usuario.role } });
+      res.json({
+        user: { id: usuario.id, email: usuario.email, role: usuario.role },
+      });
     } catch {
       res.status(400).json({ message: "Datos de solicitud inválidos" });
     }
@@ -198,7 +230,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/auth/user", requiereAutenticacion, async (req: any, res) => {
     try {
       const usuario = await almacenamiento.getUser(req.session.userId);
-      if (!usuario) return res.status(404).json({ message: "Usuario no encontrado" });
+      if (!usuario)
+        return res.status(404).json({ message: "Usuario no encontrado" });
       res.json({ id: usuario.id, email: usuario.email, role: usuario.role });
     } catch {
       res.status(500).json({ message: "Error del servidor" });
@@ -206,14 +239,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // ---------- Dashboard ----------
-  app.get("/api/dashboard/metrics", requiereAutenticacion, async (_req, res) => {
-    try {
-      const metricas = await almacenamiento.getDashboardMetrics();
-      res.json(metricas);
-    } catch {
-      res.status(500).json({ message: "No se pudieron obtener métricas" });
-    }
-  });
+  app.get(
+    "/api/dashboard/metrics",
+    requiereAutenticacion,
+    async (_req, res) => {
+      try {
+        const metricas = await almacenamiento.getDashboardMetrics();
+        res.json(metricas);
+      } catch {
+        res.status(500).json({ message: "No se pudieron obtener métricas" });
+      }
+    },
+  );
 
   // ---------- Órdenes ----------
   app.get("/api/orders", requiereAutenticacion, async (req, res) => {
@@ -240,14 +277,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-
   app.get("/api/orders/:id", requiereAutenticacion, async (req, res) => {
     try {
       const id = Number(req.params.id);
-      if (Number.isNaN(id)) return res.status(400).json({ message: "ID de orden inválido" });
+      if (Number.isNaN(id))
+        return res.status(400).json({ message: "ID de orden inválido" });
 
       const orden = await almacenamiento.getOrder(id);
-      if (!orden) return res.status(404).json({ message: "Orden no encontrada" });
+      if (!orden)
+        return res.status(404).json({ message: "Orden no encontrada" });
       res.json(orden);
     } catch {
       res.status(500).json({ message: "No se pudo obtener la orden" });
@@ -267,7 +305,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.patch("/api/orders/:id", requiereAutenticacion, async (req, res) => {
     try {
       const id = Number(req.params.id);
-      if (Number.isNaN(id)) return res.status(400).json({ message: "ID de orden inválido" });
+      if (Number.isNaN(id))
+        return res.status(400).json({ message: "ID de orden inválido" });
 
       const orden = await almacenamiento.updateOrder(id, req.body);
       res.json(orden);
@@ -356,7 +395,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.delete("/api/notes/:id", requiereAutenticacion, async (req, res) => {
     try {
       const id = Number(req.params.id);
-      if (Number.isNaN(id)) return res.status(400).json({ message: "ID de nota inválido" });
+      if (Number.isNaN(id))
+        return res.status(400).json({ message: "ID de nota inválido" });
 
       await almacenamiento.deleteNote(id);
       res.status(204).send();
@@ -364,7 +404,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(500).json({ message: "No se pudo eliminar la nota" });
     }
   });
-
 
   // ---------- Admin ----------
   app.get("/api/admin/users", requiereAdmin, async (_req, res) => {
@@ -377,13 +416,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // ---------- Integraciones simuladas ----------
-  app.get("/api/integrations/shopify/sync", requiereAutenticacion, async (_req, res) => {
-    res.json({ message: "Sincronización Shopify iniciada", status: "success" });
-  });
+  app.get(
+    "/api/integrations/shopify/sync",
+    requiereAutenticacion,
+    async (_req, res) => {
+      res.json({
+        message: "Sincronización Shopify iniciada",
+        status: "success",
+      });
+    },
+  );
 
-  app.get("/api/integrations/mercadolibre/simulate", requiereAutenticacion, async (_req, res) => {
-    res.json({ message: "Simulación MercadoLibre", status: "pending" });
-  });
+  app.get(
+    "/api/integrations/mercadolibre/simulate",
+    requiereAutenticacion,
+    async (_req, res) => {
+      res.json({ message: "Simulación MercadoLibre", status: "pending" });
+    },
+  );
 
   // Crea y devuelve el servidor HTTP a quien llama (index.ts)
   const servidorHttp = createServer(app);
@@ -394,7 +444,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 async function inicializarDatosPorDefecto() {
   try {
     // Usuarios base
-    const usuarioLogistica = await almacenamiento.getUserByEmail("logistica@empresa.com");
+    const usuarioLogistica = await almacenamiento.getUserByEmail(
+      "logistica@empresa.com",
+    );
     if (!usuarioLogistica) {
       const passwordHasheada = await bcrypt.hash("123456", 10); // ⚠️ demo
       await almacenamiento.createUser({
@@ -406,7 +458,8 @@ async function inicializarDatosPorDefecto() {
       });
     }
 
-    const usuarioAdmin = await almacenamiento.getUserByEmail("admin@empresa.com");
+    const usuarioAdmin =
+      await almacenamiento.getUserByEmail("admin@empresa.com");
     if (!usuarioAdmin) {
       const passwordHasheada = await bcrypt.hash("admin123", 10); // ⚠️ demo
       await almacenamiento.createUser({
@@ -421,17 +474,44 @@ async function inicializarDatosPorDefecto() {
     // Canales base
     const canales = await almacenamiento.getChannels();
     if (canales.length === 0) {
-      await almacenamiento.createChannel({ code: "WW", name: "WW Channel", color: "#4CAF50", icon: "fas fa-globe" });
-      await almacenamiento.createChannel({ code: "CT", name: "CT Channel", color: "#FF9800", icon: "fas fa-store" });
-      await almacenamiento.createChannel({ code: "MGL", name: "MGL Channel", color: "#2196F3", icon: "fas fa-shopping-cart" });
+      await almacenamiento.createChannel({
+        code: "WW",
+        name: "WW Channel",
+        color: "#4CAF50",
+        icon: "fas fa-globe",
+      });
+      await almacenamiento.createChannel({
+        code: "CT",
+        name: "CT Channel",
+        color: "#FF9800",
+        icon: "fas fa-store",
+      });
+      await almacenamiento.createChannel({
+        code: "MGL",
+        name: "MGL Channel",
+        color: "#2196F3",
+        icon: "fas fa-shopping-cart",
+      });
     }
 
     // Paqueterías base
     const paqueterias = await almacenamiento.getCarriers();
     if (paqueterias.length === 0) {
-      await almacenamiento.createCarrier({ name: "Estafeta", code: "ESTAFETA", apiEndpoint: "https://api.estafeta.com" });
-      await almacenamiento.createCarrier({ name: "DHL", code: "DHL", apiEndpoint: "https://api.dhl.com" });
-      await almacenamiento.createCarrier({ name: "Express PL", code: "EXPRESS_PL", apiEndpoint: "https://api.expresspl.com" });
+      await almacenamiento.createCarrier({
+        name: "Estafeta",
+        code: "ESTAFETA",
+        apiEndpoint: "https://api.estafeta.com",
+      });
+      await almacenamiento.createCarrier({
+        name: "DHL",
+        code: "DHL",
+        apiEndpoint: "https://api.dhl.com",
+      });
+      await almacenamiento.createCarrier({
+        name: "Express PL",
+        code: "EXPRESS_PL",
+        apiEndpoint: "https://api.expresspl.com",
+      });
     }
 
     // Marcas base
