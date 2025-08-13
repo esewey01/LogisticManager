@@ -27,28 +27,28 @@ const aplicacion = express();
 // Middleware para parsear JSON en peticiones
 aplicacion.use(express.json());
 
-// Middleware para parsear datos de formularios (application/x-www-form-urlencoded)  
+// Middleware para parsear datos de formularios (application/x-www-form-urlencoded)
 aplicacion.use(express.urlencoded({ extended: true }));
 
-// Configuración CORS para Replit
-// Frontend y backend se sirven del mismo dominio en Replit, pero configuramos CORS por seguridad
-const ORIGENES_PERMITIDOS = [
-  // Dominio principal del repl (reemplazar con tu dominio real)
-  'https://19e4afbd-e2d9-41f4-8a9e-9ffbd5c8eb95-00-2tumva9wp0aqg.kirk.replit.dev',
-  // Otros posibles dominios de Replit para este proyecto
-  'https://19e4afbd-e2d9-41f4-8a9e-9ffbd5c8eb95-00-2tumva9wp0aqg.kirk.replit.dev:5000'
-];
-
-aplicacion.use(cors({
-  origin: ORIGENES_PERMITIDOS,
-  credentials: true // Permite cookies/sesiones cross-origin
-}));
+// Permite credenciales y *refleja* el Origin que venga (requisito para cookies)
+// ✅ Úsalo en DEV/Replit. Si quieres restringir, abajo dejo una versión con regex.
+aplicacion.use(
+  cors({
+    origin: (origin, cb) => {
+      // Permite sin Origin (curl, extensiones, etc.)
+      if (!origin) return cb(null, true);
+      // Refleja el origin para que el navegador acepte la cookie (no puede ser "*")
+      return cb(null, true);
+    },
+    credentials: true,
+  }),
+);
 
 // Middleware de logging personalizado - registra todas las peticiones
 aplicacion.use((req, res, next) => {
   // Log simple de todas las peticiones recibidas
-  console.log(`➡️ Petición recibida: ${req.method} ${req.url}`);
-  
+  //console.log(`➡️ Petición recibida: ${req.method} ${req.url}`);
+
   const inicio = Date.now(); // marca de tiempo al recibir la petición
   const ruta = req.path;
   let respuestaJsonCapturada: Record<string, any> | undefined = undefined;
@@ -113,7 +113,6 @@ aplicacion.use((req, res, next) => {
 
   // Inicia el servidor en todas las interfaces de red (0.0.0.0) para compatibilidad con Replit
   servidor.listen({ port: puerto, host: "0.0.0.0" }, () => {
-    log(`🚀 Servidor trabajando en el puerto ${puerto}`);
-    log(`🌐 Accesible en: https://19e4afbd-e2d9-41f4-8a9e-9ffbd5c8eb95-00-2tumva9wp0aqg.kirk.replit.dev`);
+    log(` Servidor trabajando en el puerto ${puerto}`);
   });
 })();
