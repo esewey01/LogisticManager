@@ -27,6 +27,7 @@ import session from "express-session";
 import MemoryStore from "memorystore";
 import { z } from "zod";
 import { insertOrderSchema, insertTicketSchema, insertNoteSchema } from "@shared/schema";
+import { syncShopifyOrders } from "./syncShopifyOrders";//archivo de sincrinizacion
 
 // Adaptador de store en memoria para sesiones (con limpieza automática)
 const AlmacenSesionesMemoria = MemoryStore(session);
@@ -75,6 +76,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
       maxAge: 7 * 24 * 60 * 60 * 1000,                // 7 días
     },
   }));
+
+
+  // ---------- Rutas de Integración Shopify ----------
+
+  app.get("/api/integrations/shopify/sync", requiereAutenticacion, async (_req, res) => {
+    try {
+      const r = await syncShopifyOrders({ limit: 50 });
+      res.json({ message: "Sincronización Shopify OK", ...r, status: "success" });
+    } catch (e: any) {
+      res.status(500).json({ message: "Falló la sincronización", error: e.message, status: "error" });
+    }
+  });
 
   // Crea datos base si no existen (usuarios, canales, paqueterías, marcas)
   await inicializarDatosPorDefecto();

@@ -416,6 +416,63 @@ import bcrypt from "bcrypt";
 import session from "express-session";
 import MemoryStore from "memorystore";
 import { z as z2 } from "zod";
+
+// client/src/lib/shopify.ts
+var shop = process.env.SHOPIFY_SHOP_NAME_2;
+var token = process.env.SHOPIFY_ACCESS_TOKEN_2;
+var apiVersion = process.env.SHOPIFY_API_VERSION_2 || "2024-07";
+if (!shop || !token) {
+  throw new Error("Faltan SHOPIFY_SHOP/SHOPIFY_ADMIN_TOKEN en el entorno");
+}
+var base = `https://${shop}/admin/api/${apiVersion}`;
+async function shopifyGet(path3) {
+  const res = await fetch(`${base}${path3}`, {
+    headers: { "X-Shopify-Access-Token": token }
+  });
+  if (!res.ok) {
+    const txt = await res.text();
+    throw new Error(`Shopify ${res.status} ${res.statusText} :: ${txt}`);
+  }
+  return res.json();
+}
+
+// server/syncShopifyOrders.ts
+import { eq as eq2 } from "drizzle-orm";
+import { drizzle as drizzle2 } from "drizzle-orm/node-postgres";
+import { Pool as Pool2 } from "pg";
+var pool2 = new Pool2({ connectionString: process.env.DATABASE_URL });
+var db2 = drizzle2(pool2, { schema: { orders, channels } });
+async function getChannelIdByCode(code) {
+  const [ch] = await db2.select().from(channels).where(eq2(channels.code, code));
+  return ch?.id ?? 1;
+}
+async function syncShopifyOrders({ limit = 50 } = {}) {
+  const data = await shopifyGet(`/orders.json?limit=${limit}&status=any&order=created_at+desc`);
+  const channelId = await getChannelIdByCode("WW");
+  let inserted = 0, upserted = 0;
+  for (const o of data.orders ?? []) {
+    const row = {
+      orderId: String(o.id),
+      channelId,
+      customerName: o.customer?.first_name ? `${o.customer.first_name} ${o.customer.last_name || ""}`.trim() : o.email || o.name || null,
+      totalAmount: o.total_price || null,
+      isManaged: false,
+      hasTicket: false,
+      status: o.financial_status || "pending"
+    };
+    const existing = await db2.query.orders.findFirst({ where: (t, { eq: eq3 }) => eq3(t.orderId, row.orderId) });
+    if (existing) {
+      await db2.update(orders).set({ ...row, updatedAt: /* @__PURE__ */ new Date() }).where(eq2(orders.id, existing.id));
+      upserted++;
+    } else {
+      await db2.insert(orders).values(row);
+      inserted++;
+    }
+  }
+  return { inserted, upserted };
+}
+
+// server/routes.ts
 var AlmacenSesionesMemoria = MemoryStore(session);
 var esquemaLogin = z2.object({
   email: z2.string().email(),
@@ -429,7 +486,7 @@ var requiereAutenticacion = (req, res, next) => {
 };
 var requiereAdmin = async (req, res, next) => {
   if (!req.session.userId) {
-    return res.status(401).json({ m: "No autorizado" });
+    return res.status(401).json({ message: "No autorizado" });
   }
   const usuario = await storage.getUser(req.session.userId);
   if (!usuario || usuario.role !== "admin") {
@@ -456,6 +513,14 @@ async function registerRoutes(app) {
       // 7 días
     }
   }));
+  app.get("/api/integrations/shopify/sync", requiereAutenticacion, async (_req, res) => {
+    try {
+      const r = await syncShopifyOrders({ limit: 50 });
+      res.json({ message: "Sincronizaci\xF3n Shopify OK", ...r, status: "success" });
+    } catch (e) {
+      res.status(500).json({ message: "Fall\xF3 la sincronizaci\xF3n", error: e.message, status: "error" });
+    }
+  });
   await inicializarDatosPorDefecto();
   app.post("/api/auth/login", async (req, res) => {
     try {
