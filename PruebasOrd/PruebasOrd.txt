@@ -1,0 +1,322 @@
+"""
+Modulo para las funciones principales de Shopify.
+Proporciona funciones como la creacion de una orden/ consultas de productos, inventario, costo de envio y pedidos recientes.
+Autor: David Velasquez / ULUM 
+Fecha: 24/07/25
+
+"""
+import requests
+import json
+
+# --- SHOPIFY API ---
+SHOP_NAME = 'c3b13f-2'
+ACCESS_TOKEN = ' ' #INGRESAR LA LLAVE DE ACCESO AQUÍ
+API_VERSION = '2025-07'  #CAMBIAR SI ES NECESARIO
+BASE_URL = f'https://{SHOP_NAME}.myshopify.com/admin/api/{API_VERSION}'
+
+# Headers para todas las solicitudes
+HEADERS = {
+    "X-Shopify-Access-Token": ACCESS_TOKEN,
+    "Content-Type": "application/json"
+}
+
+def crear_orden(line_items):
+    # Calcular costo total de envío
+    total_items = sum(item['quantity'] for item in line_items)
+    costo_envio_total = total_items * 140 #EL COSTO DEL ENVÍO
+    url = f"{BASE_URL}/orders.json" 
+    data = {
+        "order": {
+            "line_items": line_items,
+            "customer": {
+                "first_name": "DAVID",
+                "last_name": "PRUEBAS",
+                "email": "david@ulum.mx"
+            },
+            "shipping_address": {
+                "first_name": "Prueba",
+                "last_name": "PRODUCCION",
+                "address1": "Calle Ficticia 123",
+                "phone": "5561584615",
+                "city": "NEZAYORK",
+                "province": "CDMX",
+                "country": "MX",
+                "zip": "01000"
+            },
+            "shipping_lines": [{
+                "title": f"Envío por {total_items} productos",
+                "price": str(costo_envio_total),
+                "code": "STANDARD",
+                "source": "ulum",
+            }],
+            "financial_status": "paid",
+            "note_attributes": None,
+            "discount_codes": None,
+            "tags": "uwu"
+        }
+    }
+    try:
+        response = requests.post(url, headers=HEADERS, json=data)
+        response.raise_for_status()
+        order_data = response.json()
+        order_id = order_data["order"]["id"]
+        order_name = order_data["order"]["name"]
+        print(f"\n   Orden creada exitosamente!")
+        print(f"   ID: {order_id}")
+        print(f"   Nombre: {order_name}")
+        print(f"   Financial Status: {order_data['order']['financial_status']}")
+        return order_id, order_data
+    except requests.exceptions.RequestException as e:
+        print(f"\nERROR HTTP/SERVIDOR: {e}")
+        if hasattr(e.response, 'text'):
+            print(f"   Detalles: {e.response.text}")
+        return None, None
+    except Exception as e:
+        print(f"ERROR GENERAL: {e}")
+        return None, None
+
+#FUNCION PARA CONSULTAR EL PRECIO DE UN SOLO PRODCUTO
+def consultar_producto_y_precios():
+    """
+    Imprime solamente dies y su precio
+    """
+    url = f"{BASE_URL}/products.json?limit=10"
+    try:
+        response = requests.get(url, headers=HEADERS)
+        response.raise_for_status()
+        products_data = response.json()
+        print("\n Productos disponibles:")
+        print("=" * 50)
+        for i, product in enumerate(products_data['products']):
+            print(f"\n{i+1}. {product['title']} (ID: {product['id']})")
+            for j, variant in enumerate(product['variants']):
+                print(f"     → {variant['title']}: ${variant['price']} (Variant ID: {variant['id']})")
+        return products_data
+    except Exception as e:
+        print(f"Error consultando productos: {e}")
+        return None
+
+#CONSULTAR COSTO DE ENVIO SI ESTAN CONFIGURADOS
+def consultar_costo_envio():
+    url = f"{BASE_URL}/shipping_zones.json"
+    try:
+        response = requests.get(url, headers=HEADERS)
+        response.raise_for_status()
+        zones = response.json().get('shipping_zones', [])
+        print("\nZonas de envío configuradas:")
+        for zone in zones:
+            print(f"\nZona: {zone.get('name')}")
+            print("Métodos de envío:")
+            # Verificar tarifas basadas en precio
+            for rate in zone.get('price_based_shipping_rates', []):
+                print(f" - {rate.get('name')}: ${rate.get('price')}")
+            # Verificar tarifas basadas en peso
+            for rate in zone.get('weight_based_shipping_rates', []):
+                print(f" - {rate.get('name')}: ${rate.get('price')}")
+            # Verificar tarifas personalizadas
+            if zone.get('carrier_shipping_rate_providers'):
+                print(" - Tarifas de transportista configuradas")
+        # Devolver el primer costo encontrado o None
+        for zone in zones:
+            if zone.get('price_based_shipping_rates'):
+                return float(zone['price_based_shipping_rates'][0]['price'])
+        return None
+    except Exception as e:
+        print(f"\nError consultando envío: {e}")
+        print(f"Respuesta completa: {response.json() if 'response' in locals() else 'N/A'}")
+        return None
+
+##FUNCION PARA LISTAR PEDIDOS CON ENVIO
+def listar_pedidos_con_envio():
+    url = f"{BASE_URL}/orders.json?status=any&limit=5"
+    try:
+        response = requests.get(url, headers=HEADERS)
+        response.raise_for_status()
+        orders = response.json().get('orders', [])
+        print("\nPedidos recientes:")
+        print("=" * 60)
+        for order in orders:
+            shipping_cost = sum(float(line['price']) for line in order.get('shipping_lines', []))
+            print(f"Orden #{order['name']}")
+            print(f"Fecha: {order['created_at']}")
+            print(f"Total: ${order['total_price']} (Envío: ${shipping_cost})")
+            print(f"Estado: {order['financial_status']}")
+            print("Método de envío:")
+            for shipping in order.get('shipping_lines', []):
+                print(f" - {shipping['title']}: ${shipping['price']}")
+            print("-" * 60)
+        return orders
+    except Exception as e:
+        print(f"Error al listar pedidos: {e}")
+        return None
+
+#FUNCION PARA CONSULTAR EL INVENTARIO
+def consultar_inventario(variant_id):
+    # Primero debemos obtener el inventory_item_id asociado al variant_id
+    variant_url = f"{BASE_URL}/variants/{variant_id}.json"
+    try:
+        # Paso 1: Obtener el inventory_item_id de la variante
+        response = requests.get(variant_url, headers=HEADERS)
+        response.raise_for_status()
+        variant_data = response.json()
+        inventory_item_id = variant_data['variant']['inventory_item_id']
+        print(f"\n Inventory_item_id:{inventory_item_id} ")
+        # Paso 2: Consultar los niveles de inventario
+        inventory_url = f"{BASE_URL}/inventory_levels.json?inventory_item_ids={inventory_item_id}"
+        print(f"\n URL Consulta inv={inventory_url}")
+        response = requests.get(inventory_url, headers=HEADERS)
+        response.raise_for_status()
+        inventory_data = response.json()
+        if inventory_data.get('inventory_levels'):
+            stock = inventory_data['inventory_levels'][0]['available']
+            print(f"\nInventario disponible: {stock} unidades")
+            return stock
+        else:
+            print("\nNo se encontró información de inventario para esta variante")
+            return 0
+    except requests.exceptions.RequestException as e:
+        print(f"\nError en la solicitud: {e}")
+        if hasattr(e, 'response') and e.response.text:
+            print(f"Detalles del error: {e.response.text}")
+        return None
+    except KeyError as e:
+        print(f"\nError procesando los datos: No se encontró la clave {e}")
+        return None
+    except Exception as e:
+        print(f"\nError inesperado: {e}")
+        return None
+
+# Nueva función para obtener el estatus BIW calculado
+def obtener_estatus_biw(order_id):
+    """
+    Obtiene el estatus BIW calculado para una orden específica
+    """
+    # Consultar la orden
+    url = f"{BASE_URL}/orders/{order_id}.json"
+    try:
+        response = requests.get(url, headers=HEADERS)
+        response.raise_for_status()
+        order_data = response.json()['order']
+        
+        # Obtener datos relevantes
+        financial_status = order_data.get('financial_status')
+        fulfillment_status = order_data.get('fulfillment_status')
+        cancelled_at = order_data.get('cancelled_at')
+        shipping_address = order_data.get('shipping_address', {})
+        line_items = order_data.get('line_items', [])
+        
+        # Verificar estatus esenciales primero
+        if cancelled_at:
+            return "Cancelada"
+        elif fulfillment_status == 'fulfilled':
+            return "Enviada" 
+        elif financial_status == 'paid' and fulfillment_status is None:
+            return "Recibida"
+        elif financial_status == 'refunded' and fulfillment_status == 'unfulfilled' and not cancelled_at:
+            return "Completed/UNFULFILLED/REFUNDED"
+        
+        # Verificar estatus complementarios
+        # Dirección inválida/incorrecta
+        if not shipping_address.get('address1') or not shipping_address.get('city'):
+            return "Dirección inválida/incorrecta"
+            
+        # Stock out - verificar inventario para cada item
+        for item in line_items:
+            variant_id = item.get('variant_id')
+            requested_qty = item.get('quantity', 0)
+            if variant_id:
+                available_stock = consultar_inventario(variant_id) 
+                if available_stock is not None and available_stock < requested_qty:
+                    return "Stock out"
+        
+        # Si no coincide con ninguno específico
+        return "En proceso"
+        
+    except Exception as e:
+        print(f"Error obteniendo estatus BIW: {e}")
+        return "Error"
+
+#FUNCION PARA INGRESAR MULTIPLES PRODUCTOS 
+def muliples_items():
+    try:
+        line_items = []
+        while True:
+            variant_id_input = input("\nIngrese el Variant ID del producto: ").strip()
+            quantity_input = input("Ingrese la cantidad (default 1): ").strip() or "1"
+            try:
+                variant_id = int(variant_id_input)
+                quantity = int(quantity_input)
+                line_items.append({
+                    "variant_id": variant_id,
+                    "quantity": quantity
+                })
+            except ValueError:
+                print("IDs y cantidades deben ser números válidos. Intenta de nuevo.")
+                continue
+            otro = input("¿Deseas agregar otro producto a la orden? (s/n): ").strip().lower()
+            if otro != "s":
+                break
+        if not line_items:
+            print("No se agregaron productos. Cancelando creación de orden.")
+            return None, None
+        return crear_orden(line_items)
+    except Exception as e:
+        print(f"Error al crear orden personalizada: {e}")
+        return None, None
+
+def mostrar_menu():
+    print("\n PRUEBAS ")
+    print("1. Consultar productos y precios")
+    print("2. Crear orden")
+    print("3. Consultar inventario")
+    print("4. Consultar costo de envío")
+    print("5. Listar pedidos recientes")
+    print("6. Obtener estatus BIW de una orden")
+    print("0. Terminar")
+
+def main():
+    print(f"Tienda: {SHOP_NAME}")
+    print(f"API Version utilizada: {API_VERSION}")
+    while True:
+        mostrar_menu()
+        try:
+            opcion = input(":_ ").strip()
+            if opcion == "0":
+                print("¡Hasta luego!")
+                break
+            elif opcion == "1":
+                consultar_producto_y_precios()
+            elif opcion == "2":
+                muliples_items()
+            elif opcion == "3":
+                    variant_id = input("Ingrese Variant ID: ")
+                    try:
+                        consultar_inventario(int(variant_id))
+                    except ValueError:
+                        print("ID inválido")
+            elif opcion=="4":
+                costo_envio = consultar_costo_envio()
+                if costo_envio is not None:
+                    print(f"Costo de envío: ${costo_envio}")
+                else:
+                    print("No se pudo obtener el costo de envío.")
+            elif opcion == "5":
+                listar_pedidos_con_envio()
+            elif opcion == "6":
+                order_id = input("Ingrese Order ID: ")
+                try:
+                    estatus = obtener_estatus_biw(int(order_id))
+                    print(f"Estatus BIW calculado: {estatus}")
+                except ValueError:
+                    print("ID inválido")
+            else:
+                print("Opción no válida. Intente de nuevo.")
+        except KeyboardInterrupt:
+            print("\n¡Hasta luego!")
+            break
+        except Exception as e:
+            print(f"Error inesperado: {e}")
+
+# uwu
+if __name__ == "__main__":
+    main()
