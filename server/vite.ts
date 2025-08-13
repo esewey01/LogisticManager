@@ -1,6 +1,5 @@
-// Utilidades de integración Vite ↔ Express — Versión comentada en español
-// Mantiene las mismas exportaciones: log, setupVite, serveStatic
-// para no romper los imports existentes en index.ts
+// Utilidades de integración Vite ↔ Express 
+
 
 import express, { type Express } from "express";
 import fs from "fs";
