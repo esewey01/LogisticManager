@@ -77,6 +77,78 @@ export async function registerRoutes(app: Express): Promise<Server> {
     },
   }));
 
+  // SOLO PARA VALIDAR LA RESPUESTA
+  app.get("/api/integrations/shopify/ping", requiereAutenticacion, async (_req, res) => {
+    try {
+      const shop = process.env.SHOPIFY_SHOP_NAME_2;
+      const token = process.env.SHOPIFY_ACCESS_TOKEN_2;
+      const ver = process.env.SHOPIFY_API_VERSION_2 || "2024-07";
+
+      // Validación de formato de dominio
+      const hasProto = shop?.startsWith("http://") || shop?.startsWith("https://");
+      if (hasProto) {
+        return res.status(400).json({
+          ok: false,
+          error: "SHOPIFY_SHOP_NAME_2 debe ser SOLO el dominio *.myshopify.com, sin https://",
+          example: "mi-tienda.myshopify.com",
+          got: shop
+        });
+      }
+
+      if (!shop || !token) {
+        return res.status(500).json({
+          ok: false,
+          error: "Faltan variables de entorno",
+          vars_seen: { SHOPIFY_SHOP_NAME_2: !!shop, SHOPIFY_ACCESS_TOKEN_2: !!token, SHOPIFY_API_VERSION_2: ver }
+        });
+      }
+
+      const url = `https://${shop}/admin/api/${ver}/shop.json`;
+
+      // Opcional: test DNS previo para errores más claros
+      // (Requiere Node 'dns'. Si no quieres, omite este bloque)
+      /*
+      const { promises: dns } = await import("dns");
+      try { await dns.lookup(shop); } catch (e:any) {
+        return res.status(500).json({ ok:false, error:`DNS lookup falló para ${shop}`, detail: e?.message });
+      }
+      */
+
+      const r = await fetch(url, {
+        headers: {
+          "X-Shopify-Access-Token": token,
+          "User-Agent": "LogisticManager/1.0 (+node)"
+        }
+      });
+
+      const bodyText = await r.text();
+      if (!r.ok) {
+        return res.status(r.status).json({
+          ok: false,
+          status: r.status,
+          statusText: r.statusText,
+          body: bodyText.slice(0, 500) // limitar tamaño
+        });
+      }
+
+      const data = JSON.parse(bodyText);
+      return res.json({
+        ok: true,
+        shop: data?.shop?.myshopify_domain || data?.shop?.domain || null,
+        apiVersion: ver
+      });
+
+    } catch (e: any) {
+      // Captura causa real (proxy, cert, ECONNRESET, etc.)
+      const causeMsg = e?.cause?.message || e?.code || null;
+      res.status(500).json({
+        ok: false,
+        error: e.message,
+        cause: causeMsg
+      });
+    }
+  });
+
 
   // ---------- Rutas de Integración Shopify ----------
 

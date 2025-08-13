@@ -5,6 +5,7 @@ var __export = (target, all) => {
 };
 
 // server/index.ts
+import fetchOrig from "node-fetch";
 import express2 from "express";
 
 // server/routes.ts
@@ -513,6 +514,59 @@ async function registerRoutes(app) {
       // 7 días
     }
   }));
+  app.get("/api/integrations/shopify/ping", requiereAutenticacion, async (_req, res) => {
+    try {
+      const shop2 = process.env.SHOPIFY_SHOP_NAME_2;
+      const token2 = process.env.SHOPIFY_ACCESS_TOKEN_2;
+      const ver = process.env.SHOPIFY_API_VERSION_2 || "2024-07";
+      const hasProto = shop2?.startsWith("http://") || shop2?.startsWith("https://");
+      if (hasProto) {
+        return res.status(400).json({
+          ok: false,
+          error: "SHOPIFY_SHOP_NAME_2 debe ser SOLO el dominio *.myshopify.com, sin https://",
+          example: "mi-tienda.myshopify.com",
+          got: shop2
+        });
+      }
+      if (!shop2 || !token2) {
+        return res.status(500).json({
+          ok: false,
+          error: "Faltan variables de entorno",
+          vars_seen: { SHOPIFY_SHOP_NAME_2: !!shop2, SHOPIFY_ACCESS_TOKEN_2: !!token2, SHOPIFY_API_VERSION_2: ver }
+        });
+      }
+      const url = `https://${shop2}/admin/api/${ver}/shop.json`;
+      const r = await fetch(url, {
+        headers: {
+          "X-Shopify-Access-Token": token2,
+          "User-Agent": "LogisticManager/1.0 (+node)"
+        }
+      });
+      const bodyText = await r.text();
+      if (!r.ok) {
+        return res.status(r.status).json({
+          ok: false,
+          status: r.status,
+          statusText: r.statusText,
+          body: bodyText.slice(0, 500)
+          // limitar tamaño
+        });
+      }
+      const data = JSON.parse(bodyText);
+      return res.json({
+        ok: true,
+        shop: data?.shop?.myshopify_domain || data?.shop?.domain || null,
+        apiVersion: ver
+      });
+    } catch (e) {
+      const causeMsg = e?.cause?.message || e?.code || null;
+      res.status(500).json({
+        ok: false,
+        error: e.message,
+        cause: causeMsg
+      });
+    }
+  });
   app.get("/api/integrations/shopify/sync", requiereAutenticacion, async (_req, res) => {
     try {
       const r = await syncShopifyOrders({ limit: 50 });
@@ -849,6 +903,10 @@ function serveStatic(app) {
 }
 
 // server/index.ts
+var _g = globalThis;
+if (typeof _g.fetch !== "function") {
+  _g.fetch = fetchOrig;
+}
 var aplicacion = express2();
 aplicacion.use(express2.json());
 aplicacion.use(express2.urlencoded({ extended: false }));

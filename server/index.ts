@@ -4,6 +4,12 @@ CREA LA APLICACION EXPRESS, CONFIGURA MIDDLEWARE PARA RECIBIR DATOS EN JSON Y FO
 
 =================*/
 
+// Compatibilidad fetch en runtimes sin fetch global
+import fetchOrig from "node-fetch";
+const _g: any = globalThis as any;
+if (typeof _g.fetch !== "function") {
+  _g.fetch = fetchOrig as any;
+}
 
 
 
