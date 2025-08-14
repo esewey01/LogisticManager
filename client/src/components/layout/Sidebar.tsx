@@ -38,6 +38,12 @@ export default function Sidebar() {
       label: "Paquetería",
       badge: null,
     },
+    {
+      path: "/shopify",
+      icon: "fas fa-store",
+      label: "Shopify",
+      badge: null,
+    },
   ];
 
   const adminItems = [

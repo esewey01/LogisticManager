@@ -32,6 +32,9 @@ import {
 } from "@shared/schema";
 import { syncShopifyOrders } from "./syncShopifyOrders"; // archivo de sincrinizacion
 import { getShopifyCredentials } from "./shopifyEnv"; // Helper para múltiples tiendas
+import { OrderSyncService } from "./services/OrderSyncService"; // Servicio de sync de órdenes
+import { ProductService } from "./services/ProductService"; // Servicio de productos
+import { ShopifyAdminClient } from "./services/ShopifyAdminClient"; // Cliente de Shopify
 
 // Adaptador de store en memoria para sesiones (con limpieza automática)
 const AlmacenSesionesMemoria = MemoryStore(session);
@@ -476,25 +479,242 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // ---------- Integraciones simuladas ----------
-  app.get(
-    "/api/integrations/shopify/sync",
-    requiereAutenticacion,
-    async (_req, res) => {
-      res.json({
-        message: "Sincronización Shopify iniciada",
-        status: "success",
-      });
-    },
-  );
+  // ========== INTEGRACIÓN SHOPIFY COMPLETA ==========
 
-  app.get(
-    "/api/integrations/mercadolibre/simulate",
-    requiereAutenticacion,
-    async (_req, res) => {
-      res.json({ message: "Simulación MercadoLibre", status: "pending" });
-    },
-  );
+  // PING SHOPIFY CON CONTEO DE ÓRDENES
+  app.get("/api/integrations/shopify/ping-count", requiereAutenticacion, async (req, res) => {
+    try {
+      const storeParam = req.query.store as string || '1';
+      console.log(`📊 Shopify ping count para tienda ${storeParam}`);
+      
+      const orderSync = new OrderSyncService(storeParam);
+      const countResult = await orderSync.getOrdersCount();
+      const storeInfo = orderSync.getStoreInfo();
+      
+      if (countResult.error) {
+        return res.status(500).json({
+          ok: false,
+          store: storeInfo.storeNumber,
+          error: countResult.error,
+        });
+      }
+      
+      return res.json({
+        ok: true,
+        store: storeInfo.storeNumber,
+        shop: storeInfo.shopDomain,
+        count: countResult.count,
+        apiVersion: storeInfo.apiVersion,
+      });
+      
+    } catch (e: any) {
+      console.log(`❌ Error en ping count: ${e.message}`);
+      res.status(500).json({
+        ok: false,
+        error: e.message,
+      });
+    }
+  });
+
+  // Backfill inicial de órdenes
+  app.post("/api/integrations/shopify/orders/backfill", requiereAutenticacion, async (req, res) => {
+    try {
+      const storeParam = req.query.store as string || '1';
+      const since = req.query.since as string;
+      const cursor = req.query.cursor as string;
+      const limit = parseInt(req.query.limit as string) || 50;
+      
+      console.log(`🔄 Backfill iniciado para tienda ${storeParam}, since: ${since}, limit: ${limit}`);
+      
+      const orderSync = new OrderSyncService(storeParam);
+      const result = await orderSync.backfillOrders(since, cursor, limit);
+      
+      if (result.success) {
+        res.json({
+          ok: true,
+          message: `Backfill completado para tienda ${storeParam}`,
+          ordersProcessed: result.ordersProcessed,
+          hasNextPage: result.hasNextPage,
+          errors: result.errors,
+        });
+      } else {
+        res.status(500).json({
+          ok: false,
+          message: `Backfill falló para tienda ${storeParam}`,
+          ordersProcessed: result.ordersProcessed,
+          errors: result.errors,
+        });
+      }
+      
+    } catch (e: any) {
+      console.log(`❌ Error en backfill: ${e.message}`);
+      res.status(500).json({
+        ok: false,
+        error: e.message,
+      });
+    }
+  });
+
+  // Sincronización incremental de órdenes
+  app.post("/api/integrations/shopify/orders/sync", requiereAutenticacion, async (req, res) => {
+    try {
+      const storeParam = req.query.store as string || '1';
+      const updatedSince = req.query.updatedSince as string;
+      
+      if (!updatedSince) {
+        return res.status(400).json({
+          ok: false,
+          error: 'Parámetro updatedSince es requerido (formato ISO8601)',
+        });
+      }
+      
+      console.log(`🔄 Sync incremental para tienda ${storeParam}, desde: ${updatedSince}`);
+      
+      const orderSync = new OrderSyncService(storeParam);
+      const result = await orderSync.incrementalSync(updatedSince);
+      
+      if (result.success) {
+        res.json({
+          ok: true,
+          message: `Sync incremental completado para tienda ${storeParam}`,
+          ordersProcessed: result.ordersProcessed,
+          errors: result.errors,
+        });
+      } else {
+        res.status(500).json({
+          ok: false,
+          message: `Sync incremental falló para tienda ${storeParam}`,
+          ordersProcessed: result.ordersProcessed,
+          errors: result.errors,
+        });
+      }
+      
+    } catch (e: any) {
+      console.log(`❌ Error en sync incremental: ${e.message}`);
+      res.status(500).json({
+        ok: false,
+        error: e.message,
+      });
+    }
+  });
+
+  // Listar productos por tienda
+  app.get("/api/integrations/shopify/products", requiereAutenticacion, async (req, res) => {
+    try {
+      const storeParam = req.query.store as string || '1';
+      const storeId = parseInt(storeParam);
+      
+      console.log(`📦 Listando productos para tienda ${storeParam}`);
+      
+      const productService = new ProductService(storeParam);
+      const products = await productService.getProductsForStore(storeId);
+      
+      res.json({
+        ok: true,
+        store: storeParam,
+        products: products,
+        count: products.length,
+      });
+      
+    } catch (e: any) {
+      console.log(`❌ Error listando productos: ${e.message}`);
+      res.status(500).json({
+        ok: false,
+        error: e.message,
+      });
+    }
+  });
+
+  // Sincronizar productos desde Shopify
+  app.post("/api/integrations/shopify/products/sync", requiereAutenticacion, async (req, res) => {
+    try {
+      const storeParam = req.query.store as string || '1';
+      const limit = parseInt(req.query.limit as string) || 50;
+      
+      console.log(`🔄 Sincronizando productos desde Shopify tienda ${storeParam}`);
+      
+      const productService = new ProductService(storeParam);
+      const result = await productService.syncProductsFromShopify(limit);
+      
+      if (result.success) {
+        res.json({
+          ok: true,
+          message: `Productos sincronizados para tienda ${storeParam}`,
+          productsProcessed: result.productsProcessed,
+          errors: result.errors,
+        });
+      } else {
+        res.status(500).json({
+          ok: false,
+          message: `Sync de productos falló para tienda ${storeParam}`,
+          productsProcessed: result.productsProcessed,
+          errors: result.errors,
+        });
+      }
+      
+    } catch (e: any) {
+      console.log(`❌ Error sincronizando productos: ${e.message}`);
+      res.status(500).json({
+        ok: false,
+        error: e.message,
+      });
+    }
+  });
+
+  // Actualizar producto (con sincronización a Shopify)
+  app.put("/api/integrations/shopify/products/:id", requiereAutenticacion, async (req, res) => {
+    try {
+      const productId = parseInt(req.params.id);
+      const updates = req.body;
+      
+      if (!updates || typeof updates !== 'object') {
+        return res.status(400).json({
+          ok: false,
+          error: 'Datos de actualización requeridos',
+        });
+      }
+      
+      console.log(`🔄 Actualizando producto ${productId} en Shopify`);
+      
+      const product = await almacenamiento.getProduct(productId);
+      if (!product) {
+        return res.status(404).json({
+          ok: false,
+          error: 'Producto no encontrado',
+        });
+      }
+      
+      const productService = new ProductService(product.shopId.toString());
+      const result = await productService.updateProductInShopify(productId, updates);
+      
+      if (result.success) {
+        res.json({
+          ok: true,
+          message: 'Producto actualizado exitosamente',
+          product: result.product,
+          shopifyUpdated: result.shopifyUpdated,
+        });
+      } else {
+        res.status(500).json({
+          ok: false,
+          error: result.error,
+          shopifyUpdated: result.shopifyUpdated,
+        });
+      }
+      
+    } catch (e: any) {
+      console.log(`❌ Error actualizando producto: ${e.message}`);
+      res.status(500).json({
+        ok: false,
+        error: e.message,
+      });
+    }
+  });
+
+  // ========== INTEGRACIÓN MERCADOLIBRE (SIMULADA) ==========
+  app.get("/api/integrations/mercadolibre/simulate", requiereAutenticacion, async (_req, res) => {
+    res.json({ message: "Simulación MercadoLibre", status: "pending" });
+  });
 
   // Crea y devuelve el servidor HTTP a quien llama (index.ts)
   const servidorHttp = createServer(app);

@@ -13,6 +13,10 @@ import {
   tickets as tablaTickets,
   shippingRules as tablaReglasEnvio,
   notes as tablaNotas,
+  products as tablaProductos,
+  variants as tablaVariantes,
+  orderItems as tablaItemsOrden,
+  productComboItems as tablaItemsCombo,
   // Tipos (alias en español)
   type User as Usuario,
   type InsertUser as InsertarUsuario,
@@ -32,6 +36,14 @@ import {
   type InsertShippingRule as InsertarReglaEnvio,
   type Note as Nota,
   type InsertNote as InsertarNota,
+  type Product as Producto,
+  type InsertProduct as InsertarProducto,
+  type Variant as Variante,
+  type InsertVariant as InsertarVariante,
+  type OrderItem as ItemOrden,
+  type InsertOrderItem as InsertarItemOrden,
+  type ProductComboItem as ItemCombo,
+  type InsertProductComboItem as InsertarItemCombo,
 } from "@shared/schema";
 
 import { db as baseDatos } from "./db";
@@ -70,6 +82,7 @@ export interface IStorage {
   // Órdenes
   getOrders(filters?: { channelId?: number; managed?: boolean; hasTicket?: boolean }): Promise<Orden[]>;
   getOrder(id: number): Promise<Orden | undefined>;
+  getOrderByShopifyId(shopifyId: string, shopId: number): Promise<Orden | undefined>;
   createOrder(order: InsertarOrden): Promise<Orden>;
   updateOrder(id: number, updates: Partial<InsertarOrden>): Promise<Orden>;
   getOrdersByCustomer(customerName: string): Promise<Orden[]>;
@@ -88,6 +101,19 @@ export interface IStorage {
   getNotes(userId?: number): Promise<Nota[]>;
   createNote(note: InsertarNota): Promise<Nota>;
   deleteNote(id: number): Promise<void>;
+
+  // Nuevos métodos Shopify
+  createOrderItem(item: InsertarItemOrden): Promise<ItemOrden>;
+  getProducts(shopId?: number): Promise<Producto[]>;
+  getProduct(id: number): Promise<Producto | undefined>;
+  getProductByShopifyId(shopifyId: string, shopId: number): Promise<Producto | undefined>;
+  createProduct(product: InsertarProducto): Promise<Producto>;
+  updateProduct(id: number, updates: Partial<InsertarProducto>): Promise<Producto>;
+  
+  getVariants(productId?: number): Promise<Variante[]>;
+  getVariant(id: number): Promise<Variante | undefined>;
+  createVariant(variant: InsertarVariante): Promise<Variante>;
+  updateVariant(id: number, updates: Partial<InsertarVariante>): Promise<Variante>;
 
   // Métricas de dashboard
   getDashboardMetrics(): Promise<{
@@ -303,6 +329,15 @@ export class DatabaseStorage implements IStorage {
       .orderBy(desc(tablaOrdenes.createdAt));
   }
 
+  /** Obtiene una orden por ID de Shopify y tienda. */
+  async getOrderByShopifyId(shopifyId: string, shopId: number): Promise<Orden | undefined> {
+    const [orden] = await baseDatos
+      .select()
+      .from(tablaOrdenes)
+      .where(and(eq(tablaOrdenes.idShopify, shopifyId), eq(tablaOrdenes.shopId, shopId)));
+    return orden;
+  }
+
   // ==== TICKETS ====
 
   /** Lista tickets ordenados por fecha de creación descendente. */
@@ -365,6 +400,91 @@ export class DatabaseStorage implements IStorage {
   /** Elimina una nota por ID. */
   async deleteNote(id: number): Promise<void> {
     await baseDatos.delete(tablaNotas).where(eq(tablaNotas.id, id));
+  }
+
+  // ==== NUEVOS MÉTODOS SHOPIFY ====
+
+  /** Crea un item de orden. */
+  async createOrderItem(datos: InsertarItemOrden): Promise<ItemOrden> {
+    const [item] = await baseDatos.insert(tablaItemsOrden).values(datos).returning();
+    return item;
+  }
+
+  /** Lista productos por tienda (opcional). */
+  async getProducts(shopId?: number): Promise<Producto[]> {
+    if (shopId !== undefined) {
+      return await baseDatos
+        .select()
+        .from(tablaProductos)
+        .where(eq(tablaProductos.shopId, shopId))
+        .orderBy(asc(tablaProductos.title));
+    }
+    return await baseDatos.select().from(tablaProductos).orderBy(asc(tablaProductos.title));
+  }
+
+  /** Obtiene un producto por ID. */
+  async getProduct(id: number): Promise<Producto | undefined> {
+    const [producto] = await baseDatos.select().from(tablaProductos).where(eq(tablaProductos.id, id));
+    return producto;
+  }
+
+  /** Obtiene un producto por ID de Shopify y tienda. */
+  async getProductByShopifyId(shopifyId: string, shopId: number): Promise<Producto | undefined> {
+    const [producto] = await baseDatos
+      .select()
+      .from(tablaProductos)
+      .where(and(eq(tablaProductos.idShopify, shopifyId), eq(tablaProductos.shopId, shopId)));
+    return producto;
+  }
+
+  /** Crea un producto. */
+  async createProduct(datos: InsertarProducto): Promise<Producto> {
+    const [producto] = await baseDatos.insert(tablaProductos).values(datos).returning();
+    return producto;
+  }
+
+  /** Actualiza un producto. */
+  async updateProduct(id: number, updates: Partial<InsertarProducto>): Promise<Producto> {
+    const [producto] = await baseDatos
+      .update(tablaProductos)
+      .set({ ...updates, updatedAt: new Date() })
+      .where(eq(tablaProductos.id, id))
+      .returning();
+    return producto;
+  }
+
+  /** Lista variantes por producto (opcional). */
+  async getVariants(productId?: number): Promise<Variante[]> {
+    if (productId !== undefined) {
+      return await baseDatos
+        .select()
+        .from(tablaVariantes)
+        .where(eq(tablaVariantes.productId, productId))
+        .orderBy(asc(tablaVariantes.sku));
+    }
+    return await baseDatos.select().from(tablaVariantes).orderBy(asc(tablaVariantes.sku));
+  }
+
+  /** Obtiene una variante por ID. */
+  async getVariant(id: number): Promise<Variante | undefined> {
+    const [variante] = await baseDatos.select().from(tablaVariantes).where(eq(tablaVariantes.id, id));
+    return variante;
+  }
+
+  /** Crea una variante. */
+  async createVariant(datos: InsertarVariante): Promise<Variante> {
+    const [variante] = await baseDatos.insert(tablaVariantes).values(datos).returning();
+    return variante;
+  }
+
+  /** Actualiza una variante. */
+  async updateVariant(id: number, updates: Partial<InsertarVariante>): Promise<Variante> {
+    const [variante] = await baseDatos
+      .update(tablaVariantes)
+      .set({ ...updates, updatedAt: new Date() })
+      .where(eq(tablaVariantes.id, id))
+      .returning();
+    return variante;
   }
 
   // ==== MÉTRICAS DE DASHBOARD ====
