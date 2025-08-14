@@ -1,0 +1,132 @@
+Prompt (EN)
+
+Overall goal
+Build a robust Shopify integration for two stores and expose in the app:
+
+ORDERS tab showing orders from both stores, with channel filters.
+
+PRODUCTS tab to list and edit products per channel/brand, applying changes to both the database and Shopify.
+
+Context & assumptions
+
+Two Shopify stores with different assortments (one uses combos):
+
+SHOPIFY_SHOP_NAME_1, SHOPIFY_ACCESS_TOKEN_1
+
+SHOPIFY_SHOP_NAME_2, SHOPIFY_ACCESS_TOKEN_2
+
+SHOPIFY_API_VERSION (e.g., 2025-07)
+
+The dashboard currently reads from the local DB. No backfill/sync implemented yet.
+
+DB: PostgreSQL/Drizzle (or equivalent). Frontend: React with shadcn/ui (or project’s current stack).
+
+Functional requirements
+
+Order synchronization (both stores)
+
+Create a service/worker and endpoints for initial backfill (cursor pagination via page_info) and incremental sync (updated_at_min or webhooks if available).
+
+Fetch status=any orders; persist into orders (and order_items).
+
+Minimum fields: id_shopify, shop_id (1 or 2), name, order_number, created_at, updated_at, financial_status, fulfillment_status, currency, total_price, subtotal_price, customer_email, tags.
+
+Honor rate limits (~2 rps / 40 burst) with exponential backoff and retries.
+
+Sample endpoints:
+
+POST /api/integrations/shopify/orders/backfill?store=1&since=2024-01-01
+
+POST /api/integrations/shopify/orders/sync?store=1&updatedSince=ISO8601
+
+Quick metric: GET /api/integrations/shopify/ping?store=1 should return {ok, count} using orders/count.json.
+
+ORDERS screen
+
+Table with search, channel filter (store 1/2), date range, financial_status/fulfillment_status, free text.
+
+Columns: name, order_number, channel, created_at, financial_status, fulfillment_status, total_price.
+
+Pagination, sorting, manual refresh and optional auto-refresh (30–60s).
+
+Optionally trigger a non-blocking background sync on enter.
+
+PRODUCTS screen
+
+New Products tab in the menu.
+
+Channel switch (store 1/2) to display only that store’s catalog.
+
+Table columns: title, sku, product_type, vendor/brand, variant price, status (active/draft), updated_at.
+
+Edit: title, variant prices, status (active/draft), tags, vendor.
+
+On save, write to Shopify Admin API first; if successful, persist to DB (transactional logic). If Shopify fails, do not persist local change; show a clear error toast.
+
+Support combos (document representation): tag combo, metafields, or a combo_items relation to component SKUs.
+
+Suggested DB model
+
+channels (id, name) → {1: store1, 2: store2}
+
+products (id_shopify, shop_id, title, vendor, product_type, status, updated_at, tags)
+
+variants (id_shopify, product_id, sku, price, compare_at_price, barcode, inventory_qty optional)
+
+product_combo_items (product_combo_id → product_simple_id, qty) if combos
+
+orders (fields above)
+
+order_items (order_id, product_id/variant_id, sku, quantity, price)
+
+Indexes on shop_id, updated_at, sku, order_number.
+
+Services/Layers
+
+ShopifyAdminClient per store (injecting shop, token, version).
+
+OrderSyncService: backfill, incremental, retries, logging.
+
+ProductService: reads and mutations (update product/variant).
+
+Mapping per store/channel (e.g., shop_id, brand tags).
+
+UX / UI
+
+“Products” tab with channel selector (toggle/dropdown).
+
+“Sync now” button per channel on ORDERS and PRODUCTS.
+
+Save confirmations, error toasts, and loading states.
+
+Security & validations
+
+Do not expose tokens in the browser; all Shopify calls from backend.
+
+Validate edit inputs (numeric prices, allowed statuses).
+
+RBAC: only admin can edit products.
+
+Tests & acceptance criteria
+
+Pass: After backfill, ORDERS shows records from both stores.
+
+Pass: Editing a product (price/title/status) updates Shopify and DB.
+
+Pass: Channel switch filters PRODUCTS correctly.
+
+Pass: ping returns real count.
+
+Pass: Sync handles rate limits and retries.
+
+Deliverables
+
+Endpoints: ping, orders/backfill, orders/sync, products/list?store=, products/update (or products/:id).
+
+UI components: OrdersTable, ProductsTable, ChannelSwitch.
+
+Sync worker with cursor pagination and retries.
+
+DB migrations for suggested tables/indexes.
+
+Short docs on running backfill and configuring env vars.
