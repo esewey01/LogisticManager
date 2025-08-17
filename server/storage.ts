@@ -86,6 +86,21 @@ export interface IStorage {
   createOrder(order: InsertarOrden): Promise<Orden>;
   updateOrder(id: number, updates: Partial<InsertarOrden>): Promise<Orden>;
   getOrdersByCustomer(customerName: string): Promise<Orden[]>;
+  getOrdersPaginated(params: {
+    page: number;
+    pageSize: number;
+    fulfillment: "unfulfilled" | "fulfilled" | "any";
+    channelId?: number;
+    managed?: boolean;
+    hasTicket?: boolean;
+  }): Promise<{
+    rows: Orden[];
+    page: number;
+    pageSize: number;
+    totalRows: number;
+    totalPages: number;
+  }>;
+  getOrderItems(orderId: number): Promise<(ItemOrden & { title: string | null })[]>;
 
   // Tickets
   getTickets(): Promise<Ticket[]>;
@@ -336,6 +351,69 @@ export class DatabaseStorage implements IStorage {
       .from(tablaOrdenes)
       .where(and(eq(tablaOrdenes.idShopify, shopifyId), eq(tablaOrdenes.shopId, shopId)));
     return orden;
+  }
+
+  /** Lista órdenes paginadas con filtro de fulfillment. */
+  async getOrdersPaginated(params: {
+    page: number;
+    pageSize: number;
+    fulfillment: "unfulfilled" | "fulfilled" | "any";
+    channelId?: number;
+    managed?: boolean;
+    hasTicket?: boolean;
+  }): Promise<{ rows: Orden[]; page: number; pageSize: number; totalRows: number; totalPages: number }> {
+    const { page, pageSize, fulfillment, channelId, managed, hasTicket } = params;
+    const condiciones: any[] = [];
+    if (channelId !== undefined) condiciones.push(eq(tablaOrdenes.channelId, channelId));
+    if (managed !== undefined) condiciones.push(eq(tablaOrdenes.isManaged, managed));
+    if (hasTicket !== undefined) condiciones.push(eq(tablaOrdenes.hasTicket, hasTicket));
+
+    if (fulfillment === "unfulfilled") {
+      condiciones.push(
+        sql`${tablaOrdenes.fulfillmentStatus} IS NULL OR ${tablaOrdenes.fulfillmentStatus} IN ('unfulfilled','partial')`,
+      );
+    } else if (fulfillment === "fulfilled") {
+      condiciones.push(eq(tablaOrdenes.fulfillmentStatus, "fulfilled"));
+    }
+
+    const offset = (page - 1) * pageSize;
+    const whereCond = condiciones.length ? and(...condiciones) : undefined;
+
+    let totalQuery: any = baseDatos.select({ value: count() }).from(tablaOrdenes);
+    if (whereCond) totalQuery = totalQuery.where(whereCond);
+    const totalRows = Number((await totalQuery)[0]?.value ?? 0);
+
+    let rowsQuery: any = baseDatos
+      .select()
+      .from(tablaOrdenes)
+      .orderBy(desc(tablaOrdenes.createdAt))
+      .limit(pageSize)
+      .offset(offset);
+    if (whereCond) rowsQuery = rowsQuery.where(whereCond);
+    const rows = await rowsQuery;
+
+    const totalPages = Math.ceil(totalRows / pageSize);
+    return { rows, page, pageSize, totalRows, totalPages };
+  }
+
+  /** Devuelve los ítems de una orden. */
+  async getOrderItems(orderId: number): Promise<(ItemOrden & { title: string | null })[]> {
+    return (await baseDatos
+      .select({
+        id: tablaItemsOrden.id,
+        orderId: tablaItemsOrden.orderId,
+        productId: tablaItemsOrden.productId,
+        variantId: tablaItemsOrden.variantId,
+        sku: tablaItemsOrden.sku,
+        quantity: tablaItemsOrden.quantity,
+        price: tablaItemsOrden.price,
+        createdAt: tablaItemsOrden.createdAt,
+        title: tablaProductos.title,
+      })
+      .from(tablaItemsOrden)
+      .leftJoin(tablaProductos, eq(tablaProductos.id, tablaItemsOrden.productId))
+      .where(eq(tablaItemsOrden.orderId, orderId))
+      .orderBy(asc(tablaItemsOrden.id))) as any;
   }
 
   // ==== TICKETS ====
