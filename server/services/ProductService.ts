@@ -4,6 +4,12 @@
 import { ShopifyAdminClient } from './ShopifyAdminClient';
 import { storage } from '../storage';
 import type { InsertProduct, InsertVariant, Product, Variant } from '@shared/schema';
+// por (lookup directo):
+import { db } from "../db";
+import { variants } from "@shared/schema";
+import { eq } from "drizzle-orm";
+
+
 
 interface ShopifyProduct {
   id: string;
@@ -25,115 +31,170 @@ interface ShopifyProduct {
   }>;
 }
 
+interface ShopifyVariant {
+  id: string | number;
+  product_id: string | number;
+  sku: string | null;
+  price: string | null;
+  compare_at_price: string | null;
+  barcode: string | null;
+  inventory_quantity: number | null;
+}
+
 interface ProductUpdateResult {
   success: boolean;
   product?: Product;
   error?: string;
   shopifyUpdated?: boolean;
 }
+interface SyncResult {
+  success: boolean;
+  productsProcessed: number;
+  errors: string[];
+}
 
 export class ProductService {
   private client: ShopifyAdminClient;
   private storeNumber: number;
 
-  constructor(storeParam: string = '1') {
+  constructor(storeParam: string = "1") {
     this.client = new ShopifyAdminClient(storeParam);
-    this.storeNumber = parseInt(storeParam);
+    this.storeNumber = parseInt(storeParam, 10);
   }
 
-  private convertShopifyProduct(shopifyProduct: ShopifyProduct): InsertProduct {
+  private convertShopifyProduct(sp: ShopifyProduct): InsertProduct {
+    // Mapea archived → draft para que pase tu schema
+    const statusNorm =
+      sp.status === "active" ? "active" :
+        sp.status === "draft" ? "draft" : "draft";
+
     return {
-      idShopify: shopifyProduct.id,
+      idShopify: String(sp.id),
       shopId: this.storeNumber,
-      title: shopifyProduct.title,
-      vendor: shopifyProduct.vendor || null,
-      productType: shopifyProduct.product_type || null,
-      status: shopifyProduct.status as 'active' | 'draft',
-      tags: shopifyProduct.tags ? shopifyProduct.tags.split(', ').filter(Boolean) : [],
+      title: sp.title,
+      vendor: sp.vendor ?? null,
+      productType: sp.product_type ?? null,
+      status: statusNorm, // 'active' | 'draft'
+      tags: sp.tags ? sp.tags.split(",").map(t => t.trim()).filter(Boolean) : [],
     };
   }
 
-  private convertShopifyVariant(shopifyVariant: any, localProductId: number): InsertVariant {
+  private convertShopifyVariant(sv: ShopifyVariant, localProductId: number): InsertVariant {
     return {
-      idShopify: shopifyVariant.id,
+      idShopify: String(sv.id),
       productId: localProductId,
-      sku: shopifyVariant.sku || null,
-      price: shopifyVariant.price || null,
-      compareAtPrice: shopifyVariant.compare_at_price || null,
-      barcode: shopifyVariant.barcode || null,
-      inventoryQty: shopifyVariant.inventory_quantity || 0,
+      sku: sv.sku ?? null,
+      price: sv.price ?? null,
+      compareAtPrice: sv.compare_at_price ?? null,
+      barcode: sv.barcode ?? null,
+      inventoryQty: sv.inventory_quantity ?? 0,
     };
   }
 
-  async syncProductsFromShopify(limit: number = 50): Promise<{
-    success: boolean;
-    productsProcessed: number;
-    errors: string[];
-  }> {
-    console.log(`🔄 Sincronizando productos desde Shopify tienda ${this.storeNumber}`);
-    
-    const result = {
-      success: false,
-      productsProcessed: 0,
-      errors: [] as string[],
-    };
+  // Upsert de un producto + variantes
+  private async upsertOne(sp: ShopifyProduct): Promise<void> {
+    const existing = await storage.getProductByShopifyId(String(sp.id), this.storeNumber);
+    const productData = this.convertShopifyProduct(sp);
+
+    let local: Product;
+    if (existing) {
+      local = await storage.updateProduct(existing.id, productData);
+      // console.log(`🔄 Producto actualizado: ${sp.title}`);
+    } else {
+      local = await storage.createProduct(productData);
+      // console.log(`➕ Nuevo producto: ${sp.title}`);
+    }
+
+    // Variantes: upsert por idShopify
+    if (sp.variants && sp.variants.length > 0) {
+      for (const sv of sp.variants) {
+        const vData = this.convertShopifyVariant(sv, local.id);
+        const [vExisting] = await db
+          .select()
+          .from(variants)
+          .where(eq(variants.idShopify, String(sv.id)))
+          .limit(1);
+        if (vExisting) {
+          await storage.updateVariant(vExisting.id, vData);
+        } else {
+          await storage.createVariant(vData);
+        }
+      }
+      // (Opcional) Prune variantes que ya no existan en Shopify:
+      // await storage.deleteVariantsNotInList(local.id, sp.variants.map(v => String(v.id)));
+    }
+  }
+
+  /**
+   * Sincroniza productos con soporte opcional de incremental por fecha y paginación completa.
+   * - updatedSince: ISO8601 para traer solo productos actualizados desde esa fecha
+   * - limit: tamaño de página (<=250)
+   */
+  async syncProductsFromShopify(limit: number = 250, updatedSince?: string): Promise<SyncResult> {
+    console.log(`🔄 Sincronizando productos tienda ${this.storeNumber} (limit=${limit}${updatedSince ? `, updated>=${updatedSince}` : ""})`);
+
+    const result: SyncResult = { success: false, productsProcessed: 0, errors: [] };
 
     try {
-      const response = await this.client.getProducts({ limit });
-      const products: ShopifyProduct[] = response.products || [];
+      let cursor: string | undefined = undefined;
+      let firstPage = true;
 
-      console.log(`📦 Obtenidos ${products.length} productos de Shopify`);
-
-      for (const shopifyProduct of products) {
-        try {
-          // Verificar si el producto ya existe
-          const existingProduct = await storage.getProductByShopifyId(
-            shopifyProduct.id,
-            this.storeNumber
-          );
-
-          let localProduct: Product;
-
-          if (existingProduct) {
-            // Actualizar producto existente
-            const productData = this.convertShopifyProduct(shopifyProduct);
-            localProduct = await storage.updateProduct(existingProduct.id, productData);
-            console.log(`🔄 Producto actualizado: ${shopifyProduct.title}`);
-          } else {
-            // Crear nuevo producto
-            const productData = this.convertShopifyProduct(shopifyProduct);
-            localProduct = await storage.createProduct(productData);
-            console.log(`➕ Nuevo producto: ${shopifyProduct.title}`);
-          }
-
-          // Sincronizar variantes
-          if (shopifyProduct.variants && shopifyProduct.variants.length > 0) {
-            for (const shopifyVariant of shopifyProduct.variants) {
-              const variantData = this.convertShopifyVariant(shopifyVariant, localProduct.id);
-              
-              // Por simplicidad, crear siempre nueva variante (en prod, verificar existencia)
-              await storage.createVariant(variantData);
-            }
-          }
-
-          result.productsProcessed++;
-
-        } catch (error) {
-          const errorMsg = `Error procesando producto ${shopifyProduct.title}: ${error}`;
-          console.log(`❌ ${errorMsg}`);
-          result.errors.push(errorMsg);
+      while (true) {
+        let params: Record<string, any>;
+        if (firstPage) {
+          params = { limit: Math.min(limit, 250) };
+          if (updatedSince) params.updated_at_min = updatedSince;
+          // Puedes añadir fields si quieres acotar, pero Shopify devuelve variantes por default
+          firstPage = false;
+        } else {
+          // Con page_info no mandes otros filtros
+          params = { limit: Math.min(limit, 250), page_info: cursor };
         }
+
+        const resp = await this.client.getProducts(params);
+        const prods: ShopifyProduct[] = resp.products || [];
+        // console.log(`📦 Página productos: ${prods.length}`);
+
+        for (const sp of prods) {
+          try {
+            await this.upsertOne(sp);
+            result.productsProcessed++;
+          } catch (e: any) {
+            const msg = `Producto "${sp.title}" error: ${e?.message || e}`;
+            console.log("❌", msg);
+            result.errors.push(msg);
+          }
+        }
+
+        if (!resp.hasNextPage) break;
+        cursor = resp.nextPageInfo!;
+        // Respeta rate limit
+        await new Promise(r => setTimeout(r, 500));
       }
 
       result.success = result.errors.length === 0;
       return result;
-
-    } catch (error) {
-      const errorMsg = `Error sincronizando productos: ${error}`;
-      console.log(`❌ ${errorMsg}`);
-      result.errors.push(errorMsg);
+    } catch (e: any) {
+      const msg = `Error general sync productos: ${e?.message || e}`;
+      console.log("❌", msg);
+      result.errors.push(msg);
       return result;
     }
+  }
+
+  // Mantén este método para el script de backfill por chunks
+  async syncProductsChunk(shopifyProducts: ShopifyProduct[]): Promise<SyncResult> {
+    const result: SyncResult = { success: false, productsProcessed: 0, errors: [] };
+    for (const sp of shopifyProducts) {
+      try {
+        await this.upsertOne(sp);
+        result.productsProcessed++;
+      } catch (e: any) {
+        result.errors.push(`Producto "${sp.title}" error: ${e?.message || e}`);
+      }
+    }
+    result.success = result.errors.length === 0;
+    return result;
   }
 
   async updateProductInShopify(

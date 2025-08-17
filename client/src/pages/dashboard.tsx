@@ -191,7 +191,7 @@ export default function Dashboard() {
             </CardHeader>
             <CardContent className="space-y-4">
               {/* Formulario para escribir una nueva nota */}
-              <div className="space-y-2">
+              <div className="space-y-2">``
                 <Textarea
                   placeholder="Escribe una nota rápida..."
                   value={newNote}

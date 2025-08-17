@@ -88,6 +88,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Configuración de sesión (cookie firmada con SESSION_SECRET)
   app.set("trust proxy", 1);
+  const isProd =
+    process.env.NODE_ENV === "production" ||
+    process.env.FORCE_SECURE_COOKIE === "1";
+
 
   app.use(
     session({
@@ -96,10 +100,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       saveUninitialized: false,
       store: new AlmacenSesionesMemoria({ checkPeriod: 86_400_000 }),
       cookie: {
-        secure: true, // Replit sirve sobre HTTPS
         httpOnly: true,
-        sameSite: "none", // 🔑 necesario cuando front/back no comparten exactamente el mismo origin
+        secure: isProd,                 // ✅ en dev=false; en prod (HTTPS)=true
+        sameSite: isProd ? "none" : "lax", // ✅ dev=lax, prod=none
         maxAge: 7 * 24 * 60 * 60 * 1000,
+        // NO pongas domain en localhost
       },
     }),
   );
@@ -117,6 +122,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Temporalmente sin autenticación para pruebas - luego agregar requiereAutenticacion
   app.get("/api/integrations/shopify/ping", async (req, res) => {
     try {
+
+      
       // Obtener parámetro de tienda (por defecto '1')
       const storeParam = (req.query.store as string) || "1";
       console.log(` Shopify ping solicitado para tienda ${storeParam}`);
@@ -137,6 +144,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
 
       const bodyText = await r.text();
+
+      
 
       // Si hay error de Shopify, responder con detalles completos
       if (!r.ok) {
@@ -235,26 +244,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // ---------- Rutas de Integración Shopify ----------
 
-  app.get(
-    "/api/integrations/shopify/sync",
-    requiereAutenticacion,
-    async (_req, res) => {
-      try {
-        const r = await syncShopifyOrders({ limit: 50 });
-        res.json({
-          message: "Sincronización Shopify OK",
-          ...r,
-          status: "success",
-        });
-      } catch (e: any) {
-        res.status(500).json({
-          message: "Falló la sincronización",
-          error: e.message,
-          status: "error",
-        });
-      }
-    },
-  );
+  app.get("/api/integrations/shopify/sync", requiereAutenticacion, async (req, res) => {
+  try {
+    const storeParam = (req.query.store as string) || "all";   // "1" | "2" | "all"
+    const limit = Number(req.query.limit ?? 50);
+    const r = await syncShopifyOrders({ store: storeParam, limit });
+    res.json({ message: "Sincronización Shopify OK", ...r, status: "success" });
+  } catch (e: any) {
+    res.status(500).json({ message: "Falló la sincronización", error: e.message, status: "error" });
+  }
+});
+
 
   // Crea datos base si no existen (usuarios, canales, paqueterías, marcas)
   await inicializarDatosPorDefecto();
@@ -266,24 +266,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { email, password } = esquemaLogin.parse(req.body);
 
       const usuario = await almacenamiento.getUserByEmail(email);
-      if (!usuario)
-        return res.status(401).json({ message: "Credenciales inválidas" });
+      if (!usuario) return res.status(401).json({ message: "Credenciales inválidas" });
 
       const passwordValida = await bcrypt.compare(password, usuario.password);
-      if (!passwordValida)
-        return res.status(401).json({ message: "Credenciales inválidas" });
+      if (!passwordValida) return res.status(401).json({ message: "Credenciales inválidas" });
 
-      // Actualiza último acceso
       await almacenamiento.updateUser(usuario.id, { lastLogin: new Date() });
 
-      (req.session as any).userId = usuario.id;
-      res.json({
-        user: { id: usuario.id, email: usuario.email, role: usuario.role },
+      //  Previene fixation y asegura persistencia
+      req.session.regenerate((err) => {
+        if (err) return res.status(500).json({ message: "Error de sesión" });
+
+        (req.session as any).userId = usuario.id;
+
+        req.session.save((err2) => {
+          if (err2) return res.status(500).json({ message: "Error guardando sesión" });
+          res.json({ user: { id: usuario.id, email: usuario.email, role: usuario.role } });
+        });
       });
     } catch {
       res.status(400).json({ message: "Datos de solicitud inválidos" });
     }
   });
+
 
   app.post("/api/auth/logout", (req, res) => {
     req.session.destroy(() => {
@@ -486,11 +491,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const storeParam = req.query.store as string || '1';
       console.log(`📊 Shopify ping count para tienda ${storeParam}`);
-      
+
       const orderSync = new OrderSyncService(storeParam);
       const countResult = await orderSync.getOrdersCount();
       const storeInfo = orderSync.getStoreInfo();
-      
+
       if (countResult.error) {
         return res.status(500).json({
           ok: false,
@@ -498,7 +503,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           error: countResult.error,
         });
       }
-      
+
       return res.json({
         ok: true,
         store: storeInfo.storeNumber,
@@ -506,7 +511,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         count: countResult.count,
         apiVersion: storeInfo.apiVersion,
       });
-      
+
     } catch (e: any) {
       console.log(`❌ Error en ping count: ${e.message}`);
       res.status(500).json({
@@ -523,12 +528,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const since = req.query.since as string;
       const cursor = req.query.cursor as string;
       const limit = parseInt(req.query.limit as string) || 50;
-      
+
       console.log(`🔄 Backfill iniciado para tienda ${storeParam}, since: ${since}, limit: ${limit}`);
-      
+
       const orderSync = new OrderSyncService(storeParam);
       const result = await orderSync.backfillOrders(since, cursor, limit);
-      
+
       if (result.success) {
         res.json({
           ok: true,
@@ -545,7 +550,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           errors: result.errors,
         });
       }
-      
+
     } catch (e: any) {
       console.log(`❌ Error en backfill: ${e.message}`);
       res.status(500).json({
@@ -560,19 +565,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const storeParam = req.query.store as string || '1';
       const updatedSince = req.query.updatedSince as string;
-      
+
       if (!updatedSince) {
         return res.status(400).json({
           ok: false,
           error: 'Parámetro updatedSince es requerido (formato ISO8601)',
         });
       }
-      
+
       console.log(`🔄 Sync incremental para tienda ${storeParam}, desde: ${updatedSince}`);
-      
+
       const orderSync = new OrderSyncService(storeParam);
       const result = await orderSync.incrementalSync(updatedSince);
-      
+
       if (result.success) {
         res.json({
           ok: true,
@@ -588,7 +593,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           errors: result.errors,
         });
       }
-      
+
     } catch (e: any) {
       console.log(`❌ Error en sync incremental: ${e.message}`);
       res.status(500).json({
@@ -603,19 +608,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const storeParam = req.query.store as string || '1';
       const storeId = parseInt(storeParam);
-      
+
       console.log(`📦 Listando productos para tienda ${storeParam}`);
-      
+
       const productService = new ProductService(storeParam);
       const products = await productService.getProductsForStore(storeId);
-      
+
       res.json({
         ok: true,
         store: storeParam,
         products: products,
         count: products.length,
       });
-      
+
     } catch (e: any) {
       console.log(`❌ Error listando productos: ${e.message}`);
       res.status(500).json({
@@ -630,12 +635,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const storeParam = req.query.store as string || '1';
       const limit = parseInt(req.query.limit as string) || 50;
-      
+
       console.log(`🔄 Sincronizando productos desde Shopify tienda ${storeParam}`);
-      
+
       const productService = new ProductService(storeParam);
       const result = await productService.syncProductsFromShopify(limit);
-      
+
       if (result.success) {
         res.json({
           ok: true,
@@ -651,7 +656,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           errors: result.errors,
         });
       }
-      
+
     } catch (e: any) {
       console.log(`❌ Error sincronizando productos: ${e.message}`);
       res.status(500).json({
@@ -666,16 +671,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const productId = parseInt(req.params.id);
       const updates = req.body;
-      
+
       if (!updates || typeof updates !== 'object') {
         return res.status(400).json({
           ok: false,
           error: 'Datos de actualización requeridos',
         });
       }
-      
+
       console.log(`🔄 Actualizando producto ${productId} en Shopify`);
-      
+
       const product = await almacenamiento.getProduct(productId);
       if (!product) {
         return res.status(404).json({
@@ -683,10 +688,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
           error: 'Producto no encontrado',
         });
       }
-      
+
       const productService = new ProductService(product.shopId.toString());
       const result = await productService.updateProductInShopify(productId, updates);
-      
+
       if (result.success) {
         res.json({
           ok: true,
@@ -701,7 +706,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           shopifyUpdated: result.shopifyUpdated,
         });
       }
-      
+
     } catch (e: any) {
       console.log(`❌ Error actualizando producto: ${e.message}`);
       res.status(500).json({

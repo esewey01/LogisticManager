@@ -86,6 +86,20 @@ export type InsertCarrier = typeof carriers.$inferInsert;
 // Registro de órdenes integradas con datos completos de Shopify
 export const orders = pgTable("orders", {
   id: serial("id").primaryKey(),
+
+  // Cliente 
+  customerFirstName: text("customer_first_name"),
+  customerLastName: text("customer_last_name"),
+
+  // Dirección de envío básica (puedes detallar más si quieres)
+  shipName: text("ship_name"),
+  shipPhone: text("ship_phone"),
+  shipAddress1: text("ship_address1"),
+  shipCity: text("ship_city"),
+  shipProvince: text("ship_province"),
+  shipCountry: text("ship_country"),
+  shipZip: text("ship_zip"),
+
   // Campos originales (compatibilidad)
   orderId: text("order_id").notNull().unique(),   // ID externo (ej. Shopify)
   channelId: integer("channel_id").notNull(),     // referencia a channels.id
@@ -94,7 +108,7 @@ export const orders = pgTable("orders", {
   isManaged: boolean("is_managed").notNull().default(false), // gestionada por logística
   hasTicket: boolean("has_ticket").notNull().default(false), // tiene ticket asociado
   status: text("status").notNull().default("pending"),      // estado interno
-  
+
   // Nuevos campos Shopify
   idShopify: text("id_shopify").notNull(),        // ID oficial de Shopify
   shopId: integer("shop_id").notNull(),           // 1 o 2 (tienda)
@@ -106,7 +120,7 @@ export const orders = pgTable("orders", {
   subtotalPrice: decimal("subtotal_price"),       // subtotal sin impuestos
   customerEmail: text("customer_email"),          // email del cliente
   tags: text("tags").array(),                     // etiquetas (array)
-  
+
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at"),
 });
@@ -195,6 +209,9 @@ export type InsertVariant = typeof variants.$inferInsert;
 export const orderItems = pgTable("order_items", {
   id: serial("id").primaryKey(),
   orderId: integer("order_id").notNull(),         // referencia a orders.id
+  // en schema de items
+  shopifyProductId: text("shopify_product_id"),
+  shopifyVariantId: text("shopify_variant_id"),
   productId: integer("product_id"),               // referencia a products.id (opcional)
   variantId: integer("variant_id"),               // referencia a variants.id (opcional)
   sku: text("sku"),                               // SKU del producto
@@ -228,7 +245,7 @@ export const insertOrderSchema = z.object({
   isManaged: z.boolean().optional().default(false),
   hasTicket: z.boolean().optional().default(false),
   status: z.string().default("pending"),
-  
+
   // Nuevos campos Shopify
   idShopify: z.string().min(1, "ID de Shopify requerido"),
   shopId: z.number().int().min(1).max(2, "Shop ID debe ser 1 o 2"),

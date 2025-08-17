@@ -6,10 +6,193 @@ var __export = (target, all) => {
 
 // server/index.ts
 import fetchOrig from "node-fetch";
-import express2 from "express";
 
-// server/routes.ts
-import { createServer } from "http";
+// server/shopifyEnv.ts
+function getShopifyCredentials(storeParam) {
+  const storeNumber = parseInt(storeParam || "1", 10);
+  const shop = process.env[`SHOPIFY_SHOP_NAME_${storeNumber}`] || process.env[`SHOPIFY_SHOP_${storeNumber}`];
+  const token = process.env[`SHOPIFY_ACCESS_TOKEN_${storeNumber}`] || process.env[`SHOPIFY_TOKEN_${storeNumber}`];
+  const apiVersion = process.env[`SHOPIFY_API_VERSION_${storeNumber}`] || process.env.SHOPIFY_API_VERSION || "2025-04";
+  if (!shop || !token) {
+    throw new Error(
+      `Credenciales de Shopify faltantes para tienda ${storeNumber}. Requeridas: SHOPIFY_SHOP_NAME_${storeNumber} y SHOPIFY_ACCESS_TOKEN_${storeNumber}. Disponibles: shop=${!!shop}, token=${!!token}`
+    );
+  }
+  if (/^https?:\/\//i.test(shop)) {
+    throw new Error(
+      `SHOPIFY_SHOP_NAME_${storeNumber} debe ser "*.myshopify.com" sin https:// (recibido: ${shop})`
+    );
+  }
+  return {
+    shop,
+    token,
+    apiVersion,
+    storeNumber,
+    shopDomain: shop
+  };
+}
+
+// server/services/ShopifyAdminClient.ts
+var ShopifyAdminClient = class {
+  shopDomain;
+  accessToken;
+  apiVersion;
+  storeNumber;
+  constructor(storeParam = "1") {
+    const credentials = getShopifyCredentials(storeParam);
+    this.shopDomain = credentials.shop;
+    this.accessToken = credentials.token;
+    this.apiVersion = credentials.apiVersion;
+    this.storeNumber = credentials.storeNumber;
+  }
+  getBaseUrl() {
+    return `https://${this.shopDomain}/admin/api/${this.apiVersion}`;
+  }
+  async delay(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+  extractRateLimitInfo(headers) {
+    const remaining = headers.get("x-shopify-shop-api-call-limit");
+    if (!remaining) return null;
+    const [current, max] = remaining.split("/").map(Number);
+    return {
+      remaining: max - current,
+      max,
+      resetTime: Date.now() + 1e3
+      // Estimación: reset en 1 segundo
+    };
+  }
+  async handleRateLimit(rateLimitInfo) {
+    if (rateLimitInfo.remaining <= 2) {
+      console.log(`\u{1F6A7} Rate limit bajo para tienda ${this.storeNumber}: ${rateLimitInfo.remaining}/${rateLimitInfo.max} - Esperando...`);
+      await this.delay(1e3);
+    }
+  }
+  // Método REST para endpoints específicos
+  async restRequest(endpoint, method = "GET", body, maxRetries = 3) {
+    const url = `${this.getBaseUrl()}${endpoint}`;
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        const response = await fetch(url, {
+          method,
+          headers: {
+            "X-Shopify-Access-Token": this.accessToken,
+            "Content-Type": "application/json",
+            "User-Agent": "LogiSys/1.0 (+shopify-integration)"
+          },
+          body: body ? JSON.stringify(body) : void 0
+        });
+        const rateLimitInfo = this.extractRateLimitInfo(response.headers);
+        if (rateLimitInfo) {
+          await this.handleRateLimit(rateLimitInfo);
+        }
+        if (response.status === 429) {
+          const retryAfter = parseInt(response.headers.get("retry-after") || "1") * 1e3;
+          console.log(`\u23F3 Rate limit excedido para tienda ${this.storeNumber}, reintentando en ${retryAfter}ms (intento ${attempt}/${maxRetries})`);
+          await this.delay(retryAfter);
+          continue;
+        }
+        if (!response.ok) {
+          const errorText = await response.text();
+          console.log(`\u274C Error HTTP ${response.status} en tienda ${this.storeNumber}: ${errorText}`);
+          if (response.status >= 500 && attempt < maxRetries) {
+            const backoffDelay = Math.min(1e3 * Math.pow(2, attempt - 1), 3e4);
+            console.log(`\u{1F504} Reintentando en ${backoffDelay}ms (intento ${attempt}/${maxRetries})`);
+            await this.delay(backoffDelay);
+            continue;
+          }
+          throw new Error(`HTTP ${response.status}: ${errorText}`);
+        }
+        const data = await response.json();
+        return data;
+      } catch (error) {
+        console.log(`\u274C Error en intento ${attempt}/${maxRetries} para tienda ${this.storeNumber}:`, error);
+        if (attempt === maxRetries) {
+          throw error;
+        }
+        const backoffDelay = Math.min(1e3 * Math.pow(2, attempt - 1), 3e4);
+        await this.delay(backoffDelay);
+      }
+    }
+    throw new Error(`Fall\xF3 despu\xE9s de ${maxRetries} intentos`);
+  }
+  // Método GraphQL
+  async graphqlRequest(query, variables, maxRetries = 3) {
+    const url = `${this.getBaseUrl()}/graphql.json`;
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        const response = await fetch(url, {
+          method: "POST",
+          headers: {
+            "X-Shopify-Access-Token": this.accessToken,
+            "Content-Type": "application/json",
+            "User-Agent": "LogiSys/1.0 (+shopify-graphql)"
+          },
+          body: JSON.stringify({ query, variables })
+        });
+        if (response.status === 429) {
+          const retryAfter = parseInt(response.headers.get("retry-after") || "2") * 1e3;
+          console.log(`\u23F3 GraphQL rate limit para tienda ${this.storeNumber}, esperando ${retryAfter}ms`);
+          await this.delay(retryAfter);
+          continue;
+        }
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(`GraphQL HTTP ${response.status}: ${errorText}`);
+        }
+        const result = await response.json();
+        if (result.errors && result.errors.length > 0) {
+          console.log(`\u26A0\uFE0F Errores GraphQL en tienda ${this.storeNumber}:`, result.errors);
+        }
+        if (result.extensions?.cost?.throttleStatus) {
+          const throttle = result.extensions.cost.throttleStatus;
+          if (throttle.currentlyAvailable < 100) {
+            const waitTime = Math.ceil((100 - throttle.currentlyAvailable) / throttle.restoreRate) * 1e3;
+            console.log(`\u{1F6A7} GraphQL throttling bajo: ${throttle.currentlyAvailable}/${throttle.maximumAvailable}, esperando ${waitTime}ms`);
+            await this.delay(waitTime);
+          }
+        }
+        return result;
+      } catch (error) {
+        if (attempt === maxRetries) {
+          throw error;
+        }
+        const backoffDelay = Math.min(1e3 * Math.pow(2, attempt - 1), 3e4);
+        console.log(`\u{1F504} Reintentando GraphQL en ${backoffDelay}ms (${attempt}/${maxRetries})`);
+        await this.delay(backoffDelay);
+      }
+    }
+    throw new Error(`GraphQL fall\xF3 despu\xE9s de ${maxRetries} intentos`);
+  }
+  // Métodos de conveniencia
+  async getShopInfo() {
+    return this.restRequest("/shop.json");
+  }
+  async getOrdersCount() {
+    return this.restRequest("/orders/count.json");
+  }
+  async getOrders(params = {}) {
+    const searchParams = new URLSearchParams(params).toString();
+    return this.restRequest(`/orders.json?${searchParams}`);
+  }
+  async getProducts(params = {}) {
+    const searchParams = new URLSearchParams(params).toString();
+    return this.restRequest(`/products.json?${searchParams}`);
+  }
+  async updateProduct(productId, productData) {
+    return this.restRequest(`/products/${productId}.json`, "PUT", { product: productData });
+  }
+  async updateVariant(variantId, variantData) {
+    return this.restRequest(`/variants/${variantId}.json`, "PUT", { variant: variantData });
+  }
+  getStoreInfo() {
+    return {
+      storeNumber: this.storeNumber,
+      shopDomain: this.shopDomain,
+      apiVersion: this.apiVersion
+    };
+  }
+};
 
 // shared/schema.ts
 var schema_exports = {};
@@ -21,20 +204,26 @@ __export(schema_exports, {
   channels: () => channels,
   insertNoteSchema: () => insertNoteSchema,
   insertOrderSchema: () => insertOrderSchema,
+  insertProductSchema: () => insertProductSchema,
   insertTicketSchema: () => insertTicketSchema,
+  insertVariantSchema: () => insertVariantSchema,
   marcas: () => brands,
   notas: () => notes,
   notes: () => notes,
   ordenes: () => orders,
+  orderItems: () => orderItems,
   orders: () => orders,
   paqueterias: () => carriers,
+  productComboItems: () => productComboItems,
   productosCatalogo: () => catalogProducts,
+  products: () => products,
   reglasEnvio: () => shippingRules,
   shippingRules: () => shippingRules,
   tickets: () => tickets,
   ticketsTabla: () => tickets,
   users: () => users,
-  usuarios: () => users
+  usuarios: () => users,
+  variants: () => variants
 });
 import { pgTable, serial, text, boolean, timestamp, integer, decimal } from "drizzle-orm/pg-core";
 import { z } from "zod";
@@ -116,6 +305,18 @@ var carriers = pgTable("carriers", {
 });
 var orders = pgTable("orders", {
   id: serial("id").primaryKey(),
+  // Cliente 
+  customerFirstName: text("customer_first_name"),
+  customerLastName: text("customer_last_name"),
+  // Dirección de envío básica (puedes detallar más si quieres)
+  shipName: text("ship_name"),
+  shipPhone: text("ship_phone"),
+  shipAddress1: text("ship_address1"),
+  shipCity: text("ship_city"),
+  shipProvince: text("ship_province"),
+  shipCountry: text("ship_country"),
+  shipZip: text("ship_zip"),
+  // Campos originales (compatibilidad)
   orderId: text("order_id").notNull().unique(),
   // ID externo (ej. Shopify)
   channelId: integer("channel_id").notNull(),
@@ -130,6 +331,27 @@ var orders = pgTable("orders", {
   // tiene ticket asociado
   status: text("status").notNull().default("pending"),
   // estado interno
+  // Nuevos campos Shopify
+  idShopify: text("id_shopify").notNull(),
+  // ID oficial de Shopify
+  shopId: integer("shop_id").notNull(),
+  // 1 o 2 (tienda)
+  name: text("name"),
+  // nombre de la orden (ej. #1001)
+  orderNumber: text("order_number"),
+  // número de orden
+  financialStatus: text("financial_status"),
+  // paid, pending, etc.
+  fulfillmentStatus: text("fulfillment_status"),
+  // fulfilled, partial, etc.
+  currency: text("currency").default("MXN"),
+  // moneda
+  subtotalPrice: decimal("subtotal_price"),
+  // subtotal sin impuestos
+  customerEmail: text("customer_email"),
+  // email del cliente
+  tags: text("tags").array(),
+  // etiquetas (array)
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at")
 });
@@ -173,7 +395,75 @@ var notes = pgTable("notes", {
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at")
 });
+var products = pgTable("products", {
+  id: serial("id").primaryKey(),
+  idShopify: text("id_shopify").notNull(),
+  // ID de Shopify
+  shopId: integer("shop_id").notNull(),
+  // 1 o 2 (tienda)
+  title: text("title").notNull(),
+  // título del producto
+  vendor: text("vendor"),
+  // proveedor/marca
+  productType: text("product_type"),
+  // tipo de producto
+  status: text("status").notNull().default("active"),
+  // active, draft
+  tags: text("tags").array(),
+  // etiquetas (array)
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at")
+});
+var variants = pgTable("variants", {
+  id: serial("id").primaryKey(),
+  idShopify: text("id_shopify").notNull(),
+  // ID de variante en Shopify
+  productId: integer("product_id").notNull(),
+  // referencia a products.id
+  sku: text("sku"),
+  // SKU de la variante
+  price: decimal("price"),
+  // precio de venta
+  compareAtPrice: decimal("compare_at_price"),
+  // precio de comparación
+  barcode: text("barcode"),
+  // código de barras
+  inventoryQty: integer("inventory_qty"),
+  // cantidad en inventario
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at")
+});
+var orderItems = pgTable("order_items", {
+  id: serial("id").primaryKey(),
+  orderId: integer("order_id").notNull(),
+  // referencia a orders.id
+  // en schema de items
+  shopifyProductId: text("shopify_product_id"),
+  shopifyVariantId: text("shopify_variant_id"),
+  productId: integer("product_id"),
+  // referencia a products.id (opcional)
+  variantId: integer("variant_id"),
+  // referencia a variants.id (opcional)
+  sku: text("sku"),
+  // SKU del producto
+  quantity: integer("quantity").notNull(),
+  // cantidad
+  price: decimal("price"),
+  // precio unitario
+  createdAt: timestamp("created_at").defaultNow()
+});
+var productComboItems = pgTable("product_combo_items", {
+  id: serial("id").primaryKey(),
+  productComboId: integer("product_combo_id").notNull(),
+  // producto que es combo
+  productSimpleId: integer("product_simple_id").notNull(),
+  // producto componente
+  qty: integer("qty").notNull().default(1),
+  // cantidad del componente
+  createdAt: timestamp("created_at").defaultNow()
+});
 var insertOrderSchema = z.object({
+  // Campos originales
   orderId: z.string().min(1, "El ID de la orden es obligatorio"),
   channelId: z.number().int().positive("El ID del canal debe ser un n\xFAmero positivo"),
   customerName: z.string().optional(),
@@ -181,7 +471,36 @@ var insertOrderSchema = z.object({
   // se acepta como string para evitar issues de decimal
   isManaged: z.boolean().optional().default(false),
   hasTicket: z.boolean().optional().default(false),
-  status: z.string().default("pending")
+  status: z.string().default("pending"),
+  // Nuevos campos Shopify
+  idShopify: z.string().min(1, "ID de Shopify requerido"),
+  shopId: z.number().int().min(1).max(2, "Shop ID debe ser 1 o 2"),
+  name: z.string().optional(),
+  orderNumber: z.string().optional(),
+  financialStatus: z.string().optional(),
+  fulfillmentStatus: z.string().optional(),
+  currency: z.string().default("MXN"),
+  subtotalPrice: z.string().optional(),
+  customerEmail: z.string().email().optional(),
+  tags: z.array(z.string()).optional().default([])
+});
+var insertProductSchema = z.object({
+  idShopify: z.string().min(1, "ID de Shopify requerido"),
+  shopId: z.number().int().min(1).max(2, "Shop ID debe ser 1 o 2"),
+  title: z.string().min(1, "T\xEDtulo requerido"),
+  vendor: z.string().optional(),
+  productType: z.string().optional(),
+  status: z.enum(["active", "draft"]).default("active"),
+  tags: z.array(z.string()).optional().default([])
+});
+var insertVariantSchema = z.object({
+  idShopify: z.string().min(1, "ID de Shopify requerido"),
+  productId: z.number().int().positive("Product ID requerido"),
+  sku: z.string().optional(),
+  price: z.string().optional(),
+  compareAtPrice: z.string().optional(),
+  barcode: z.string().optional(),
+  inventoryQty: z.number().int().optional()
 });
 var insertTicketSchema = z.object({
   ticketNumber: z.string().min(1, "El n\xFAmero de ticket es obligatorio"),
@@ -202,8 +521,11 @@ if (!process.env.DATABASE_URL) {
   throw new Error("DATABASE_URL no definida/encontrada");
 }
 var pool = new Pool({
-  connectionString: process.env.DATABASE_URL
+  connectionString: process.env.DATABASE_URL,
+  ssl: { rejectUnauthorized: false }
 });
+var u = new URL(process.env.DATABASE_URL);
+console.log("[DB] Conectando a:", u.hostname);
 var db = drizzle(pool, { schema: schema_exports });
 
 // server/storage.ts
@@ -334,6 +656,11 @@ var DatabaseStorage = class {
   async getOrdersByCustomer(nombreCliente) {
     return await db.select().from(orders).where(eq(orders.customerName, nombreCliente)).orderBy(desc(orders.createdAt));
   }
+  /** Obtiene una orden por ID de Shopify y tienda. */
+  async getOrderByShopifyId(shopifyId, shopId) {
+    const [orden] = await db.select().from(orders).where(and(eq(orders.idShopify, shopifyId), eq(orders.shopId, shopId)));
+    return orden;
+  }
   // ==== TICKETS ====
   /** Lista tickets ordenados por fecha de creación descendente. */
   async getTickets() {
@@ -382,6 +709,61 @@ var DatabaseStorage = class {
   async deleteNote(id) {
     await db.delete(notes).where(eq(notes.id, id));
   }
+  // ==== NUEVOS MÉTODOS SHOPIFY ====
+  /** Crea un item de orden. */
+  async createOrderItem(datos) {
+    const [item] = await db.insert(orderItems).values(datos).returning();
+    return item;
+  }
+  /** Lista productos por tienda (opcional). */
+  async getProducts(shopId) {
+    if (shopId !== void 0) {
+      return await db.select().from(products).where(eq(products.shopId, shopId)).orderBy(asc(products.title));
+    }
+    return await db.select().from(products).orderBy(asc(products.title));
+  }
+  /** Obtiene un producto por ID. */
+  async getProduct(id) {
+    const [producto] = await db.select().from(products).where(eq(products.id, id));
+    return producto;
+  }
+  /** Obtiene un producto por ID de Shopify y tienda. */
+  async getProductByShopifyId(shopifyId, shopId) {
+    const [producto] = await db.select().from(products).where(and(eq(products.idShopify, shopifyId), eq(products.shopId, shopId)));
+    return producto;
+  }
+  /** Crea un producto. */
+  async createProduct(datos) {
+    const [producto] = await db.insert(products).values(datos).returning();
+    return producto;
+  }
+  /** Actualiza un producto. */
+  async updateProduct(id, updates) {
+    const [producto] = await db.update(products).set({ ...updates, updatedAt: /* @__PURE__ */ new Date() }).where(eq(products.id, id)).returning();
+    return producto;
+  }
+  /** Lista variantes por producto (opcional). */
+  async getVariants(productId) {
+    if (productId !== void 0) {
+      return await db.select().from(variants).where(eq(variants.productId, productId)).orderBy(asc(variants.sku));
+    }
+    return await db.select().from(variants).orderBy(asc(variants.sku));
+  }
+  /** Obtiene una variante por ID. */
+  async getVariant(id) {
+    const [variante] = await db.select().from(variants).where(eq(variants.id, id));
+    return variante;
+  }
+  /** Crea una variante. */
+  async createVariant(datos) {
+    const [variante] = await db.insert(variants).values(datos).returning();
+    return variante;
+  }
+  /** Actualiza una variante. */
+  async updateVariant(id, updates) {
+    const [variante] = await db.update(variants).set({ ...updates, updatedAt: /* @__PURE__ */ new Date() }).where(eq(variants.id, id)).returning();
+    return variante;
+  }
   // ==== MÉTRICAS DE DASHBOARD ====
   /**
    * Calcula métricas agregadas para el dashboard.
@@ -412,65 +794,553 @@ var DatabaseStorage = class {
 };
 var storage = new DatabaseStorage();
 
+// server/services/OrderSyncService.ts
+var OrderSyncService = class {
+  client;
+  storeNumber;
+  channelId;
+  constructor(storeParam = "1") {
+    this.client = new ShopifyAdminClient(storeParam);
+    this.storeNumber = parseInt(storeParam, 10);
+    this.channelId = this.storeNumber;
+  }
+  convertShopifyOrder(shopifyOrder) {
+    const o = shopifyOrder;
+    const idStr = String(o.id);
+    const first = o.customer?.first_name ?? null;
+    const last = o.customer?.last_name ?? null;
+    const ship = o.shipping_address ?? void 0;
+    return {
+      // Campos básicos existentes
+      orderId: idStr,
+      channelId: this.channelId,
+      customerName: first || last ? `${first ?? ""} ${last ?? ""}`.trim() : o.email || "Sin nombre",
+      totalAmount: o.total_price ?? null,
+      isManaged: false,
+      hasTicket: false,
+      status: "pending",
+      // Shopify
+      idShopify: idStr,
+      shopId: this.storeNumber,
+      name: o.name ?? null,
+      orderNumber: o.order_number != null ? String(o.order_number) : null,
+      financialStatus: o.financial_status ?? null,
+      fulfillmentStatus: o.fulfillment_status ?? null,
+      currency: o.currency ?? null,
+      subtotalPrice: o.subtotal_price ?? null,
+      customerEmail: o.email ?? null,
+      tags: o.tags ? o.tags.split(",").map((t) => t.trim()).filter(Boolean) : [],
+      // 👇 Estos 4 requieren columnas en tu schema (ver sección 2)
+      // Si aún no agregas esas columnas, comenta estas líneas.
+      createdAtShopify: o.created_at ? new Date(o.created_at) : null,
+      updatedAtShopify: o.updated_at ? new Date(o.updated_at) : null,
+      cancelReason: o.cancel_reason ?? null,
+      cancelledAt: o.cancelled_at ? new Date(o.cancelled_at) : null,
+      // Ya tienes estas columnas en tu schema:
+      customerFirstName: first,
+      customerLastName: last,
+      shipName: ship?.name ?? null,
+      shipPhone: ship?.phone ?? null,
+      shipAddress1: ship?.address1 ?? null,
+      shipCity: ship?.city ?? null,
+      shipProvince: ship?.province ?? null,
+      shipCountry: ship?.country ?? null,
+      shipZip: ship?.zip ?? null
+    };
+  }
+  convertOrderItems(shopifyOrder, localOrderId) {
+    return shopifyOrder.line_items.map((item) => ({
+      orderId: localOrderId,
+      // FK local a orders.id (numérico)
+      productId: null,
+      // resolverás luego contra tu catálogo
+      variantId: null,
+      sku: item.sku,
+      quantity: item.quantity,
+      price: item.price,
+      // 👇 ya tienes estas columnas en order_items
+      shopifyProductId: item.product_id != null ? String(item.product_id) : null,
+      shopifyVariantId: item.variant_id != null ? String(item.variant_id) : null,
+      title: item.title ?? null
+    }));
+  }
+  async backfillOrders(sinceDate, cursor, limit = 50) {
+    console.log(`Iniciando backfill para tienda ${this.storeNumber}${sinceDate ? ` desde ${sinceDate}` : ""}`);
+    const result = {
+      success: false,
+      ordersProcessed: 0,
+      errors: [],
+      hasNextPage: false
+    };
+    try {
+      const params = {
+        limit: Math.min(limit, 250),
+        status: "any",
+        //  trae line_items y datos útiles
+        fields: "id,name,order_number,email,created_at,updated_at,financial_status,fulfillment_status,currency,total_price,subtotal_price,tags,line_items,customer,shipping_address,cancel_reason,cancelled_at"
+      };
+      if (sinceDate) params.created_at_min = sinceDate;
+      if (cursor) params.page_info = cursor;
+      const response = await this.client.getOrders(params);
+      const orders2 = response.orders || [];
+      console.log(`Ordenes Obtenidas ${orders2.length} \xF3rdenes de tienda ${this.storeNumber}`);
+      for (const shopifyOrder of orders2) {
+        try {
+          const existing = await storage.getOrderByShopifyId(String(shopifyOrder.id), this.storeNumber);
+          if (existing) {
+            const orderData = this.convertShopifyOrder(shopifyOrder);
+            await storage.updateOrder(existing.id, orderData);
+            console.log(`Actualizada ${shopifyOrder.name}`);
+          } else {
+            const orderData = this.convertShopifyOrder(shopifyOrder);
+            const newOrder = await storage.createOrder(orderData);
+            const items = shopifyOrder.line_items ?? [];
+            console.log(`> ${shopifyOrder.name}: items=${items.length}`);
+            if (items.length > 0) {
+              const orderItems2 = this.convertOrderItems(shopifyOrder, newOrder.id);
+              for (const it of orderItems2) await storage.createOrderItem(it);
+            }
+          }
+          result.ordersProcessed++;
+        } catch (e) {
+          const msg = `Error procesando ${shopifyOrder.name}: ${e}`;
+          console.log("error", msg);
+          result.errors.push(msg);
+        }
+      }
+      result.hasNextPage = orders2.length === params.limit;
+      result.success = result.errors.length === 0;
+      console.log(`\u2705 Backfill tienda ${this.storeNumber}: ${result.ordersProcessed} \xF3rdenes`);
+      if (result.errors.length) console.log(`\u26A0\uFE0F ${result.errors.length} errores`);
+      return result;
+    } catch (e) {
+      const msg = `Error en backfill tienda ${this.storeNumber}: ${e}`;
+      console.log("\u274C", msg);
+      result.errors.push(msg);
+      return result;
+    }
+  }
+  async incrementalSync(updatedSince) {
+    console.log(`\u{1F504} Sync incremental tienda ${this.storeNumber} desde ${updatedSince}`);
+    const result = {
+      success: false,
+      ordersProcessed: 0,
+      errors: [],
+      hasNextPage: false
+    };
+    try {
+      const params = {
+        updated_at_min: updatedSince,
+        status: "any",
+        limit: 100,
+        fields: "id,name,order_number,email,created_at,updated_at,financial_status,fulfillment_status,currency,total_price,subtotal_price,tags,line_items,customer,shipping_address,cancel_reason,cancelled_at"
+      };
+      const response = await this.client.getOrders(params);
+      const orders2 = response.orders || [];
+      console.log(`\u{1F4E6} Sync incremental: ${orders2.length} \xF3rdenes`);
+      for (const shopifyOrder of orders2) {
+        try {
+          const existing = await storage.getOrderByShopifyId(String(shopifyOrder.id), this.storeNumber);
+          const orderData = this.convertShopifyOrder(shopifyOrder);
+          if (existing) {
+            await storage.updateOrder(existing.id, orderData);
+            console.log(`\u{1F504} Actualizada ${shopifyOrder.name}`);
+          } else {
+            const newOrder = await storage.createOrder(orderData);
+            const items = shopifyOrder.line_items ?? [];
+            if (items.length > 0) {
+              const orderItems2 = this.convertOrderItems(shopifyOrder, newOrder.id);
+              for (const it of orderItems2) await storage.createOrderItem(it);
+            }
+            console.log(`Nueva ${shopifyOrder.name}`);
+          }
+          result.ordersProcessed++;
+        } catch (e) {
+          const msg = `Error incremental ${shopifyOrder.name}: ${e}`;
+          console.log("error", msg);
+          result.errors.push(msg);
+        }
+      }
+      result.success = result.errors.length === 0;
+      result.hasNextPage = orders2.length === 100;
+      console.log(`Sync incremental ok: ${result.ordersProcessed}`);
+      return result;
+    } catch (e) {
+      const msg = `Error incremental tienda ${this.storeNumber}: ${e}`;
+      console.log("error", msg);
+      result.errors.push(msg);
+      return result;
+    }
+  }
+  async getOrdersCount() {
+    try {
+      const response = await this.client.getOrdersCount();
+      return { count: response.count || 0 };
+    } catch (e) {
+      return { count: 0, error: String(e) };
+    }
+  }
+  getStoreInfo() {
+    return this.client.getStoreInfo();
+  }
+};
+
+// server/services/ProductService.ts
+var ProductService = class {
+  client;
+  storeNumber;
+  constructor(storeParam = "1") {
+    this.client = new ShopifyAdminClient(storeParam);
+    this.storeNumber = parseInt(storeParam);
+  }
+  convertShopifyProduct(shopifyProduct) {
+    return {
+      idShopify: shopifyProduct.id,
+      shopId: this.storeNumber,
+      title: shopifyProduct.title,
+      vendor: shopifyProduct.vendor || null,
+      productType: shopifyProduct.product_type || null,
+      status: shopifyProduct.status,
+      tags: shopifyProduct.tags ? shopifyProduct.tags.split(", ").filter(Boolean) : []
+    };
+  }
+  convertShopifyVariant(shopifyVariant, localProductId) {
+    return {
+      idShopify: shopifyVariant.id,
+      productId: localProductId,
+      sku: shopifyVariant.sku || null,
+      price: shopifyVariant.price || null,
+      compareAtPrice: shopifyVariant.compare_at_price || null,
+      barcode: shopifyVariant.barcode || null,
+      inventoryQty: shopifyVariant.inventory_quantity || 0
+    };
+  }
+  async syncProductsFromShopify(limit = 50) {
+    console.log(`\u{1F504} Sincronizando productos desde Shopify tienda ${this.storeNumber}`);
+    const result = {
+      success: false,
+      productsProcessed: 0,
+      errors: []
+    };
+    try {
+      const response = await this.client.getProducts({ limit });
+      const products2 = response.products || [];
+      console.log(`\u{1F4E6} Obtenidos ${products2.length} productos de Shopify`);
+      for (const shopifyProduct of products2) {
+        try {
+          const existingProduct = await storage.getProductByShopifyId(
+            shopifyProduct.id,
+            this.storeNumber
+          );
+          let localProduct;
+          if (existingProduct) {
+            const productData = this.convertShopifyProduct(shopifyProduct);
+            localProduct = await storage.updateProduct(existingProduct.id, productData);
+            console.log(`\u{1F504} Producto actualizado: ${shopifyProduct.title}`);
+          } else {
+            const productData = this.convertShopifyProduct(shopifyProduct);
+            localProduct = await storage.createProduct(productData);
+            console.log(`\u2795 Nuevo producto: ${shopifyProduct.title}`);
+          }
+          if (shopifyProduct.variants && shopifyProduct.variants.length > 0) {
+            for (const shopifyVariant of shopifyProduct.variants) {
+              const variantData = this.convertShopifyVariant(shopifyVariant, localProduct.id);
+              await storage.createVariant(variantData);
+            }
+          }
+          result.productsProcessed++;
+        } catch (error) {
+          const errorMsg = `Error procesando producto ${shopifyProduct.title}: ${error}`;
+          console.log(`\u274C ${errorMsg}`);
+          result.errors.push(errorMsg);
+        }
+      }
+      result.success = result.errors.length === 0;
+      return result;
+    } catch (error) {
+      const errorMsg = `Error sincronizando productos: ${error}`;
+      console.log(`\u274C ${errorMsg}`);
+      result.errors.push(errorMsg);
+      return result;
+    }
+  }
+  async updateProductInShopify(productId, updates) {
+    console.log(`\u{1F504} Actualizando producto ${productId} en Shopify tienda ${this.storeNumber}`);
+    try {
+      const localProduct = await storage.getProduct(productId);
+      if (!localProduct) {
+        return { success: false, error: "Producto no encontrado en BD local" };
+      }
+      const shopifyData = {};
+      if (updates.title) shopifyData.title = updates.title;
+      if (updates.vendor) shopifyData.vendor = updates.vendor;
+      if (updates.status) shopifyData.status = updates.status;
+      if (updates.tags) shopifyData.tags = updates.tags.join(", ");
+      await this.client.updateProduct(localProduct.idShopify, shopifyData);
+      console.log(`\u2705 Shopify actualizado para producto ${localProduct.idShopify}`);
+      const updatedProduct = await storage.updateProduct(productId, {
+        title: updates.title || localProduct.title,
+        vendor: updates.vendor || localProduct.vendor,
+        status: updates.status || localProduct.status,
+        tags: updates.tags || localProduct.tags
+      });
+      console.log(`\u2705 BD local actualizada para producto ${productId}`);
+      return {
+        success: true,
+        product: updatedProduct,
+        shopifyUpdated: true
+      };
+    } catch (error) {
+      console.log(`\u274C Error actualizando producto ${productId}: ${error}`);
+      return {
+        success: false,
+        error: String(error),
+        shopifyUpdated: false
+      };
+    }
+  }
+  async updateVariantInShopify(variantId, updates) {
+    console.log(`\u{1F504} Actualizando variante ${variantId} en Shopify tienda ${this.storeNumber}`);
+    try {
+      const localVariant = await storage.getVariant(variantId);
+      if (!localVariant) {
+        return { success: false, error: "Variante no encontrada en BD local" };
+      }
+      const shopifyData = {};
+      if (updates.price) shopifyData.price = updates.price;
+      if (updates.compareAtPrice) shopifyData.compare_at_price = updates.compareAtPrice;
+      if (updates.sku) shopifyData.sku = updates.sku;
+      if (updates.inventoryQty !== void 0) shopifyData.inventory_quantity = updates.inventoryQty;
+      await this.client.updateVariant(localVariant.idShopify, shopifyData);
+      console.log(`\u2705 Shopify actualizado para variante ${localVariant.idShopify}`);
+      const updatedVariant = await storage.updateVariant(variantId, {
+        price: updates.price || localVariant.price,
+        compareAtPrice: updates.compareAtPrice || localVariant.compareAtPrice,
+        sku: updates.sku || localVariant.sku,
+        inventoryQty: updates.inventoryQty ?? localVariant.inventoryQty
+      });
+      console.log(`\u2705 BD local actualizada para variante ${variantId}`);
+      return {
+        success: true,
+        shopifyUpdated: true
+      };
+    } catch (error) {
+      console.log(`\u274C Error actualizando variante ${variantId}: ${error}`);
+      return {
+        success: false,
+        error: String(error),
+        shopifyUpdated: false
+      };
+    }
+  }
+  async getProductsForStore(shopId) {
+    return await storage.getProducts(shopId);
+  }
+  async getVariantsForProduct(productId) {
+    return await storage.getVariants(productId);
+  }
+  getStoreInfo() {
+    return this.client.getStoreInfo();
+  }
+};
+
+// server/scheduler.ts
+function listStoreNumbersFromEnv() {
+  const nums = /* @__PURE__ */ new Set();
+  for (const k of Object.keys(process.env)) {
+    const m = k.match(/^SHOPIFY_SHOP_NAME_(\d+)$/);
+    if (m) nums.add(parseInt(m[1], 10));
+  }
+  return Array.from(nums).sort((a, b) => a - b);
+}
+var orderLock = {};
+var productLock = {};
+function nowISO() {
+  return (/* @__PURE__ */ new Date()).toISOString();
+}
+async function runOrderIncremental(store) {
+  if (orderLock[store]) {
+    console.log(`[CRON][${nowISO()}] Orders store ${store}: saltando (en ejecuci\xF3n)`);
+    return;
+  }
+  orderLock[store] = true;
+  try {
+    const windowMin = parseInt(process.env.SYNC_WINDOW_MIN ?? "10", 10);
+    const since = new Date(Date.now() - windowMin * 6e4).toISOString();
+    const svc = new OrderSyncService(String(store));
+    const res = await svc.incrementalSync(since);
+    console.log(
+      `[CRON][${nowISO()}] Orders store ${store}: processed=${res.ordersProcessed} errors=${res.errors.length}`
+    );
+    if (res.errors.length) console.log(res.errors.slice(0, 3));
+  } catch (e) {
+    console.error(`[CRON][${nowISO()}] Orders store ${store} ERROR:`, e.message || e);
+  } finally {
+    orderLock[store] = false;
+  }
+}
+async function runProductSync(store) {
+  if (productLock[store]) {
+    console.log(`[CRON][${nowISO()}] Products store ${store}: saltando (en ejecuci\xF3n)`);
+    return;
+  }
+  productLock[store] = true;
+  try {
+    const limit = parseInt(process.env.PRODUCT_SYNC_LIMIT ?? "250", 10);
+    const svc = new ProductService(String(store));
+    const res = await svc.syncProductsFromShopify(limit);
+    console.log(
+      `[CRON][${nowISO()}] Products store ${store}: processed=${res.productsProcessed} errors=${res.errors.length}`
+    );
+    if (res.errors.length) console.log(res.errors.slice(0, 3));
+  } catch (e) {
+    console.error(`[CRON][${nowISO()}] Products store ${store} ERROR:`, e.message || e);
+  } finally {
+    productLock[store] = false;
+  }
+}
+function startSchedulers() {
+  const stores = listStoreNumbersFromEnv();
+  if (stores.length === 0) {
+    console.warn("[CRON] No se encontraron tiendas en envs (SHOPIFY_SHOP_NAME_N).");
+    return;
+  }
+  const orderMs = parseInt(process.env.SYNC_INTERVAL_MS ?? `${5 * 6e4}`, 10);
+  const prodMs = parseInt(process.env.PRODUCT_SYNC_INTERVAL_MS ?? `${30 * 6e4}`, 10);
+  console.log(`[CRON] Iniciando. Ordenes cada ${orderMs / 6e4} min; Productos cada ${prodMs / 6e4} min. Tiendas: ${stores.join(", ")}`);
+  (async () => {
+    for (const s of stores) {
+      runOrderIncremental(s);
+    }
+  })();
+  for (const s of stores) {
+    setInterval(() => runOrderIncremental(s), orderMs);
+    setInterval(() => runProductSync(s), prodMs);
+  }
+}
+
+// server/index.ts
+import express2 from "express";
+import cors from "cors";
+
 // server/routes.ts
+import { createServer } from "http";
 import bcrypt from "bcrypt";
 import session from "express-session";
 import MemoryStore from "memorystore";
 import { z as z2 } from "zod";
 
-// client/src/lib/shopify.ts
-var shop = process.env.SHOPIFY_SHOP_NAME_2;
-var token = process.env.SHOPIFY_ACCESS_TOKEN_2;
-var apiVersion = process.env.SHOPIFY_API_VERSION_2 || "2024-07";
-if (!shop || !token) {
-  throw new Error("Faltan SHOPIFY_SHOP/SHOPIFY_ADMIN_TOKEN en el entorno");
-}
-var base = `https://${shop}/admin/api/${apiVersion}`;
-async function shopifyGet(path3) {
-  const res = await fetch(`${base}${path3}`, {
-    headers: { "X-Shopify-Access-Token": token }
-  });
-  if (!res.ok) {
-    const txt = await res.text();
-    throw new Error(`Shopify ${res.status} ${res.statusText} :: ${txt}`);
-  }
-  return res.json();
-}
-
 // server/syncShopifyOrders.ts
 import { eq as eq2 } from "drizzle-orm";
-import { drizzle as drizzle2 } from "drizzle-orm/node-postgres";
-import { Pool as Pool2 } from "pg";
-var pool2 = new Pool2({ connectionString: process.env.DATABASE_URL });
-var db2 = drizzle2(pool2, { schema: { orders, channels } });
-async function getChannelIdByCode(code) {
-  const [ch] = await db2.select().from(channels).where(eq2(channels.code, code));
-  return ch?.id ?? 1;
+function listStoreNumbersFromEnv2() {
+  const nums = /* @__PURE__ */ new Set();
+  for (const k of Object.keys(process.env)) {
+    const m = k.match(/^SHOPIFY_SHOP_NAME_(\d+)$/);
+    if (m) nums.add(parseInt(m[1], 10));
+  }
+  return Array.from(nums).sort((a, b) => a - b);
 }
-async function syncShopifyOrders({ limit = 50 } = {}) {
-  const data = await shopifyGet(`/orders.json?limit=${limit}&status=any&order=created_at+desc`);
-  const channelId = await getChannelIdByCode("WW");
-  let inserted = 0, upserted = 0;
-  for (const o of data.orders ?? []) {
-    const row = {
-      orderId: String(o.id),
-      channelId,
-      customerName: o.customer?.first_name ? `${o.customer.first_name} ${o.customer.last_name || ""}`.trim() : o.email || o.name || null,
-      totalAmount: o.total_price || null,
-      isManaged: false,
-      hasTicket: false,
-      status: o.financial_status || "pending"
-    };
-    const existing = await db2.query.orders.findFirst({ where: (t, { eq: eq3 }) => eq3(t.orderId, row.orderId) });
-    if (existing) {
-      await db2.update(orders).set({ ...row, updatedAt: /* @__PURE__ */ new Date() }).where(eq2(orders.id, existing.id));
-      upserted++;
-    } else {
-      await db2.insert(orders).values(row);
-      inserted++;
+async function getChannelIdForStore(storeNumber) {
+  const code = process.env[`SHOPIFY_CHANNEL_CODE_${storeNumber}`] || // fallback simples (ajusta si quieres)
+  (storeNumber === 1 ? "CT" : storeNumber === 2 ? "WW" : "WW");
+  const [ch] = await db.select().from(channels).where(eq2(channels.code, code));
+  if (ch?.id) return ch.id;
+  const all = await db.select().from(channels).limit(1);
+  return all[0]?.id ?? 1;
+}
+async function shopifyRestGet(storeNumber, path3) {
+  const { shop, token, apiVersion } = getShopifyCredentials(String(storeNumber));
+  console.log(`[SYNC DEBUG] store=${storeNumber} shop=${shop} ver=${apiVersion} tokenLen=${token?.length}`);
+  const base = `https://${shop}/admin/api/${apiVersion}`;
+  const r = await fetch(`${base}${path3}`, {
+    headers: {
+      "X-Shopify-Access-Token": token,
+      "User-Agent": "LogisticManager/1.0 (+node)"
+    }
+  });
+  const text2 = await r.text();
+  if (!r.ok) {
+    throw new Error(
+      `Shopify ${storeNumber} ${r.status} ${r.statusText} :: ${text2.slice(0, 500)}`
+    );
+  }
+  return JSON.parse(text2);
+}
+async function syncShopifyOrders(opts = {}) {
+  const limit = opts.limit ?? 50;
+  let targets;
+  if (opts.store && String(opts.store).toLowerCase() !== "all") {
+    targets = [parseInt(String(opts.store), 10)];
+  } else {
+    targets = listStoreNumbersFromEnv2();
+  }
+  if (targets.length === 0) {
+    throw new Error("No se encontraron tiendas (SHOPIFY_SHOP_NAME_N) en .env");
+  }
+  const summary = [];
+  for (const storeNumber of targets) {
+    try {
+      const { shop } = getShopifyCredentials(String(storeNumber));
+      const channelId = await getChannelIdForStore(storeNumber);
+      const data = await shopifyRestGet(
+        storeNumber,
+        `/orders.json?limit=${limit}&status=any&order=created_at+desc`
+      );
+      let inserted = 0, upserted = 0;
+      for (const o of data.orders ?? []) {
+        const orderIdStr = String(o.id);
+        const tagsArr = typeof o.tags === "string" ? o.tags.split(",").map((s) => s.trim()).filter(Boolean) : [];
+        const customerName = o.customer?.first_name ? `${o.customer.first_name} ${o.customer.last_name || ""}`.trim() : o.email || o.name || null;
+        const baseRow = {
+          orderId: orderIdStr,
+          // UNIQUE externo
+          idShopify: orderIdStr,
+          // ✅ NOT NULL
+          shopId: storeNumber,
+          // ✅ NOT NULL (1 o 2)
+          channelId,
+          // FK a channels
+          // Campos “básicos” que ya tenías:
+          customerName,
+          totalAmount: o.total_price || null,
+          isManaged: false,
+          hasTicket: false,
+          status: o.financial_status || "pending",
+          // puede mapearse a un estado interno
+          // Extras de Shopify (opcionales pero útiles):
+          name: o.name || null,
+          orderNumber: o.order_number != null ? String(o.order_number) : null,
+          financialStatus: o.financial_status || null,
+          fulfillmentStatus: o.fulfillment_status || null,
+          currency: o.currency || null,
+          subtotalPrice: o.subtotal_price || null,
+          customerEmail: o.email || null,
+          tags: tagsArr,
+          // Timestamps
+          createdAt: o.created_at ? new Date(o.created_at) : void 0,
+          updatedAt: /* @__PURE__ */ new Date()
+        };
+        const existing = await db.select().from(orders).where(eq2(orders.orderId, orderIdStr)).limit(1);
+        if (existing[0]) {
+          await db.update(orders).set(baseRow).where(eq2(orders.id, existing[0].id));
+          upserted++;
+        } else {
+          await db.insert(orders).values(baseRow);
+          inserted++;
+        }
+      }
+      summary.push({ store: storeNumber, shop, inserted, upserted });
+    } catch (e) {
+      summary.push({
+        store: storeNumber,
+        shop: "unknown",
+        inserted: 0,
+        upserted: 0
+      });
+      console.error(`Sync tienda ${storeNumber} fall\xF3:`, e.message);
     }
   }
-  return { inserted, upserted };
+  return { ok: true, summary };
 }
 
 // server/routes.ts
@@ -496,80 +1366,142 @@ var requiereAdmin = async (req, res, next) => {
   next();
 };
 async function registerRoutes(app) {
-  app.use(session({
-    secret: process.env.SESSION_SECRET || "dev-secret-key",
-    // en prod ¡debe ser fuerte!
-    resave: false,
-    saveUninitialized: false,
-    store: new AlmacenSesionesMemoria({
-      checkPeriod: 864e5
-      // limpia expirados cada 24h
-    }),
-    cookie: {
-      secure: process.env.NODE_ENV === "production",
-      // solo por HTTPS en prod
-      httpOnly: true,
-      // inaccesible desde JS del navegador
-      maxAge: 7 * 24 * 60 * 60 * 1e3
-      // 7 días
-    }
-  }));
-  app.get("/api/integrations/shopify/ping", requiereAutenticacion, async (_req, res) => {
+  app.get("/debug/ping", (req, res) => {
+    console.log(
+      " /debug/ping hit ::",
+      req.method,
+      req.url,
+      "UA:",
+      req.headers["user-agent"]
+    );
+    res.json({
+      ok: true,
+      time: (/* @__PURE__ */ new Date()).toISOString(),
+      url: req.url
+    });
+  });
+  app.set("trust proxy", 1);
+  const isProd = process.env.NODE_ENV === "production" || process.env.FORCE_SECURE_COOKIE === "1";
+  app.use(
+    session({
+      secret: process.env.SESSION_SECRET || "dev-secret-key",
+      resave: false,
+      saveUninitialized: false,
+      store: new AlmacenSesionesMemoria({ checkPeriod: 864e5 }),
+      cookie: {
+        httpOnly: true,
+        secure: isProd,
+        // ✅ en dev=false; en prod (HTTPS)=true
+        sameSite: isProd ? "none" : "lax",
+        // ✅ dev=lax, prod=none
+        maxAge: 7 * 24 * 60 * 60 * 1e3
+        // NO pongas domain en localhost
+      }
+    })
+  );
+  app.get("/api/health", (req, res) => {
+    console.log("Health check solicitado");
+    res.json({
+      ok: true,
+      ts: Date.now()
+    });
+  });
+  app.get("/api/integrations/shopify/ping", async (req, res) => {
     try {
-      const shop2 = process.env.SHOPIFY_SHOP_NAME_2;
-      const token2 = process.env.SHOPIFY_ACCESS_TOKEN_2;
-      const ver = process.env.SHOPIFY_API_VERSION_2 || "2024-07";
-      const hasProto = shop2?.startsWith("http://") || shop2?.startsWith("https://");
-      if (hasProto) {
-        return res.status(400).json({
-          ok: false,
-          error: "SHOPIFY_SHOP_NAME_2 debe ser SOLO el dominio *.myshopify.com, sin https://",
-          example: "mi-tienda.myshopify.com",
-          got: shop2
-        });
-      }
-      if (!shop2 || !token2) {
-        return res.status(500).json({
-          ok: false,
-          error: "Faltan variables de entorno",
-          vars_seen: { SHOPIFY_SHOP_NAME_2: !!shop2, SHOPIFY_ACCESS_TOKEN_2: !!token2, SHOPIFY_API_VERSION_2: ver }
-        });
-      }
-      const url = `https://${shop2}/admin/api/${ver}/shop.json`;
+      const storeParam = req.query.store || "1";
+      console.log(` Shopify ping solicitado para tienda ${storeParam}`);
+      const { shop, token, apiVersion, storeNumber } = getShopifyCredentials(storeParam);
+      const url = `https://${shop}/admin/api/${apiVersion}/shop.json`;
       const r = await fetch(url, {
         headers: {
-          "X-Shopify-Access-Token": token2,
+          "X-Shopify-Access-Token": token,
           "User-Agent": "LogisticManager/1.0 (+node)"
         }
       });
       const bodyText = await r.text();
       if (!r.ok) {
+        console.log(
+          ` Error Shopify tienda ${storeNumber}: ${r.status} ${r.statusText}`
+        );
+        return res.status(r.status).json({
+          ok: false,
+          store: storeNumber,
+          status: r.status,
+          statusText: r.statusText,
+          body: bodyText.slice(0, 500)
+          // primeros 500 caracteres del error
+        });
+      }
+      const data = JSON.parse(bodyText);
+      console.log(
+        `\u2705 Shopify tienda ${storeNumber} conectada: ${data?.shop?.myshopify_domain}`
+      );
+      return res.json({
+        ok: true,
+        store: storeNumber,
+        shop: data?.shop?.myshopify_domain || data?.shop?.domain || null,
+        apiVersion
+      });
+    } catch (e) {
+      console.log(` Error en Shopify ping: ${e.message}`);
+      res.status(500).json({
+        ok: false,
+        error: e.message,
+        cause: e?.cause?.message || e?.code || null
+      });
+    }
+  });
+  app.get("/api/integrations/shopify/ping-public", async (req, res) => {
+    try {
+      const store = Number(req.query.store || 1);
+      const shop = process.env[`SHOPIFY_SHOP_NAME_${store}`];
+      const token = process.env[`SHOPIFY_ACCESS_TOKEN_${store}`];
+      const ver = process.env[`SHOPIFY_API_VERSION_${store}`] || "2024-07";
+      if (!shop || !token) {
+        return res.status(500).json({
+          ok: false,
+          error: "Faltan envs",
+          visto: { shop: !!shop, token: !!token, ver }
+        });
+      }
+      if (/^https?:\/\//i.test(shop)) {
+        return res.status(400).json({
+          ok: false,
+          error: "SHOPIFY_SHOP_NAME_X debe ser solo *.myshopify.com (sin https://)",
+          got: shop
+        });
+      }
+      const url = `https://${shop}/admin/api/${ver}/shop.json`;
+      const r = await fetch(url, {
+        headers: {
+          "X-Shopify-Access-Token": token,
+          "User-Agent": "LogisticManager/1.0 (+node)"
+        }
+      });
+      const body = await r.text();
+      if (!r.ok) {
         return res.status(r.status).json({
           ok: false,
           status: r.status,
           statusText: r.statusText,
-          body: bodyText.slice(0, 500)
-          // limitar tamaño
+          body: body.slice(0, 500)
         });
       }
-      const data = JSON.parse(bodyText);
-      return res.json({
+      const data = JSON.parse(body);
+      res.json({
         ok: true,
-        shop: data?.shop?.myshopify_domain || data?.shop?.domain || null,
+        shop: data?.shop?.myshopify_domain || data?.shop?.domain,
         apiVersion: ver
       });
     } catch (e) {
-      const causeMsg = e?.cause?.message || e?.code || null;
-      res.status(500).json({
-        ok: false,
-        error: e.message,
-        cause: causeMsg
-      });
+      res.status(500).json({ ok: false, error: e?.message, cause: e?.cause || null });
     }
   });
-  app.get("/api/integrations/shopify/sync", requiereAutenticacion, async (_req, res) => {
+  app.get("/api/integrations/shopify/sync", requiereAutenticacion, async (req, res) => {
     try {
-      const r = await syncShopifyOrders({ limit: 50 });
+      const storeParam = req.query.store || "all";
+      const limit = Number(req.query.limit ?? 50);
+      const r = await syncShopifyOrders({ store: storeParam, limit });
       res.json({ message: "Sincronizaci\xF3n Shopify OK", ...r, status: "success" });
     } catch (e) {
       res.status(500).json({ message: "Fall\xF3 la sincronizaci\xF3n", error: e.message, status: "error" });
@@ -578,14 +1510,21 @@ async function registerRoutes(app) {
   await inicializarDatosPorDefecto();
   app.post("/api/auth/login", async (req, res) => {
     try {
+      console.log("Body recibido en login:", req.body);
       const { email, password } = esquemaLogin.parse(req.body);
       const usuario = await storage.getUserByEmail(email);
       if (!usuario) return res.status(401).json({ message: "Credenciales inv\xE1lidas" });
       const passwordValida = await bcrypt.compare(password, usuario.password);
       if (!passwordValida) return res.status(401).json({ message: "Credenciales inv\xE1lidas" });
       await storage.updateUser(usuario.id, { lastLogin: /* @__PURE__ */ new Date() });
-      req.session.userId = usuario.id;
-      res.json({ user: { id: usuario.id, email: usuario.email, role: usuario.role } });
+      req.session.regenerate((err) => {
+        if (err) return res.status(500).json({ message: "Error de sesi\xF3n" });
+        req.session.userId = usuario.id;
+        req.session.save((err2) => {
+          if (err2) return res.status(500).json({ message: "Error guardando sesi\xF3n" });
+          res.json({ user: { id: usuario.id, email: usuario.email, role: usuario.role } });
+        });
+      });
     } catch {
       res.status(400).json({ message: "Datos de solicitud inv\xE1lidos" });
     }
@@ -598,20 +1537,25 @@ async function registerRoutes(app) {
   app.get("/api/auth/user", requiereAutenticacion, async (req, res) => {
     try {
       const usuario = await storage.getUser(req.session.userId);
-      if (!usuario) return res.status(404).json({ message: "Usuario no encontrado" });
+      if (!usuario)
+        return res.status(404).json({ message: "Usuario no encontrado" });
       res.json({ id: usuario.id, email: usuario.email, role: usuario.role });
     } catch {
       res.status(500).json({ message: "Error del servidor" });
     }
   });
-  app.get("/api/dashboard/metrics", requiereAutenticacion, async (_req, res) => {
-    try {
-      const metricas = await storage.getDashboardMetrics();
-      res.json(metricas);
-    } catch {
-      res.status(500).json({ message: "No se pudieron obtener m\xE9tricas" });
+  app.get(
+    "/api/dashboard/metrics",
+    requiereAutenticacion,
+    async (_req, res) => {
+      try {
+        const metricas = await storage.getDashboardMetrics();
+        res.json(metricas);
+      } catch {
+        res.status(500).json({ message: "No se pudieron obtener m\xE9tricas" });
+      }
     }
-  });
+  );
   app.get("/api/orders", requiereAutenticacion, async (req, res) => {
     try {
       const { channelId, managed, hasTicket } = req.query;
@@ -631,9 +1575,11 @@ async function registerRoutes(app) {
   app.get("/api/orders/:id", requiereAutenticacion, async (req, res) => {
     try {
       const id = Number(req.params.id);
-      if (Number.isNaN(id)) return res.status(400).json({ message: "ID de orden inv\xE1lido" });
+      if (Number.isNaN(id))
+        return res.status(400).json({ message: "ID de orden inv\xE1lido" });
       const orden = await storage.getOrder(id);
-      if (!orden) return res.status(404).json({ message: "Orden no encontrada" });
+      if (!orden)
+        return res.status(404).json({ message: "Orden no encontrada" });
       res.json(orden);
     } catch {
       res.status(500).json({ message: "No se pudo obtener la orden" });
@@ -651,7 +1597,8 @@ async function registerRoutes(app) {
   app.patch("/api/orders/:id", requiereAutenticacion, async (req, res) => {
     try {
       const id = Number(req.params.id);
-      if (Number.isNaN(id)) return res.status(400).json({ message: "ID de orden inv\xE1lido" });
+      if (Number.isNaN(id))
+        return res.status(400).json({ message: "ID de orden inv\xE1lido" });
       const orden = await storage.updateOrder(id, req.body);
       res.json(orden);
     } catch {
@@ -726,7 +1673,8 @@ async function registerRoutes(app) {
   app.delete("/api/notes/:id", requiereAutenticacion, async (req, res) => {
     try {
       const id = Number(req.params.id);
-      if (Number.isNaN(id)) return res.status(400).json({ message: "ID de nota inv\xE1lido" });
+      if (Number.isNaN(id))
+        return res.status(400).json({ message: "ID de nota inv\xE1lido" });
       await storage.deleteNote(id);
       res.status(204).send();
     } catch {
@@ -741,8 +1689,196 @@ async function registerRoutes(app) {
       res.status(500).json({ message: "No se pudieron obtener usuarios" });
     }
   });
-  app.get("/api/integrations/shopify/sync", requiereAutenticacion, async (_req, res) => {
-    res.json({ message: "Sincronizaci\xF3n Shopify iniciada", status: "success" });
+  app.get("/api/integrations/shopify/ping-count", requiereAutenticacion, async (req, res) => {
+    try {
+      const storeParam = req.query.store || "1";
+      console.log(`\u{1F4CA} Shopify ping count para tienda ${storeParam}`);
+      const orderSync = new OrderSyncService(storeParam);
+      const countResult = await orderSync.getOrdersCount();
+      const storeInfo = orderSync.getStoreInfo();
+      if (countResult.error) {
+        return res.status(500).json({
+          ok: false,
+          store: storeInfo.storeNumber,
+          error: countResult.error
+        });
+      }
+      return res.json({
+        ok: true,
+        store: storeInfo.storeNumber,
+        shop: storeInfo.shopDomain,
+        count: countResult.count,
+        apiVersion: storeInfo.apiVersion
+      });
+    } catch (e) {
+      console.log(`\u274C Error en ping count: ${e.message}`);
+      res.status(500).json({
+        ok: false,
+        error: e.message
+      });
+    }
+  });
+  app.post("/api/integrations/shopify/orders/backfill", requiereAutenticacion, async (req, res) => {
+    try {
+      const storeParam = req.query.store || "1";
+      const since = req.query.since;
+      const cursor = req.query.cursor;
+      const limit = parseInt(req.query.limit) || 50;
+      console.log(`\u{1F504} Backfill iniciado para tienda ${storeParam}, since: ${since}, limit: ${limit}`);
+      const orderSync = new OrderSyncService(storeParam);
+      const result = await orderSync.backfillOrders(since, cursor, limit);
+      if (result.success) {
+        res.json({
+          ok: true,
+          message: `Backfill completado para tienda ${storeParam}`,
+          ordersProcessed: result.ordersProcessed,
+          hasNextPage: result.hasNextPage,
+          errors: result.errors
+        });
+      } else {
+        res.status(500).json({
+          ok: false,
+          message: `Backfill fall\xF3 para tienda ${storeParam}`,
+          ordersProcessed: result.ordersProcessed,
+          errors: result.errors
+        });
+      }
+    } catch (e) {
+      console.log(`\u274C Error en backfill: ${e.message}`);
+      res.status(500).json({
+        ok: false,
+        error: e.message
+      });
+    }
+  });
+  app.post("/api/integrations/shopify/orders/sync", requiereAutenticacion, async (req, res) => {
+    try {
+      const storeParam = req.query.store || "1";
+      const updatedSince = req.query.updatedSince;
+      if (!updatedSince) {
+        return res.status(400).json({
+          ok: false,
+          error: "Par\xE1metro updatedSince es requerido (formato ISO8601)"
+        });
+      }
+      console.log(`\u{1F504} Sync incremental para tienda ${storeParam}, desde: ${updatedSince}`);
+      const orderSync = new OrderSyncService(storeParam);
+      const result = await orderSync.incrementalSync(updatedSince);
+      if (result.success) {
+        res.json({
+          ok: true,
+          message: `Sync incremental completado para tienda ${storeParam}`,
+          ordersProcessed: result.ordersProcessed,
+          errors: result.errors
+        });
+      } else {
+        res.status(500).json({
+          ok: false,
+          message: `Sync incremental fall\xF3 para tienda ${storeParam}`,
+          ordersProcessed: result.ordersProcessed,
+          errors: result.errors
+        });
+      }
+    } catch (e) {
+      console.log(`\u274C Error en sync incremental: ${e.message}`);
+      res.status(500).json({
+        ok: false,
+        error: e.message
+      });
+    }
+  });
+  app.get("/api/integrations/shopify/products", requiereAutenticacion, async (req, res) => {
+    try {
+      const storeParam = req.query.store || "1";
+      const storeId = parseInt(storeParam);
+      console.log(`\u{1F4E6} Listando productos para tienda ${storeParam}`);
+      const productService = new ProductService(storeParam);
+      const products2 = await productService.getProductsForStore(storeId);
+      res.json({
+        ok: true,
+        store: storeParam,
+        products: products2,
+        count: products2.length
+      });
+    } catch (e) {
+      console.log(`\u274C Error listando productos: ${e.message}`);
+      res.status(500).json({
+        ok: false,
+        error: e.message
+      });
+    }
+  });
+  app.post("/api/integrations/shopify/products/sync", requiereAutenticacion, async (req, res) => {
+    try {
+      const storeParam = req.query.store || "1";
+      const limit = parseInt(req.query.limit) || 50;
+      console.log(`\u{1F504} Sincronizando productos desde Shopify tienda ${storeParam}`);
+      const productService = new ProductService(storeParam);
+      const result = await productService.syncProductsFromShopify(limit);
+      if (result.success) {
+        res.json({
+          ok: true,
+          message: `Productos sincronizados para tienda ${storeParam}`,
+          productsProcessed: result.productsProcessed,
+          errors: result.errors
+        });
+      } else {
+        res.status(500).json({
+          ok: false,
+          message: `Sync de productos fall\xF3 para tienda ${storeParam}`,
+          productsProcessed: result.productsProcessed,
+          errors: result.errors
+        });
+      }
+    } catch (e) {
+      console.log(`\u274C Error sincronizando productos: ${e.message}`);
+      res.status(500).json({
+        ok: false,
+        error: e.message
+      });
+    }
+  });
+  app.put("/api/integrations/shopify/products/:id", requiereAutenticacion, async (req, res) => {
+    try {
+      const productId = parseInt(req.params.id);
+      const updates = req.body;
+      if (!updates || typeof updates !== "object") {
+        return res.status(400).json({
+          ok: false,
+          error: "Datos de actualizaci\xF3n requeridos"
+        });
+      }
+      console.log(`\u{1F504} Actualizando producto ${productId} en Shopify`);
+      const product = await storage.getProduct(productId);
+      if (!product) {
+        return res.status(404).json({
+          ok: false,
+          error: "Producto no encontrado"
+        });
+      }
+      const productService = new ProductService(product.shopId.toString());
+      const result = await productService.updateProductInShopify(productId, updates);
+      if (result.success) {
+        res.json({
+          ok: true,
+          message: "Producto actualizado exitosamente",
+          product: result.product,
+          shopifyUpdated: result.shopifyUpdated
+        });
+      } else {
+        res.status(500).json({
+          ok: false,
+          error: result.error,
+          shopifyUpdated: result.shopifyUpdated
+        });
+      }
+    } catch (e) {
+      console.log(`\u274C Error actualizando producto: ${e.message}`);
+      res.status(500).json({
+        ok: false,
+        error: e.message
+      });
+    }
   });
   app.get("/api/integrations/mercadolibre/simulate", requiereAutenticacion, async (_req, res) => {
     res.json({ message: "Simulaci\xF3n MercadoLibre", status: "pending" });
@@ -752,7 +1888,9 @@ async function registerRoutes(app) {
 }
 async function inicializarDatosPorDefecto() {
   try {
-    const usuarioLogistica = await storage.getUserByEmail("logistica@empresa.com");
+    const usuarioLogistica = await storage.getUserByEmail(
+      "logistica@empresa.com"
+    );
     if (!usuarioLogistica) {
       const passwordHasheada = await bcrypt.hash("123456", 10);
       await storage.createUser({
@@ -776,15 +1914,42 @@ async function inicializarDatosPorDefecto() {
     }
     const canales = await storage.getChannels();
     if (canales.length === 0) {
-      await storage.createChannel({ code: "WW", name: "WW Channel", color: "#4CAF50", icon: "fas fa-globe" });
-      await storage.createChannel({ code: "CT", name: "CT Channel", color: "#FF9800", icon: "fas fa-store" });
-      await storage.createChannel({ code: "MGL", name: "MGL Channel", color: "#2196F3", icon: "fas fa-shopping-cart" });
+      await storage.createChannel({
+        code: "WW",
+        name: "WW Channel",
+        color: "#4CAF50",
+        icon: "fas fa-globe"
+      });
+      await storage.createChannel({
+        code: "CT",
+        name: "CT Channel",
+        color: "#FF9800",
+        icon: "fas fa-store"
+      });
+      await storage.createChannel({
+        code: "MGL",
+        name: "MGL Channel",
+        color: "#2196F3",
+        icon: "fas fa-shopping-cart"
+      });
     }
     const paqueterias = await storage.getCarriers();
     if (paqueterias.length === 0) {
-      await storage.createCarrier({ name: "Estafeta", code: "ESTAFETA", apiEndpoint: "https://api.estafeta.com" });
-      await storage.createCarrier({ name: "DHL", code: "DHL", apiEndpoint: "https://api.dhl.com" });
-      await storage.createCarrier({ name: "Express PL", code: "EXPRESS_PL", apiEndpoint: "https://api.expresspl.com" });
+      await storage.createCarrier({
+        name: "Estafeta",
+        code: "ESTAFETA",
+        apiEndpoint: "https://api.estafeta.com"
+      });
+      await storage.createCarrier({
+        name: "DHL",
+        code: "DHL",
+        apiEndpoint: "https://api.dhl.com"
+      });
+      await storage.createCarrier({
+        name: "Express PL",
+        code: "EXPRESS_PL",
+        apiEndpoint: "https://api.expresspl.com"
+      });
     }
     const marcas = await storage.getBrands();
     if (marcas.length === 0) {
@@ -909,7 +2074,16 @@ if (typeof _g.fetch !== "function") {
 }
 var aplicacion = express2();
 aplicacion.use(express2.json());
-aplicacion.use(express2.urlencoded({ extended: false }));
+aplicacion.use(express2.urlencoded({ extended: true }));
+aplicacion.use(
+  cors({
+    origin: (origin, cb) => {
+      if (!origin) return cb(null, true);
+      return cb(null, true);
+    },
+    credentials: true
+  })
+);
 aplicacion.use((req, res, next) => {
   const inicio = Date.now();
   const ruta = req.path;
@@ -936,12 +2110,14 @@ aplicacion.use((req, res, next) => {
 });
 (async () => {
   const servidor = await registerRoutes(aplicacion);
-  aplicacion.use((err, _req, res, _next) => {
-    const estado = err.status || err.statusCode || 500;
-    const mensaje = err.message || "Error interno del servidor";
-    res.status(estado).json({ mensaje });
-    throw err;
-  });
+  aplicacion.use(
+    (err, _req, res, _next) => {
+      const estado = err.status || err.statusCode || 500;
+      const mensaje = err.message || "Error interno del servidor";
+      res.status(estado).json({ mensaje });
+      throw err;
+    }
+  );
   if (aplicacion.get("env") === "development") {
     await setupVite(aplicacion, servidor);
   } else {
@@ -949,6 +2125,11 @@ aplicacion.use((req, res, next) => {
   }
   const puerto = parseInt(process.env.PORT || "5000", 10);
   servidor.listen({ port: puerto, host: "0.0.0.0" }, () => {
-    log(`Servidor trabajando en el puerto ${puerto}`);
+    log(` Servidor trabajando en el puerto ${puerto}`);
+    if (process.env.ENABLE_CRON === "1") {
+      startSchedulers();
+    } else {
+      console.log("[CRON] Desactivado (ENABLE_CRON != 1)");
+    }
   });
 })();

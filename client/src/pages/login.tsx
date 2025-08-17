@@ -56,7 +56,7 @@ export default function Login() {
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder="ejemplo@empresa.com"
+                placeholder="Correo Electrónico"
                 required
               />
             </div>
@@ -83,16 +83,16 @@ export default function Login() {
           </form>
 
           <div className="mt-6 p-4 bg-gray-50 rounded-lg">
-            <p className="text-sm font-medium text-gray-700 mb-2">Usuarios de prueba:</p>
+            {/* <p className="text-sm font-medium text-gray-700 mb-2">Usuarios de prueba:</p>
             <div className="text-xs text-gray-600 space-y-1">
               <div>
-                <strong>Usuario:</strong> logistica@empresa.com / 123456
+                <strong>Usuario:</strong> logistica@empresa.com / 1234567
               </div>
               <div>
                 <strong>Admin:</strong> admin@empresa.com / admin123
               </div>
-            </div>
-          </div>
+            </div>*/}
+          </div> 
         </CardContent>
       </Card>
     </div>

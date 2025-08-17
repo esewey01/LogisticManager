@@ -6,6 +6,8 @@ CREA LA APLICACION EXPRESS, CONFIGURA MIDDLEWARE PARA RECIBIR DATOS EN JSON Y FO
 
 // Compatibilidad fetch en runtimes sin fetch global
 import fetchOrig from "node-fetch";
+//SINCRONIZACION DE AMBAS TIENDAS
+import { startSchedulers } from "./scheduler";
 const _g: any = globalThis as any;
 if (typeof _g.fetch !== "function") {
   _g.fetch = fetchOrig as any;
@@ -114,5 +116,10 @@ aplicacion.use((req, res, next) => {
   // Inicia el servidor en todas las interfaces de red (0.0.0.0) para compatibilidad con Replit
   servidor.listen({ port: puerto, host: "0.0.0.0" }, () => {
     log(` Servidor trabajando en el puerto ${puerto}`);
+    if (process.env.ENABLE_CRON === "1") {
+      startSchedulers();
+    } else {
+      console.log("[CRON] Desactivado (ENABLE_CRON != 1)");
+    }
   });
 })();

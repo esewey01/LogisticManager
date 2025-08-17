@@ -6,6 +6,8 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
+
+
 import {
   Table,
   TableBody,
@@ -14,6 +16,11 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+
+
+
+
+
 import { apiRequest } from "@/lib/queryClient";
 import OrderDetailsModal from "@/components/modals/OrderDetailsModal";
 
@@ -31,6 +38,8 @@ export default function Pedidos() {
   const { data: channels = [] } = useQuery({
     queryKey: ["/api/channels"],
   });
+
+
 
   const updateOrderMutation = useMutation({
     mutationFn: async ({ orderId, updates }: { orderId: string; updates: any }) => {
@@ -87,6 +96,8 @@ export default function Pedidos() {
       </div>
     );
   }
+
+  
 
   return (
     <div>
@@ -180,7 +191,7 @@ export default function Pedidos() {
                       />
                     </TableCell>
                     <TableCell className="font-medium">
-                      {order.externalId || order.id.slice(0, 8)}
+                      {order.externalId || (order.orderId ? String(order.orderId).slice(-6) : String(order.id).slice(-6))}
                     </TableCell>
                     <TableCell>{order.customerName}</TableCell>
                     <TableCell>

@@ -30,7 +30,7 @@ export class ShopifyAdminClient {
   private accessToken: string;
   private apiVersion: string;
   private storeNumber: string;
-  
+
   constructor(storeParam: string = '1') {
     const credentials = getShopifyCredentials(storeParam);
     this.shopDomain = credentials.shop;
@@ -74,7 +74,7 @@ export class ShopifyAdminClient {
     maxRetries: number = 3
   ): Promise<T> {
     const url = `${this.getBaseUrl()}${endpoint}`;
-    
+
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
         const response = await fetch(url, {
@@ -103,14 +103,14 @@ export class ShopifyAdminClient {
         if (!response.ok) {
           const errorText = await response.text();
           console.log(`❌ Error HTTP ${response.status} en tienda ${this.storeNumber}: ${errorText}`);
-          
+
           if (response.status >= 500 && attempt < maxRetries) {
             const backoffDelay = Math.min(1000 * Math.pow(2, attempt - 1), 30000);
             console.log(`🔄 Reintentando en ${backoffDelay}ms (intento ${attempt}/${maxRetries})`);
             await this.delay(backoffDelay);
             continue;
           }
-          
+
           throw new Error(`HTTP ${response.status}: ${errorText}`);
         }
 
@@ -119,11 +119,11 @@ export class ShopifyAdminClient {
 
       } catch (error) {
         console.log(`❌ Error en intento ${attempt}/${maxRetries} para tienda ${this.storeNumber}:`, error);
-        
+
         if (attempt === maxRetries) {
           throw error;
         }
-        
+
         const backoffDelay = Math.min(1000 * Math.pow(2, attempt - 1), 30000);
         await this.delay(backoffDelay);
       }
@@ -139,7 +139,7 @@ export class ShopifyAdminClient {
     maxRetries: number = 3
   ): Promise<GraphQLResponse<T>> {
     const url = `${this.getBaseUrl()}/graphql.json`;
-    
+
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
         const response = await fetch(url, {
@@ -166,7 +166,7 @@ export class ShopifyAdminClient {
         }
 
         const result: GraphQLResponse<T> = await response.json();
-        
+
         // Verificar errores GraphQL
         if (result.errors && result.errors.length > 0) {
           console.log(`⚠️ Errores GraphQL en tienda ${this.storeNumber}:`, result.errors);
@@ -188,7 +188,7 @@ export class ShopifyAdminClient {
         if (attempt === maxRetries) {
           throw error;
         }
-        
+
         const backoffDelay = Math.min(1000 * Math.pow(2, attempt - 1), 30000);
         console.log(`🔄 Reintentando GraphQL en ${backoffDelay}ms (${attempt}/${maxRetries})`);
         await this.delay(backoffDelay);
@@ -208,14 +208,85 @@ export class ShopifyAdminClient {
   }
 
   async getOrders(params: Record<string, any> = {}) {
-    const searchParams = new URLSearchParams(params).toString();
-    return this.restRequest(`/orders.json?${searchParams}`);
+    const { shopDomain, accessToken, apiVersion } = this;
+
+    // Construir URL
+    const url = new URL(`https://${shopDomain}/admin/api/${apiVersion}/orders.json`);
+    Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, String(v)));
+
+    // Reutilizamos restRequest para mantener manejo de errores y reintentos
+    const response = await fetch(url.toString(), {
+      headers: {
+        'X-Shopify-Access-Token': accessToken,
+        'User-Agent': 'LogisticManager/1.0 (+node)',
+        'Content-Type': 'application/json',
+      },
+    });
+
+    const text = await response.text();
+    if (!response.ok) {
+      throw new Error(`Shopify ${response.status} ${response.statusText} :: ${text.slice(0, 400)}`);
+    }
+
+    const data = JSON.parse(text);
+    const linkHeader = response.headers.get('link') || response.headers.get('Link') || '';
+    let nextPageInfo: string | null = null;
+    let hasNextPage = false;
+
+    // Parsear header Link para obtener page_info
+    if (linkHeader && /rel="next"/i.test(linkHeader)) {
+      const match = linkHeader.match(/<([^>]+)>;\s*rel="next"/i);
+      if (match) {
+        const nextUrl = new URL(match[1]);
+        nextPageInfo = nextUrl.searchParams.get('page_info');
+        hasNextPage = !!nextPageInfo;
+      }
+    }
+
+    return {
+      orders: data.orders ?? [],
+      nextPageInfo,
+      hasNextPage,
+    };
   }
 
   async getProducts(params: Record<string, any> = {}) {
-    const searchParams = new URLSearchParams(params).toString();
-    return this.restRequest(`/products.json?${searchParams}`);
+  const url = new URL(`https://${this.shopDomain}/admin/api/${this.apiVersion}/products.json`);
+  Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, String(v)));
+
+  const response = await fetch(url.toString(), {
+    headers: {
+      'X-Shopify-Access-Token': this.accessToken,
+      'User-Agent': 'LogisticManager/1.0 (+node)',
+      'Content-Type': 'application/json',
+    },
+  });
+
+  const text = await response.text();
+  if (!response.ok) {
+    throw new Error(`Shopify ${response.status} ${response.statusText} :: ${text.slice(0, 400)}`);
   }
+
+  const data = JSON.parse(text);
+  const linkHeader = response.headers.get('link') || response.headers.get('Link') || '';
+  let nextPageInfo: string | null = null;
+  let hasNextPage = false;
+
+  if (linkHeader && /rel="next"/i.test(linkHeader)) {
+    const match = linkHeader.match(/<([^>]+)>;\s*rel="next"/i);
+    if (match) {
+      const nextUrl = new URL(match[1]);
+      nextPageInfo = nextUrl.searchParams.get('page_info');
+      hasNextPage = !!nextPageInfo;
+    }
+  }
+
+  return {
+    products: data.products ?? [],
+    nextPageInfo,
+    hasNextPage,
+  };
+}
 
   async updateProduct(productId: string, productData: any) {
     return this.restRequest(`/products/${productId}.json`, 'PUT', { product: productData });
