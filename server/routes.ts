@@ -324,13 +324,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // ---------- Órdenes ----------
   app.get("/api/orders", requiereAutenticacion, async (req, res) => {
     try {
+      const page = parseInt((req.query.page as string) ?? "1", 10) || 1;
+      const pageSize = parseInt((req.query.pageSize as string) ?? "20", 10) || 20;
+      const fulfillment = (req.query.fulfillment as string) || "unfulfilled";
       const { channelId, managed, hasTicket } = req.query;
 
       const filtros: {
+        page: number;
+        pageSize: number;
+        fulfillment: "unfulfilled" | "fulfilled" | "any";
         channelId?: number;
         managed?: boolean;
         hasTicket?: boolean;
-      } = {};
+      } = {
+        page,
+        pageSize,
+        fulfillment:
+          fulfillment === "fulfilled" || fulfillment === "any"
+            ? (fulfillment as any)
+            : "unfulfilled",
+      };
 
       if (channelId !== undefined) {
         const channelIdNum = Number(channelId);
@@ -339,8 +352,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (managed !== undefined) filtros.managed = managed === "true";
       if (hasTicket !== undefined) filtros.hasTicket = hasTicket === "true";
 
-      const ordenes = await almacenamiento.getOrders(filtros);
-      res.json(ordenes);
+      const result = await almacenamiento.getOrdersPaginated(filtros);
+      res.json(result);
     } catch {
       res.status(500).json({ message: "No se pudieron obtener órdenes" });
     }
@@ -358,6 +371,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json(orden);
     } catch {
       res.status(500).json({ message: "No se pudo obtener la orden" });
+    }
+  });
+
+  app.get("/api/orders/:id/items", requiereAutenticacion, async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      if (Number.isNaN(id))
+        return res.status(400).json({ message: "ID de orden inválido" });
+      const items = await almacenamiento.getOrderItems(id);
+      res.json(items);
+    } catch {
+      res.status(500).json({ message: "No se pudieron obtener los ítems" });
     }
   });
 
