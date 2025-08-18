@@ -17,6 +17,7 @@ import {
   variants as tablaVariantes,
   orderItems as tablaItemsOrden,
   productComboItems as tablaItemsCombo,
+  externalProducts as tablaProductosExternos,
   // Tipos (alias en español)
   type User as Usuario,
   type InsertUser as InsertarUsuario,
@@ -44,10 +45,12 @@ import {
   type InsertOrderItem as InsertarItemOrden,
   type ProductComboItem as ItemCombo,
   type InsertProductComboItem as InsertarItemCombo,
+  type ExternalProduct as ProductoExterno,
+  type InsertExternalProduct as InsertarProductoExterno,
 } from "@shared/schema";
 
 import { db as baseDatos } from "./db";
-import { eq, and, desc, asc, sql, count } from "drizzle-orm";
+import { eq, and, desc, asc, sql, count, gte, lte } from "drizzle-orm";
 
 // --- Interfaz original (compatibilidad) ---
 export interface IStorage {
@@ -98,8 +101,9 @@ export interface IStorage {
   createShippingRule(rule: InsertarReglaEnvio): Promise<ReglaEnvio>;
 
   // Notas
-  getNotes(userId?: number): Promise<Nota[]>;
+  getNotesRange(from: Date, to: Date): Promise<Nota[]>;
   createNote(note: InsertarNota): Promise<Nota>;
+  updateNote(id: number, updates: Partial<InsertarNota>): Promise<Nota>;
   deleteNote(id: number): Promise<void>;
 
   // Nuevos métodos Shopify
@@ -116,13 +120,24 @@ export interface IStorage {
   updateVariant(id: number, updates: Partial<InsertarVariante>): Promise<Variante>;
 
   // Métricas de dashboard
-  getDashboardMetrics(): Promise<{
+  getDashboardMetricsRange(from: Date, to: Date): Promise<{
     totalOrders: number;
     unmanaged: number;
-    totalSales: number;
-    delayed: number;
-    channelStats: { channelId: number; orders: number; channelName: string; channelCode: string }[];
+    ordersByDay: { day: string; count: number }[];
   }>;
+
+  getOrdersPaginated(params: {
+    statusFilter: "unmanaged" | "managed" | "all";
+    channelId?: number;
+    page: number;
+    pageSize: number;
+  }): Promise<{ rows: any[]; total: number; page: number; pageSize: number }>;
+
+  getOrderItems(orderId: number): Promise<any[]>;
+
+  getProductsPaginated(shopId: number, page: number, pageSize: number): Promise<{ rows: any[]; total: number; page: number; pageSize: number }>;
+  getCatalogProductsPaginated(page: number, pageSize: number): Promise<{ rows: any[]; total: number; page: number; pageSize: number }>;
+  getExternalProductsPaginated(page: number, pageSize: number): Promise<{ rows: any[]; total: number; page: number; pageSize: number }>;
 }
 
 /**
@@ -383,18 +398,30 @@ export class DatabaseStorage implements IStorage {
   // ==== NOTAS ====
 
   /** Lista notas; si se pasa userId, filtra por usuario. */
-  async getNotes(userId?: number): Promise<Nota[]> {
-    const consulta = baseDatos.select().from(tablaNotas);
-    if (userId) {
-      return await consulta.where(eq(tablaNotas.userId, userId)).orderBy(desc(tablaNotas.createdAt));
-    }
-    return await consulta.orderBy(desc(tablaNotas.createdAt));
+  async getNotesRange(from: Date, to: Date): Promise<Nota[]> {
+    const fromStr = from.toISOString().slice(0, 10);
+    const toStr = to.toISOString().slice(0, 10);
+    return await baseDatos
+      .select()
+      .from(tablaNotas)
+      .where(and(gte(tablaNotas.date, fromStr), lte(tablaNotas.date, toStr)))
+      .orderBy(asc(tablaNotas.date));
   }
 
   /** Crea una nota. */
   async createNote(nota: InsertarNota): Promise<Nota> {
     const [nuevaNota] = await baseDatos.insert(tablaNotas).values(nota).returning();
     return nuevaNota;
+  }
+
+  /** Actualiza una nota. */
+  async updateNote(id: number, updates: Partial<InsertarNota>): Promise<Nota> {
+    const [nota] = await baseDatos
+      .update(tablaNotas)
+      .set(updates)
+      .where(eq(tablaNotas.id, id))
+      .returning();
+    return nota;
   }
 
   /** Elimina una nota por ID. */
@@ -490,58 +517,142 @@ export class DatabaseStorage implements IStorage {
   // ==== MÉTRICAS DE DASHBOARD ====
 
   /**
-   * Calcula métricas agregadas para el dashboard.
-   * - totalOrders: total de órdenes
-   * - unmanaged: órdenes no gestionadas (isManaged = false)
-   * - totalSales: suma de montos
-   * - delayed: usa status='unmanaged' como proxy de retrasadas
-   * - channelStats: totales por canal
+   * Métricas de dashboard entre dos fechas.
    */
-  // Métricas de dashboard
-  async getDashboardMetrics(): Promise<{
+  async getDashboardMetricsRange(from: Date, to: Date): Promise<{
     totalOrders: number;
     unmanaged: number;
-    totalSales: number;
-    delayed: number;
-    channelStats: { channelId: number; orders: number; channelName: string; channelCode: string }[];
+    ordersByDay: { day: string; count: number }[];
   }> {
-    // Total de órdenes
-    const [totalOrdersResult] = await baseDatos.select({ count: count() }).from(tablaOrdenes);
-    const totalOrders = totalOrdersResult.count as number;
-
-    // Órdenes no gestionadas
-    const [unmanagedResult] = await baseDatos
+    const totalResult = await baseDatos
       .select({ count: count() })
       .from(tablaOrdenes)
-      .where(eq(tablaOrdenes.isManaged, false));
-    const unmanaged = unmanagedResult.count as number;
-
-    // Ventas totales (SUM)
-    const [salesResult] = await baseDatos
-      .select({ total: sql`COALESCE(SUM(${tablaOrdenes.totalAmount}), 0)` })
-      .from(tablaOrdenes);
-    const totalSales = Number(salesResult.total) || 0;
-
-    // Retrasadas (proxy por status = 'unmanaged')
-    const [delayedResult] = await baseDatos
+      .where(and(gte(tablaOrdenes.createdAt, from), lte(tablaOrdenes.createdAt, to)));
+    const unmanagedResult = await baseDatos
       .select({ count: count() })
       .from(tablaOrdenes)
-      .where(eq(tablaOrdenes.status, "unmanaged"));
-    const delayed = delayedResult.count as number;
+      .where(
+        and(
+          or(isNull(tablaOrdenes.fulfillmentStatus), eq(tablaOrdenes.fulfillmentStatus, "UNFULFILLED")),
+          gte(tablaOrdenes.createdAt, from),
+          lte(tablaOrdenes.createdAt, to),
+        ),
+      );
+    const ordersByDay = await baseDatos.execute<{ day: string; count: number }>(
+      sql`SELECT DATE(created_at) AS day, COUNT(*)::int FROM orders WHERE created_at BETWEEN ${from} AND ${to} GROUP BY 1 ORDER BY 1`
+    );
+    return {
+      totalOrders: Number(totalResult[0]?.count ?? 0),
+      unmanaged: Number(unmanagedResult[0]?.count ?? 0),
+      ordersByDay: ordersByDay.rows ?? ordersByDay ?? [],
+    };
+  }
 
-    // Estadísticas por canal
-    const channelStats = await baseDatos
+  // ==== ÓRDENES PAGINADAS ====
+
+  async getOrdersPaginated(params: {
+    statusFilter: "unmanaged" | "managed" | "all";
+    channelId?: number;
+    page: number;
+    pageSize: number;
+  }): Promise<{ rows: any[]; total: number; page: number; pageSize: number }> {
+    const { statusFilter, channelId, page, pageSize } = params;
+    const conditions: any[] = [];
+    if (statusFilter === "unmanaged") {
+      conditions.push(
+        or(isNull(tablaOrdenes.fulfillmentStatus), eq(tablaOrdenes.fulfillmentStatus, "UNFULFILLED")),
+      );
+    } else if (statusFilter === "managed") {
+      conditions.push(eq(tablaOrdenes.fulfillmentStatus, "FULFILLED"));
+    }
+    if (channelId !== undefined) {
+      conditions.push(eq(tablaOrdenes.channelId, channelId));
+    }
+    const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+    const offset = (page - 1) * pageSize;
+    const rows = await baseDatos
       .select({
+        id: tablaOrdenes.id,
+        name: tablaOrdenes.name,
+        customerName: tablaOrdenes.customerName,
         channelId: tablaOrdenes.channelId,
-        orders: count(),
-        channelName: tablaCanales.name,
-        channelCode: tablaCanales.code,
+        totalAmount: tablaOrdenes.totalAmount,
+        fulfillmentStatus: tablaOrdenes.fulfillmentStatus,
+        createdAt: tablaOrdenes.createdAt,
+        uiStatus: sql`CASE WHEN ${tablaOrdenes.fulfillmentStatus} IS NULL OR ${tablaOrdenes.fulfillmentStatus}='UNFULFILLED' THEN 'SIN_GESTIONAR' WHEN ${tablaOrdenes.fulfillmentStatus}='FULFILLED' THEN 'GESTIONADA' ELSE 'ERROR' END`,
       })
       .from(tablaOrdenes)
-      .innerJoin(tablaCanales, eq(tablaOrdenes.channelId, tablaCanales.id))
-      .groupBy(tablaOrdenes.channelId, tablaCanales.name, tablaCanales.code);
+      .where(whereClause as any)
+      .orderBy(desc(tablaOrdenes.createdAt))
+      .limit(pageSize)
+      .offset(offset);
+    const totalRes = await baseDatos
+      .select({ count: count() })
+      .from(tablaOrdenes)
+      .where(whereClause as any);
+    return { rows, total: Number(totalRes[0]?.count ?? 0), page, pageSize };
+  }
 
-    return { totalOrders, unmanaged, totalSales, delayed, channelStats };
+  // Items de una orden
+  async getOrderItems(orderId: number) {
+    return await baseDatos
+      .select({
+        id: tablaItemsOrden.id,
+        sku: tablaItemsOrden.sku,
+        quantity: tablaItemsOrden.quantity,
+        price: tablaItemsOrden.price,
+        title: tablaProductos.title,
+        vendor: tablaProductos.vendor,
+      })
+      .from(tablaItemsOrden)
+      .leftJoin(tablaProductos, eq(tablaProductos.id, tablaItemsOrden.productId))
+      .where(eq(tablaItemsOrden.orderId, orderId))
+      .orderBy(asc(tablaItemsOrden.id));
+  }
+
+  // Productos paginados por tienda
+  async getProductsPaginated(shopId: number, page: number, pageSize: number) {
+    const offset = (page - 1) * pageSize;
+    const rows = await baseDatos
+      .select()
+      .from(tablaProductos)
+      .where(eq(tablaProductos.shopId, shopId))
+      .orderBy(asc(tablaProductos.title))
+      .limit(pageSize)
+      .offset(offset);
+    const totalRes = await baseDatos
+      .select({ count: count() })
+      .from(tablaProductos)
+      .where(eq(tablaProductos.shopId, shopId));
+    return { rows, total: Number(totalRes[0]?.count ?? 0), page, pageSize };
+  }
+
+  async getCatalogProductsPaginated(page: number, pageSize: number) {
+    const offset = (page - 1) * pageSize;
+    const rows = await baseDatos
+      .select()
+      .from(tablaProductosCatalogo)
+      .orderBy(asc(tablaProductosCatalogo.name))
+      .limit(pageSize)
+      .offset(offset);
+    const totalRes = await baseDatos
+      .select({ count: count() })
+      .from(tablaProductosCatalogo);
+    return { rows, total: Number(totalRes[0]?.count ?? 0), page, pageSize };
+  }
+
+  async getExternalProductsPaginated(page: number, pageSize: number) {
+    const offset = (page - 1) * pageSize;
+    const rows = await baseDatos
+      .select()
+      .from(tablaProductosExternos)
+      .orderBy(asc(tablaProductosExternos.name))
+      .limit(pageSize)
+      .offset(offset);
+    const totalRes = await baseDatos
+      .select({ count: count() })
+      .from(tablaProductosExternos);
+    return { rows, total: Number(totalRes[0]?.count ?? 0), page, pageSize };
   }
 }
 

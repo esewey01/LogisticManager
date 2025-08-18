@@ -13,7 +13,7 @@ import Tickets from "@/pages/tickets";
 import Paqueteria from "@/pages/paqueteria";
 import AdminUsuarios from "@/pages/admin/usuarios";
 import Config from "@/pages/config";
-import ShopifyIntegration from "@/pages/ShopifyIntegration";
+import ProductsView from "@/pages/ProductsView";
 import AppLayout from "@/components/layout/AppLayout";
 
 function Router() {
@@ -44,7 +44,7 @@ function Router() {
         <Route path="/tickets" component={Tickets} />
         <Route path="/paqueteria" component={Paqueteria} />
         <Route path="/admin/usuarios" component={AdminUsuarios} />
-        <Route path="/shopify" component={ShopifyIntegration} />
+        <Route path="/productos" component={ProductsView} />
         <Route path="/config" component={Config} />
         <Route component={NotFound} />
       </Switch>

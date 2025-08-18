@@ -39,9 +39,9 @@ export default function Sidebar() {
       badge: null,
     },
     {
-      path: "/shopify",
-      icon: "fas fa-store",
-      label: "Shopify",
+      path: "/productos",
+      icon: "fas fa-boxes",
+      label: "Productos",
       badge: null,
     },
   ];

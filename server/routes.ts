@@ -308,41 +308,44 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // ---------- Dashboard ----------
-  app.get(
-    "/api/dashboard/metrics",
-    requiereAutenticacion,
-    async (_req, res) => {
-      try {
-        const metricas = await almacenamiento.getDashboardMetrics();
-        res.json(metricas);
-      } catch {
-        res.status(500).json({ message: "No se pudieron obtener métricas" });
-      }
-    },
-  );
+  app.get("/api/dashboard/metrics", requiereAutenticacion, async (req, res) => {
+    try {
+      const { from, to } = req.query;
+      const fromDate = from ? new Date(String(from)) : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+      const toDate = to ? new Date(String(to)) : new Date();
+      const metricas = await almacenamiento.getDashboardMetricsRange(fromDate, toDate);
+      res.json(metricas);
+    } catch {
+      res.status(500).json({ message: "No se pudieron obtener métricas" });
+    }
+  });
 
   // ---------- Órdenes ----------
   app.get("/api/orders", requiereAutenticacion, async (req, res) => {
     try {
-      const { channelId, managed, hasTicket } = req.query;
-
-      const filtros: {
-        channelId?: number;
-        managed?: boolean;
-        hasTicket?: boolean;
-      } = {};
-
-      if (channelId !== undefined) {
-        const channelIdNum = Number(channelId);
-        if (!Number.isNaN(channelIdNum)) filtros.channelId = channelIdNum;
-      }
-      if (managed !== undefined) filtros.managed = managed === "true";
-      if (hasTicket !== undefined) filtros.hasTicket = hasTicket === "true";
-
-      const ordenes = await almacenamiento.getOrders(filtros);
-      res.json(ordenes);
+      const statusFilter = (req.query.statusFilter as string) || "unmanaged";
+      const channelId = req.query.channelId && req.query.channelId !== "all" ? Number(req.query.channelId) : undefined;
+      const page = req.query.page ? Number(req.query.page) : 1;
+      const pageSize = req.query.pageSize ? Number(req.query.pageSize) : 15;
+      const data = await almacenamiento.getOrdersPaginated({
+        statusFilter: statusFilter as any,
+        channelId,
+        page,
+        pageSize,
+      });
+      res.json(data);
     } catch {
       res.status(500).json({ message: "No se pudieron obtener órdenes" });
+    }
+  });
+
+  app.get("/api/orders/:orderId/items", requiereAutenticacion, async (req, res) => {
+    try {
+      const orderId = Number(req.params.orderId);
+      const items = await almacenamiento.getOrderItems(orderId);
+      res.json(items);
+    } catch {
+      res.status(500).json({ message: "No se pudieron obtener items" });
     }
   });
 
@@ -441,7 +444,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // ---------- Notas ----------
   app.get("/api/notes", requiereAutenticacion, async (req: any, res) => {
     try {
-      const notas = await almacenamiento.getNotes(req.session.userId);
+      const { from, to } = req.query;
+      const fromDate = from ? new Date(String(from)) : new Date();
+      const toDate = to ? new Date(String(to)) : new Date();
+      const notas = await almacenamiento.getNotesRange(fromDate, toDate);
       res.json(notas);
     } catch {
       res.status(500).json({ message: "No se pudieron obtener notas" });
@@ -450,14 +456,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/notes", requiereAutenticacion, async (req: any, res) => {
     try {
-      const datosNota = insertNoteSchema.parse({
-        ...req.body,
-        userId: req.session.userId,
-      });
+      const datosNota = insertNoteSchema.parse(req.body);
       const nota = await almacenamiento.createNote(datosNota);
       res.status(201).json(nota);
     } catch {
       res.status(400).json({ message: "Datos de nota inválidos" });
+    }
+  });
+
+  app.put("/api/notes/:id", requiereAutenticacion, async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      if (Number.isNaN(id))
+        return res.status(400).json({ message: "ID de nota inválido" });
+      const nota = await almacenamiento.updateNote(id, req.body);
+      res.json(nota);
+    } catch {
+      res.status(500).json({ message: "No se pudo actualizar la nota" });
     }
   });
 
@@ -471,6 +486,41 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(204).send();
     } catch {
       res.status(500).json({ message: "No se pudo eliminar la nota" });
+    }
+  });
+
+  // ---------- Productos ----------
+  app.get("/api/products", requiereAutenticacion, async (req, res) => {
+    try {
+      const shopId = Number(req.query.shopId);
+      const page = req.query.page ? Number(req.query.page) : 1;
+      const pageSize = req.query.pageSize ? Number(req.query.pageSize) : 15;
+      const data = await almacenamiento.getProductsPaginated(shopId, page, pageSize);
+      res.json(data);
+    } catch {
+      res.status(500).json({ message: "No se pudieron obtener productos" });
+    }
+  });
+
+  app.get("/api/catalog-products", requiereAutenticacion, async (req, res) => {
+    try {
+      const page = req.query.page ? Number(req.query.page) : 1;
+      const pageSize = req.query.pageSize ? Number(req.query.pageSize) : 15;
+      const data = await almacenamiento.getCatalogProductsPaginated(page, pageSize);
+      res.json(data);
+    } catch {
+      res.status(500).json({ message: "No se pudieron obtener productos" });
+    }
+  });
+
+  app.get("/api/external-products", requiereAutenticacion, async (req, res) => {
+    try {
+      const page = req.query.page ? Number(req.query.page) : 1;
+      const pageSize = req.query.pageSize ? Number(req.query.pageSize) : 15;
+      const data = await almacenamiento.getExternalProductsPaginated(page, pageSize);
+      res.json(data);
+    } catch {
+      res.status(500).json({ message: "No se pudieron obtener productos" });
     }
   });
 

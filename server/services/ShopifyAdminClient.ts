@@ -29,9 +29,9 @@ export class ShopifyAdminClient {
   private shopDomain: string;
   private accessToken: string;
   private apiVersion: string;
-  private storeNumber: string;
+  private storeNumber: number;
 
-  constructor(storeParam: string = '1') {
+  constructor(storeParam: string = "1") {
     const credentials = getShopifyCredentials(storeParam);
     this.shopDomain = credentials.shop;
     this.accessToken = credentials.token;

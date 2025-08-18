@@ -36,7 +36,7 @@ aplicacion.use(express.urlencoded({ extended: true }));
 // ✅ Úsalo en DEV/Replit. Si quieres restringir, abajo dejo una versión con regex.
 aplicacion.use(
   cors({
-    origin: (origin, cb) => {
+    origin: (origin: string | undefined, cb: (err: Error | null, allow?: boolean) => void) => {
       // Permite sin Origin (curl, extensiones, etc.)
       if (!origin) return cb(null, true);
       // Refleja el origin para que el navegador acepte la cookie (no puede ser "*")

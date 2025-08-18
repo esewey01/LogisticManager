@@ -2,7 +2,7 @@
 // NOTA: Mantengo los mismos exports originales para no romper imports existentes.
 //       Además agrego alias en español (usuarios, marcas, etc.) por claridad.
 
-import { pgTable, serial, text, boolean, timestamp, integer, decimal } from "drizzle-orm/pg-core";
+import { pgTable, serial, text, boolean, timestamp, integer, decimal, date } from "drizzle-orm/pg-core";
 import { z } from "zod";
 
 // === USUARIOS ===
@@ -162,13 +162,12 @@ export type InsertShippingRule = typeof shippingRules.$inferInsert;
 // Notas privadas por usuario (cuaderno personal)
 export const notes = pgTable("notes", {
   id: serial("id").primaryKey(),
-  userId: integer("user_id").notNull(),           // referencia a users.id
+  date: date("date").notNull(),                  // fecha asociada a la nota
   content: text("content").notNull(),             // contenido de la nota
   createdAt: timestamp("created_at").defaultNow(),
-  updatedAt: timestamp("updated_at"),
 });
 export type Note = typeof notes.$inferSelect;
-export type InsertNote = typeof notes.$inferSelect;
+export type InsertNote = typeof notes.$inferInsert;
 
 // === PRODUCTOS SHOPIFY ===
 // Productos sincronizados desde Shopify por tienda
@@ -186,6 +185,16 @@ export const products = pgTable("products", {
 });
 export type Product = typeof products.$inferSelect;
 export type InsertProduct = typeof products.$inferInsert;
+
+// Productos externos
+export const externalProducts = pgTable("external_products", {
+  id: serial("id").primaryKey(),
+  sku: text("sku").notNull().unique(),
+  name: text("name").notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+export type ExternalProduct = typeof externalProducts.$inferSelect;
+export type InsertExternalProduct = typeof externalProducts.$inferInsert;
 
 // === VARIANTES DE PRODUCTOS ===
 // Variantes de productos Shopify (SKU, precio, inventario)
@@ -287,7 +296,7 @@ export const insertTicketSchema = z.object({
 });
 
 export const insertNoteSchema = z.object({
-  userId: z.number().int().positive("El ID de usuario debe ser un número positivo"),
+  date: z.string().min(1),
   content: z.string().min(1, "El contenido es obligatorio"),
 });
 
