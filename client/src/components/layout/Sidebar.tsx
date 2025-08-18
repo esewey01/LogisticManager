@@ -28,7 +28,7 @@ export default function Sidebar() {
     },
     {
       path: "/tickets",
-      icon: "fas fa-ticket-alt", 
+      icon: "fas fa-ticket-alt",
       label: "Tickets",
       badge: null,
     },
@@ -56,22 +56,22 @@ export default function Sidebar() {
     {
       path: "/config",
       icon: "fas fa-cog",
-      label: "Configuración", 
+      label: "Configuración",
       badge: null,
     },
   ];
 
   const NavItem = ({ item }: { item: typeof navItems[0] }) => {
     const isActive = location === item.path;
-    
+
     return (
       <Link href={item.path}>
-        <a
-          className={`flex items-center space-x-3 px-4 py-3 rounded-lg transition-colors ${
-            isActive
+        {/* ✅ Link ya es un <a>, no necesitas envolverlo */}
+        <div
+          className={`flex items-center space-x-3 px-4 py-3 rounded-lg transition-colors cursor-pointer ${isActive
               ? "bg-primary text-white font-medium"
               : "text-gray-600 hover:bg-gray-100"
-          }`}
+            }`}
         >
           <i className={`${item.icon} w-5`}></i>
           <span>{item.label}</span>
@@ -83,7 +83,7 @@ export default function Sidebar() {
               {item.badge}
             </Badge>
           )}
-        </a>
+        </div>
       </Link>
     );
   };
@@ -95,7 +95,7 @@ export default function Sidebar() {
           {navItems.map((item) => (
             <NavItem key={item.path} item={item} />
           ))}
-          
+
           {user?.role === "admin" && (
             <>
               <div className="pt-4 border-t border-gray-200">

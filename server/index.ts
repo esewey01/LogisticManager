@@ -26,12 +26,6 @@ import { setupVite, serveStatic, log } from "./vite";
 // Crea la aplicación Express
 const aplicacion = express();
 
-// Middleware para parsear JSON en peticiones
-aplicacion.use(express.json());
-
-// Middleware para parsear datos de formularios (application/x-www-form-urlencoded)
-aplicacion.use(express.urlencoded({ extended: true }));
-
 // Permite credenciales y *refleja* el Origin que venga (requisito para cookies)
 // ✅ Úsalo en DEV/Replit. Si quieres restringir, abajo dejo una versión con regex.
 aplicacion.use(
@@ -45,6 +39,13 @@ aplicacion.use(
     credentials: true,
   }),
 );
+
+// Middleware para parsear JSON en peticiones
+aplicacion.use(express.json());
+
+// Middleware para parsear datos de formularios (application/x-www-form-urlencoded)
+aplicacion.use(express.urlencoded({ extended: true }));
+
 
 // Middleware de logging personalizado - registra todas las peticiones
 aplicacion.use((req, res, next) => {

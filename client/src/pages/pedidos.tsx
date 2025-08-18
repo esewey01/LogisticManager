@@ -6,6 +6,8 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
+import { apiRequest } from "@/lib/queryClient";
+import OrderDetailsModal from "@/components/modals/OrderDetailsModal";
 
 
 import {
@@ -18,31 +20,88 @@ import {
 } from "@/components/ui/table";
 
 
+type OrderRow = {
+  id: number | string
+  name: string
+  customerName: string | null
+  channelId: number | null
+  totalAmount: number | null
+  fulfillmentStatus: "FULFILLED" | "UNFULFILLED" | string | null
+  createdAt: string
+  uiStatus: "SIN_GESTIONAR" | "GESTIONADA" | "ERROR"
+  itemsCount: number
+};
+
+type OrdersResp = {
+  rows: OrderRow[]
+  total: number
+  page: number
+  pageSize: number
+};
+
+type Channel = { id: number | string; name: string; code?: string; color?: string; icon?: string };
 
 
 
-import { apiRequest } from "@/lib/queryClient";
-import OrderDetailsModal from "@/components/modals/OrderDetailsModal";
+
+
 
 export default function Pedidos() {
   const [search, setSearch] = useState("");
-  const [channelFilter, setChannelFilter] = useState("all");
-  const [selectedOrders, setSelectedOrders] = useState<string[]>([]);
-  const [selectedOrder, setSelectedOrder] = useState<any>(null);
+  const [statusFilter, setStatusFilter] = useState<"unmanaged" | "managed" | "all">("unmanaged");
+  const [channelFilter, setChannelFilter] = useState<string>("all");
+  const [selectedOrders, setSelectedOrders] = useState<Array<number | string>>([]);
+  const [selectedOrder, setSelectedOrder] = useState<OrderRow | null>(null);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(15);
   const queryClient = useQueryClient();
+  const [sortField, setSortField] = useState<keyof OrderRow | null>(null);
+  const [sortOrder, setSortOrder] = useState<"asc" | "desc" | null>(null);
 
-  const { data: orders = [], isLoading } = useQuery({
-    queryKey: ["/api/orders"],
+  // TODO: si agregas filtros/paginación, ponlos aquí y en queryKey
+
+  const { data: ordersResp, isLoading } = useQuery<OrdersResp>({
+    queryKey: [
+      "/api/orders",
+      { page, pageSize, statusFilter, channelFilter, search, sortField, sortOrder },
+    ],
+    queryFn: async () => {
+      const params = new URLSearchParams({
+        page: String(page),
+        pageSize: String(pageSize),
+        statusFilter,
+        ...(channelFilter !== "all" && { channelId: channelFilter }),
+        ...(search && { search }),
+        ...(sortField && { sortField }),
+        ...(sortOrder && { sortOrder }),
+      });
+
+      const res = await apiRequest("GET", `/api/orders?${params}`);
+      return res.json();
+    },
   });
 
-  const { data: channels = [] } = useQuery({
+  const orders: OrderRow[] = ordersResp?.rows ?? [];
+
+  const { data: channels = [] } = useQuery<Channel[]>({
     queryKey: ["/api/channels"],
+    queryFn: async () => {
+      const res = await apiRequest("GET", "/api/channels");
+      return res.json();
+    },
   });
 
-
+  const deleteOrderMutation = useMutation({
+    mutationFn: async ({ orderId, deleted }: { orderId: number | string; deleted: boolean }) => {
+      await apiRequest("PATCH", `/api/orders/${orderId}`, { status: deleted ? "DELETED" : null });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
+    },
+  });
 
   const updateOrderMutation = useMutation({
-    mutationFn: async ({ orderId, updates }: { orderId: string; updates: any }) => {
+    mutationFn: async ({ orderId, updates }: { orderId: number | string; updates: any }) => {
       await apiRequest("PATCH", `/api/orders/${orderId}`, updates);
     },
     onSuccess: () => {
@@ -51,20 +110,26 @@ export default function Pedidos() {
     },
   });
 
-  const filteredOrders = orders.filter((order: any) => {
-    const matchesSearch = 
-      order.customerName.toLowerCase().includes(search.toLowerCase()) ||
-      order.externalId?.toLowerCase().includes(search.toLowerCase()) ||
-      JSON.stringify(order.products).toLowerCase().includes(search.toLowerCase());
-    
-    const matchesChannel = channelFilter === "all" || order.channelId === channelFilter;
-    
+  // filtrar sobre el array ya “normalizado”
+  const filteredOrders = orders.filter((order) => {
+    const matchesSearch =
+      (order.customerName ?? "").toLowerCase().includes(search.toLowerCase()) ||
+      (order.name ?? "").toLowerCase().includes(search.toLowerCase());
+
+    const matchesChannel =
+      channelFilter === "all" || String(order.channelId) === String(channelFilter);
+
     return matchesSearch && matchesChannel;
   });
 
+  const getChannelInfo = (channelId: number | string) => {
+    const channel = channels.find((c) => String(c.id) === String(channelId));
+    return channel || { code: "N/A", name: "Desconocido", color: "#6B7280", icon: "fas fa-circle" };
+  };
+
   const handleSelectOrder = (orderId: string, checked: boolean) => {
-    setSelectedOrders(prev => 
-      checked 
+    setSelectedOrders(prev =>
+      checked
         ? [...prev, orderId]
         : prev.filter(id => id !== orderId)
     );
@@ -84,10 +149,6 @@ export default function Pedidos() {
     setSelectedOrders([]);
   };
 
-  const getChannelInfo = (channelId: string) => {
-    const channel = channels.find((c: any) => c.id === channelId);
-    return channel || { code: "N/A", name: "Desconocido", color: "#6B7280", icon: "fas fa-circle" };
-  };
 
   if (isLoading) {
     return (
@@ -97,7 +158,7 @@ export default function Pedidos() {
     );
   }
 
-  
+
 
   return (
     <div>
@@ -120,6 +181,19 @@ export default function Pedidos() {
                   className="w-full"
                 />
               </div>
+
+              <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as any)}>
+                <SelectTrigger className="w-full sm:w-56">
+                  <SelectValue placeholder="Estado de gestión" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="unmanaged">Sin Gestionar</SelectItem>
+                  <SelectItem value="managed">Gestionados</SelectItem>
+                  <SelectItem value="all">Todos</SelectItem>
+                </SelectContent>
+              </Select>
+
+
               <Select value={channelFilter} onValueChange={setChannelFilter}>
                 <SelectTrigger className="w-full sm:w-48">
                   <SelectValue placeholder="Filtrar por canal" />
@@ -154,7 +228,7 @@ export default function Pedidos() {
       <Card>
         <CardHeader>
           <CardTitle>
-            Pedidos ({filteredOrders.length})
+            Pedidos Cargados({filteredOrders.length})
           </CardTitle>
         </CardHeader>
         <CardContent>
@@ -167,7 +241,27 @@ export default function Pedidos() {
                     onCheckedChange={handleSelectAll}
                   />
                 </TableHead>
-                <TableHead>ID</TableHead>
+                <TableHead>
+                  <Button
+                    variant="ghost"
+                    className="hover:bg-transparent p-0 h-auto font-semibold"
+                    onClick={() => {
+                      if (sortField === "name") {
+                        setSortOrder(sortOrder === "asc" ? "desc" : "asc");
+                      } else {
+                        setSortField("name");
+                        setSortOrder("asc");
+                      }
+                    }}
+                  >
+                    Nombre
+                    {sortField === "name" && (
+                      <span className="ml-1">
+                        {sortOrder === "asc" ? " 🔼" : " 🔽"}
+                      </span>
+                    )}
+                  </Button>
+                </TableHead>
                 <TableHead>Cliente</TableHead>
                 <TableHead>Canal</TableHead>
                 <TableHead>Productos</TableHead>
@@ -181,9 +275,10 @@ export default function Pedidos() {
               {filteredOrders.map((order: any) => {
                 const channel = getChannelInfo(order.channelId);
                 const products = Array.isArray(order.products) ? order.products : [];
-                
+
                 return (
-                  <TableRow key={order.id}>
+
+                  <TableRow key={order.id} className={order.status === 'DELETED' ? 'opacity-60 line-through' : ''}>
                     <TableCell>
                       <Checkbox
                         checked={selectedOrders.includes(order.id)}
@@ -191,11 +286,11 @@ export default function Pedidos() {
                       />
                     </TableCell>
                     <TableCell className="font-medium">
-                      {order.externalId || (order.orderId ? String(order.orderId).slice(-6) : String(order.id).slice(-6))}
+                      {order.name ?? String(order.id)}  {/* ✅ Nombre del pedido o ID si no existe */}
                     </TableCell>
                     <TableCell>{order.customerName}</TableCell>
                     <TableCell>
-                      <Badge 
+                      <Badge
                         style={{ backgroundColor: `${channel.color}20`, color: channel.color }}
                         className="border-0"
                       >
@@ -205,7 +300,7 @@ export default function Pedidos() {
                     </TableCell>
                     <TableCell>
                       <div className="flex items-center space-x-1">
-                        <span>{products.length} items</span>
+                        <span>{order.itemsCount} items</span>
                         {order.isCombo && (
                           <Badge variant="secondary" className="text-xs">
                             <i className="fas fa-box mr-1"></i>
@@ -216,10 +311,17 @@ export default function Pedidos() {
                     </TableCell>
                     <TableCell>${Number(order.totalAmount).toFixed(2)}</TableCell>
                     <TableCell>
-                      <Badge variant={order.isManaged ? "default" : "destructive"}>
-                        {order.isManaged ? "Gestionado" : "Sin gestionar"}
-                      </Badge>
+                      {order.uiStatus === "GESTIONADA" && (
+                        <Badge variant="default">Gestionada</Badge>
+                      )}
+                      {order.uiStatus === "SIN_GESTIONAR" && (
+                        <Badge variant="destructive">Sin gestionar</Badge>
+                      )}
+                      {order.uiStatus === "ERROR" && (
+                        <Badge variant="outline" className="border-red-500 text-red-600">Error</Badge>
+                      )}
                     </TableCell>
+
                     <TableCell>
                       {new Date(order.createdAt).toLocaleDateString()}
                     </TableCell>
@@ -243,9 +345,28 @@ export default function Pedidos() {
                             disabled={updateOrderMutation.isPending}
                           >
                             <i className="fas fa-check mr-1"></i>
-                            Gestionar
+                            {/* Gestionar */}
                           </Button>
                         )}
+                        <Button
+                          size="sm"
+                          variant={order.status === 'DELETED' ? 'outline' : 'destructive'}
+                          onClick={() => deleteOrderMutation.mutate({ orderId: order.id, deleted: order.status !== 'DELETED' })}
+                          disabled={deleteOrderMutation.isPending}
+                        >
+                          {order.status === 'DELETED' ? (
+                            <>
+                              <i className="fas fa-undo mr-1"></i>
+                              {/* Restaurar */}
+                            </>
+                          ) : (
+                            <>
+                              <i className="fas fa-trash mr-1"></i>
+                              {/* Borrar */}
+                            </>
+                          )}
+                        </Button>
+
                       </div>
                     </TableCell>
                   </TableRow>
@@ -253,6 +374,64 @@ export default function Pedidos() {
               })}
             </TableBody>
           </Table>
+
+          {ordersResp && (
+            <div className="flex items-center justify-between mt-4 text-sm">
+              <div className="text-gray-600">
+                Mostrando {(page - 1) * pageSize + 1}–
+                {Math.min(page * pageSize, ordersResp.total)} de {ordersResp.total} pedidos
+              </div>
+
+              <div className="flex items-center space-x-4">
+                {/* Selector de tamaño */}
+                <div className="flex items-center space-x-2">
+                  <label htmlFor="pageSize">Filas:</label>
+                  <Select
+                    value={String(pageSize)}
+                    onValueChange={(v) => {
+                      setPageSize(Number(v));
+                      setPage(1); // Reset a página 1 al cambiar tamaño
+                    }}
+                  >
+                    <SelectTrigger id="pageSize" className="w-20">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="15">15</SelectItem>
+                      <SelectItem value="30">30</SelectItem>
+                      <SelectItem value="50">50</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {/* Botones de paginación */}
+                <div className="flex items-center space-x-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setPage((p) => Math.max(1, p - 1))}
+                    disabled={page === 1}
+                  >
+                    Anterior
+                  </Button>
+                  <span className="px-2">
+                    Página {page} de {Math.ceil(ordersResp.total / pageSize)}
+                  </span>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      const totalPages = Math.ceil(ordersResp.total / pageSize);
+                      setPage((p) => Math.min(totalPages, p + 1));
+                    }}
+                    disabled={page >= Math.ceil(ordersResp.total / pageSize)}
+                  >
+                    Siguiente
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
 
           {filteredOrders.length === 0 && (
             <div className="text-center py-8">

@@ -172,12 +172,69 @@ var ShopifyAdminClient = class {
     return this.restRequest("/orders/count.json");
   }
   async getOrders(params = {}) {
-    const searchParams = new URLSearchParams(params).toString();
-    return this.restRequest(`/orders.json?${searchParams}`);
+    const { shopDomain, accessToken, apiVersion } = this;
+    const url = new URL(`https://${shopDomain}/admin/api/${apiVersion}/orders.json`);
+    Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, String(v)));
+    const response = await fetch(url.toString(), {
+      headers: {
+        "X-Shopify-Access-Token": accessToken,
+        "User-Agent": "LogisticManager/1.0 (+node)",
+        "Content-Type": "application/json"
+      }
+    });
+    const text2 = await response.text();
+    if (!response.ok) {
+      throw new Error(`Shopify ${response.status} ${response.statusText} :: ${text2.slice(0, 400)}`);
+    }
+    const data = JSON.parse(text2);
+    const linkHeader = response.headers.get("link") || response.headers.get("Link") || "";
+    let nextPageInfo = null;
+    let hasNextPage = false;
+    if (linkHeader && /rel="next"/i.test(linkHeader)) {
+      const match = linkHeader.match(/<([^>]+)>;\s*rel="next"/i);
+      if (match) {
+        const nextUrl = new URL(match[1]);
+        nextPageInfo = nextUrl.searchParams.get("page_info");
+        hasNextPage = !!nextPageInfo;
+      }
+    }
+    return {
+      orders: data.orders ?? [],
+      nextPageInfo,
+      hasNextPage
+    };
   }
   async getProducts(params = {}) {
-    const searchParams = new URLSearchParams(params).toString();
-    return this.restRequest(`/products.json?${searchParams}`);
+    const url = new URL(`https://${this.shopDomain}/admin/api/${this.apiVersion}/products.json`);
+    Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, String(v)));
+    const response = await fetch(url.toString(), {
+      headers: {
+        "X-Shopify-Access-Token": this.accessToken,
+        "User-Agent": "LogisticManager/1.0 (+node)",
+        "Content-Type": "application/json"
+      }
+    });
+    const text2 = await response.text();
+    if (!response.ok) {
+      throw new Error(`Shopify ${response.status} ${response.statusText} :: ${text2.slice(0, 400)}`);
+    }
+    const data = JSON.parse(text2);
+    const linkHeader = response.headers.get("link") || response.headers.get("Link") || "";
+    let nextPageInfo = null;
+    let hasNextPage = false;
+    if (linkHeader && /rel="next"/i.test(linkHeader)) {
+      const match = linkHeader.match(/<([^>]+)>;\s*rel="next"/i);
+      if (match) {
+        const nextUrl = new URL(match[1]);
+        nextPageInfo = nextUrl.searchParams.get("page_info");
+        hasNextPage = !!nextPageInfo;
+      }
+    }
+    return {
+      products: data.products ?? [],
+      nextPageInfo,
+      hasNextPage
+    };
   }
   async updateProduct(productId, productData) {
     return this.restRequest(`/products/${productId}.json`, "PUT", { product: productData });
@@ -202,6 +259,7 @@ __export(schema_exports, {
   carriers: () => carriers,
   catalogProducts: () => catalogProducts,
   channels: () => channels,
+  externalProducts: () => externalProducts,
   insertNoteSchema: () => insertNoteSchema,
   insertOrderSchema: () => insertOrderSchema,
   insertProductSchema: () => insertProductSchema,
@@ -225,7 +283,7 @@ __export(schema_exports, {
   usuarios: () => users,
   variants: () => variants
 });
-import { pgTable, serial, text, boolean, timestamp, integer, decimal } from "drizzle-orm/pg-core";
+import { pgTable, serial, text, boolean, timestamp, integer, decimal, date } from "drizzle-orm/pg-core";
 import { z } from "zod";
 var users = pgTable("users", {
   id: serial("id").primaryKey(),
@@ -261,7 +319,7 @@ var catalogProducts = pgTable("catalog_products", {
   // SKU único
   brandId: integer("brand_id").notNull(),
   // referencia a brands.id (no FK explícita aquí)
-  name: text("name").notNull(),
+  nombreProducto: text("name").notNull(),
   // nombre del producto
   description: text("description"),
   // descripción (opcional)
@@ -388,12 +446,11 @@ var shippingRules = pgTable("shipping_rules", {
 });
 var notes = pgTable("notes", {
   id: serial("id").primaryKey(),
-  userId: integer("user_id").notNull(),
-  // referencia a users.id
+  date: date("date").notNull(),
+  // fecha asociada a la nota
   content: text("content").notNull(),
   // contenido de la nota
-  createdAt: timestamp("created_at").defaultNow(),
-  updatedAt: timestamp("updated_at")
+  createdAt: timestamp("created_at").defaultNow()
 });
 var products = pgTable("products", {
   id: serial("id").primaryKey(),
@@ -413,6 +470,12 @@ var products = pgTable("products", {
   // etiquetas (array)
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at")
+});
+var externalProducts = pgTable("external_products", {
+  id: serial("id").primaryKey(),
+  sku: text("sku").notNull().unique(),
+  productName: text("name").notNull(),
+  createdAt: timestamp("created_at").defaultNow()
 });
 var variants = pgTable("variants", {
   id: serial("id").primaryKey(),
@@ -509,7 +572,7 @@ var insertTicketSchema = z.object({
   notes: z.string().optional()
 });
 var insertNoteSchema = z.object({
-  userId: z.number().int().positive("El ID de usuario debe ser un n\xFAmero positivo"),
+  date: z.string().min(1),
   content: z.string().min(1, "El contenido es obligatorio")
 });
 
@@ -526,60 +589,60 @@ var pool = new Pool({
 });
 var u = new URL(process.env.DATABASE_URL);
 console.log("[DB] Conectando a:", u.hostname);
-var db = drizzle(pool, { schema: schema_exports });
+var db2 = drizzle(pool, { schema: schema_exports });
 
 // server/storage.ts
-import { eq, and, desc, asc, sql, count } from "drizzle-orm";
+import { eq, and, or, isNull, desc, asc, sql, count, gte, lte } from "drizzle-orm";
 var DatabaseStorage = class {
   // ==== USUARIOS ====
   /** Obtiene un usuario por su ID. */
   async getUser(id) {
-    const [usuario] = await db.select().from(users).where(eq(users.id, id));
+    const [usuario] = await db2.select().from(users).where(eq(users.id, id));
     return usuario;
   }
   /** Busca un usuario por correo electrónico. */
   async getUserByEmail(email) {
-    const [usuario] = await db.select().from(users).where(eq(users.email, email));
+    const [usuario] = await db2.select().from(users).where(eq(users.email, email));
     return usuario;
   }
   /** Crea un nuevo usuario. */
   async createUser(datos) {
-    const [usuario] = await db.insert(users).values(datos).returning();
+    const [usuario] = await db2.insert(users).values(datos).returning();
     return usuario;
   }
   /** Actualiza campos de un usuario existente. */
   async updateUser(id, updates) {
-    const [usuario] = await db.update(users).set({ ...updates, updatedAt: /* @__PURE__ */ new Date() }).where(eq(users.id, id)).returning();
+    const [usuario] = await db2.update(users).set({ ...updates, updatedAt: /* @__PURE__ */ new Date() }).where(eq(users.id, id)).returning();
     return usuario;
   }
   /** Lista todos los usuarios ordenados por correo. */
   async getAllUsers() {
-    return await db.select().from(users).orderBy(asc(users.email));
+    return await db2.select().from(users).orderBy(asc(users.email));
   }
   // ==== MARCAS ====
   /** Devuelve las marcas activas ordenadas por nombre. */
   async getBrands() {
-    return await db.select().from(brands).where(eq(brands.isActive, true)).orderBy(asc(brands.name));
+    return await db2.select().from(brands).where(eq(brands.isActive, true)).orderBy(asc(brands.name));
   }
   /** Obtiene una marca por ID. */
   async getBrand(id) {
-    const [marca] = await db.select().from(brands).where(eq(brands.id, id));
+    const [marca] = await db2.select().from(brands).where(eq(brands.id, id));
     return marca;
   }
   /** Crea una nueva marca. */
   async createBrand(datos) {
-    const [marcaNueva] = await db.insert(brands).values(datos).returning();
+    const [marcaNueva] = await db2.insert(brands).values(datos).returning();
     return marcaNueva;
   }
   /** Actualiza una marca. */
   async updateBrand(id, updates) {
-    const [marca] = await db.update(brands).set(updates).where(eq(brands.id, id)).returning();
+    const [marca] = await db2.update(brands).set(updates).where(eq(brands.id, id)).returning();
     return marca;
   }
   // ==== CATÁLOGO ====
   /** Lista productos de catálogo; puede filtrar por ID de marca. */
   async getCatalogProducts(brandId) {
-    const consulta = db.select().from(catalogProducts);
+    const consulta = db2.select().from(catalogProducts);
     if (brandId) {
       return await consulta.where(eq(catalogProducts.brandId, brandId)).orderBy(asc(catalogProducts.sku));
     }
@@ -587,42 +650,42 @@ var DatabaseStorage = class {
   }
   /** Crea un producto de catálogo. */
   async createCatalogProduct(datos) {
-    const [productoNuevo] = await db.insert(catalogProducts).values(datos).returning();
+    const [productoNuevo] = await db2.insert(catalogProducts).values(datos).returning();
     return productoNuevo;
   }
   /** Actualiza un producto de catálogo. */
   async updateCatalogProduct(id, updates) {
-    const [producto] = await db.update(catalogProducts).set({ ...updates, updatedAt: /* @__PURE__ */ new Date() }).where(eq(catalogProducts.id, id)).returning();
+    const [producto] = await db2.update(catalogProducts).set({ ...updates, updatedAt: /* @__PURE__ */ new Date() }).where(eq(catalogProducts.id, id)).returning();
     return producto;
   }
   // ==== CANALES ====
   /** Devuelve canales activos ordenados por nombre. */
   async getChannels() {
-    return await db.select().from(channels).where(eq(channels.isActive, true)).orderBy(asc(channels.name));
+    return await db2.select().from(channels).where(eq(channels.isActive, true)).orderBy(asc(channels.name));
   }
   /** Obtiene un canal por ID. */
   async getChannel(id) {
-    const [canal] = await db.select().from(channels).where(eq(channels.id, id));
+    const [canal] = await db2.select().from(channels).where(eq(channels.id, id));
     return canal;
   }
   /** Crea un canal. */
   async createChannel(datos) {
-    const [canalNuevo] = await db.insert(channels).values(datos).returning();
+    const [canalNuevo] = await db2.insert(channels).values(datos).returning();
     return canalNuevo;
   }
   // ==== PAQUETERÍAS ====
   /** Devuelve paqueterías activas ordenadas por nombre. */
   async getCarriers() {
-    return await db.select().from(carriers).where(eq(carriers.isActive, true)).orderBy(asc(carriers.name));
+    return await db2.select().from(carriers).where(eq(carriers.isActive, true)).orderBy(asc(carriers.name));
   }
   /** Obtiene una paquetería por ID. */
   async getCarrier(id) {
-    const [paq] = await db.select().from(carriers).where(eq(carriers.id, id));
+    const [paq] = await db2.select().from(carriers).where(eq(carriers.id, id));
     return paq;
   }
   /** Crea una paquetería. */
   async createCarrier(datos) {
-    const [paqueteriaNueva] = await db.insert(carriers).values(datos).returning();
+    const [paqueteriaNueva] = await db2.insert(carriers).values(datos).returning();
     return paqueteriaNueva;
   }
   // ==== ÓRDENES ====
@@ -633,168 +696,249 @@ var DatabaseStorage = class {
     if (filtros?.managed !== void 0) condiciones.push(eq(orders.isManaged, filtros.managed));
     if (filtros?.hasTicket !== void 0) condiciones.push(eq(orders.hasTicket, filtros.hasTicket));
     if (condiciones.length > 0) {
-      return await db.select().from(orders).where(and(...condiciones)).orderBy(desc(orders.createdAt));
+      return await db2.select().from(orders).where(and(...condiciones)).orderBy(desc(orders.createdAt));
     }
-    return await db.select().from(orders).orderBy(desc(orders.createdAt));
+    return await db2.select().from(orders).orderBy(desc(orders.createdAt));
   }
   /** Obtiene una orden por ID. */
   async getOrder(id) {
-    const [orden] = await db.select().from(orders).where(eq(orders.id, id));
+    const [orden] = await db2.select().from(orders).where(eq(orders.id, id));
     return orden;
   }
   /** Crea una orden. */
   async createOrder(datos) {
-    const [ordenNueva] = await db.insert(orders).values(datos).returning();
+    const [ordenNueva] = await db2.insert(orders).values(datos).returning();
     return ordenNueva;
   }
   /** Actualiza una orden. */
   async updateOrder(id, updates) {
-    const [orden] = await db.update(orders).set({ ...updates, updatedAt: /* @__PURE__ */ new Date() }).where(eq(orders.id, id)).returning();
+    const [orden] = await db2.update(orders).set({ ...updates, updatedAt: /* @__PURE__ */ new Date() }).where(eq(orders.id, id)).returning();
     return orden;
   }
   /** Lista órdenes por nombre de cliente. */
   async getOrdersByCustomer(nombreCliente) {
-    return await db.select().from(orders).where(eq(orders.customerName, nombreCliente)).orderBy(desc(orders.createdAt));
+    return await db2.select().from(orders).where(eq(orders.customerName, nombreCliente)).orderBy(desc(orders.createdAt));
   }
   /** Obtiene una orden por ID de Shopify y tienda. */
   async getOrderByShopifyId(shopifyId, shopId) {
-    const [orden] = await db.select().from(orders).where(and(eq(orders.idShopify, shopifyId), eq(orders.shopId, shopId)));
+    const [orden] = await db2.select().from(orders).where(and(eq(orders.idShopify, shopifyId), eq(orders.shopId, shopId)));
     return orden;
   }
   // ==== TICKETS ====
   /** Lista tickets ordenados por fecha de creación descendente. */
   async getTickets() {
-    return await db.select().from(tickets).orderBy(desc(tickets.createdAt));
+    return await db2.select().from(tickets).orderBy(desc(tickets.createdAt));
   }
   /** Obtiene un ticket por ID. */
   async getTicket(id) {
-    const [ticket] = await db.select().from(tickets).where(eq(tickets.id, id));
+    const [ticket] = await db2.select().from(tickets).where(eq(tickets.id, id));
     return ticket;
   }
   /** Crea un ticket. */
   async createTicket(datos) {
-    const [ticketNuevo] = await db.insert(tickets).values(datos).returning();
+    const [ticketNuevo] = await db2.insert(tickets).values(datos).returning();
     return ticketNuevo;
   }
   /** Actualiza un ticket. */
   async updateTicket(id, updates) {
-    const [ticket] = await db.update(tickets).set({ ...updates, updatedAt: /* @__PURE__ */ new Date() }).where(eq(tickets.id, id)).returning();
+    const [ticket] = await db2.update(tickets).set({ ...updates, updatedAt: /* @__PURE__ */ new Date() }).where(eq(tickets.id, id)).returning();
     return ticket;
   }
   // ==== REGLAS DE ENVÍO ====
   /** Devuelve reglas de envío activas. */
   async getShippingRules() {
-    return await db.select().from(shippingRules).where(eq(shippingRules.isActive, true));
+    return await db2.select().from(shippingRules).where(eq(shippingRules.isActive, true));
   }
   /** Crea una regla de envío. */
   async createShippingRule(regla) {
-    const [nuevaRegla] = await db.insert(shippingRules).values(regla).returning();
+    const [nuevaRegla] = await db2.insert(shippingRules).values(regla).returning();
     return nuevaRegla;
   }
   // ==== NOTAS ====
   /** Lista notas; si se pasa userId, filtra por usuario. */
-  async getNotes(userId) {
-    const consulta = db.select().from(notes);
-    if (userId) {
-      return await consulta.where(eq(notes.userId, userId)).orderBy(desc(notes.createdAt));
-    }
-    return await consulta.orderBy(desc(notes.createdAt));
+  async getNotesRange(from, to) {
+    const fromStr = from.toISOString().slice(0, 10);
+    const toStr = to.toISOString().slice(0, 10);
+    return await db2.select().from(notes).where(and(gte(notes.date, fromStr), lte(notes.date, toStr))).orderBy(asc(notes.date));
   }
   /** Crea una nota. */
   async createNote(nota) {
-    const [nuevaNota] = await db.insert(notes).values(nota).returning();
+    const [nuevaNota] = await db2.insert(notes).values(nota).returning();
     return nuevaNota;
+  }
+  /** Actualiza una nota. */
+  async updateNote(id, updates) {
+    const [nota] = await db2.update(notes).set(updates).where(eq(notes.id, id)).returning();
+    return nota;
   }
   /** Elimina una nota por ID. */
   async deleteNote(id) {
-    await db.delete(notes).where(eq(notes.id, id));
+    await db2.delete(notes).where(eq(notes.id, id));
   }
   // ==== NUEVOS MÉTODOS SHOPIFY ====
   /** Crea un item de orden. */
   async createOrderItem(datos) {
-    const [item] = await db.insert(orderItems).values(datos).returning();
+    const [item] = await db2.insert(orderItems).values(datos).returning();
     return item;
   }
   /** Lista productos por tienda (opcional). */
   async getProducts(shopId) {
     if (shopId !== void 0) {
-      return await db.select().from(products).where(eq(products.shopId, shopId)).orderBy(asc(products.title));
+      return await db2.select().from(products).where(eq(products.shopId, shopId)).orderBy(asc(products.title));
     }
-    return await db.select().from(products).orderBy(asc(products.title));
+    return await db2.select().from(products).orderBy(asc(products.title));
   }
   /** Obtiene un producto por ID. */
   async getProduct(id) {
-    const [producto] = await db.select().from(products).where(eq(products.id, id));
+    const [producto] = await db2.select().from(products).where(eq(products.id, id));
     return producto;
   }
   /** Obtiene un producto por ID de Shopify y tienda. */
   async getProductByShopifyId(shopifyId, shopId) {
-    const [producto] = await db.select().from(products).where(and(eq(products.idShopify, shopifyId), eq(products.shopId, shopId)));
+    const [producto] = await db2.select().from(products).where(and(eq(products.idShopify, shopifyId), eq(products.shopId, shopId)));
     return producto;
   }
   /** Crea un producto. */
   async createProduct(datos) {
-    const [producto] = await db.insert(products).values(datos).returning();
+    const [producto] = await db2.insert(products).values(datos).returning();
     return producto;
   }
   /** Actualiza un producto. */
   async updateProduct(id, updates) {
-    const [producto] = await db.update(products).set({ ...updates, updatedAt: /* @__PURE__ */ new Date() }).where(eq(products.id, id)).returning();
+    const [producto] = await db2.update(products).set({ ...updates, updatedAt: /* @__PURE__ */ new Date() }).where(eq(products.id, id)).returning();
     return producto;
   }
   /** Lista variantes por producto (opcional). */
   async getVariants(productId) {
     if (productId !== void 0) {
-      return await db.select().from(variants).where(eq(variants.productId, productId)).orderBy(asc(variants.sku));
+      return await db2.select().from(variants).where(eq(variants.productId, productId)).orderBy(asc(variants.sku));
     }
-    return await db.select().from(variants).orderBy(asc(variants.sku));
+    return await db2.select().from(variants).orderBy(asc(variants.sku));
   }
   /** Obtiene una variante por ID. */
   async getVariant(id) {
-    const [variante] = await db.select().from(variants).where(eq(variants.id, id));
+    const [variante] = await db2.select().from(variants).where(eq(variants.id, id));
     return variante;
   }
   /** Crea una variante. */
   async createVariant(datos) {
-    const [variante] = await db.insert(variants).values(datos).returning();
+    const [variante] = await db2.insert(variants).values(datos).returning();
     return variante;
   }
   /** Actualiza una variante. */
   async updateVariant(id, updates) {
-    const [variante] = await db.update(variants).set({ ...updates, updatedAt: /* @__PURE__ */ new Date() }).where(eq(variants.id, id)).returning();
+    const [variante] = await db2.update(variants).set({ ...updates, updatedAt: /* @__PURE__ */ new Date() }).where(eq(variants.id, id)).returning();
     return variante;
   }
   // ==== MÉTRICAS DE DASHBOARD ====
   /**
-   * Calcula métricas agregadas para el dashboard.
-   * - totalOrders: total de órdenes
-   * - unmanaged: órdenes no gestionadas (isManaged = false)
-   * - totalSales: suma de montos
-   * - delayed: usa status='unmanaged' como proxy de retrasadas
-   * - channelStats: totales por canal
+   * Métricas de dashboard entre dos fechas.
    */
-  // Métricas de dashboard
-  async getDashboardMetrics() {
-    const [totalOrdersResult] = await db.select({ count: count() }).from(orders);
-    const totalOrders = totalOrdersResult.count;
-    const [unmanagedResult] = await db.select({ count: count() }).from(orders).where(eq(orders.isManaged, false));
-    const unmanaged = unmanagedResult.count;
-    const [salesResult] = await db.select({ total: sql`COALESCE(SUM(${orders.totalAmount}), 0)` }).from(orders);
-    const totalSales = Number(salesResult.total) || 0;
-    const [delayedResult] = await db.select({ count: count() }).from(orders).where(eq(orders.status, "unmanaged"));
-    const delayed = delayedResult.count;
-    const channelStats = await db.select({
+  async getDashboardMetricsRange(from, to) {
+    const totalResult = await db2.select({ count: count() }).from(orders).where(and(gte(orders.createdAt, from), lte(orders.createdAt, to)));
+    const unmanagedResult = await db2.select({ count: count() }).from(orders).where(
+      and(
+        or(isNull(orders.fulfillmentStatus), eq(orders.fulfillmentStatus, "UNFULFILLED")),
+        gte(orders.createdAt, from),
+        lte(orders.createdAt, to)
+      )
+    );
+    const ordersByDay = await db2.execute(
+      sql`SELECT DATE(created_at) AS day, COUNT(*)::int FROM orders WHERE created_at BETWEEN ${from} AND ${to} GROUP BY 1 ORDER BY 1`
+    );
+    return {
+      totalOrders: Number(totalResult[0]?.count ?? 0),
+      unmanaged: Number(unmanagedResult[0]?.count ?? 0),
+      ordersByDay: ordersByDay.rows ?? ordersByDay ?? []
+    };
+  }
+  // ==== ÓRDENES PAGINADAS ====
+  async getOrdersPaginated(params) {
+    const { statusFilter, channelId, page, pageSize } = params;
+    const conds = [];
+    if (statusFilter === "unmanaged") {
+      conds.push(
+        or(isNull(orders.fulfillmentStatus), eq(orders.fulfillmentStatus, "UNFULFILLED"))
+      );
+    } else if (statusFilter === "managed") {
+      conds.push(eq(orders.fulfillmentStatus, "FULFILLED"));
+    }
+    if (channelId !== void 0) {
+      conds.push(eq(orders.channelId, channelId));
+    }
+    const whereClause = conds.length ? and(...conds) : void 0;
+    const offset = Math.max(0, (page - 1) * pageSize);
+    const baseSelect = db2.select({
+      id: orders.id,
+      name: orders.name,
+      customerName: orders.customerName,
       channelId: orders.channelId,
-      orders: count(),
-      channelName: channels.name,
-      channelCode: channels.code
-    }).from(orders).innerJoin(channels, eq(orders.channelId, channels.id)).groupBy(orders.channelId, channels.name, channels.code);
-    return { totalOrders, unmanaged, totalSales, delayed, channelStats };
+      totalAmount: orders.totalAmount,
+      fulfillmentStatus: orders.fulfillmentStatus,
+      createdAt: orders.createdAt,
+      itemsCount: sql`COUNT(${orderItems.id})`.as("items_count"),
+      uiStatus: sql`
+        CASE
+          WHEN ${orders.fulfillmentStatus} IS NULL OR ${orders.fulfillmentStatus} = 'UNFULFILLED' THEN 'SIN_GESTIONAR'
+          WHEN ${orders.fulfillmentStatus} = 'FULFILLED' THEN 'GESTIONADA'
+          ELSE 'ERROR'
+        END
+      `.as("ui_status")
+    }).from(orders).leftJoin(orderItems, eq(orderItems.orderId, orders.id));
+    const dataQ = whereClause ? baseSelect.where(whereClause) : baseSelect;
+    const rows = await dataQ.groupBy(
+      orders.id,
+      orders.name,
+      orders.customerName,
+      orders.channelId,
+      orders.totalAmount,
+      orders.fulfillmentStatus,
+      orders.createdAt
+    ).orderBy(desc(orders.createdAt)).limit(pageSize).offset(offset);
+    const baseCount = db2.select({ count: count() }).from(orders);
+    const countQ = whereClause ? baseCount.where(whereClause) : baseCount;
+    const totalRes = await countQ;
+    return { rows, page, pageSize, total: Number(totalRes[0]?.count ?? 0) };
+  }
+  // Items de una orden
+  async getOrderItems(orderId) {
+    return await db2.select({
+      id: orderItems.id,
+      sku: orderItems.sku,
+      quantity: orderItems.quantity,
+      price: orderItems.price,
+      title: products.title,
+      vendor: products.vendor
+    }).from(orderItems).leftJoin(products, eq(products.id, orderItems.productId)).where(eq(orderItems.orderId, orderId)).orderBy(asc(orderItems.id));
+  }
+  // Productos paginados por tienda
+  async getProductsPaginated(shopId, page, pageSize) {
+    const offset = (page - 1) * pageSize;
+    const rows = await db2.select().from(products).where(eq(products.shopId, shopId)).orderBy(asc(products.title)).limit(pageSize).offset(offset);
+    const totalRes = await db2.select({ count: count() }).from(products).where(eq(products.shopId, shopId));
+    return { rows, total: Number(totalRes[0]?.count ?? 0), page, pageSize };
+  }
+  async getCatalogProductsPaginated(page, pageSize) {
+    const offset = (page - 1) * pageSize;
+    const rows = await db2.select().from(catalogProducts).orderBy(asc(catalogProducts.nombreProducto)).limit(pageSize).offset(offset);
+    const totalRes = await db2.select({ count: count() }).from(catalogProducts);
+    return { rows, total: Number(totalRes[0]?.count ?? 0), page, pageSize };
+  }
+  async getExternalProductsPaginated(page, pageSize) {
+    const offset = (page - 1) * pageSize;
+    const rows = await db2.select().from(externalProducts).orderBy(asc(externalProducts.productName)).limit(pageSize).offset(offset);
+    const totalRes = await db2.select({ count: count() }).from(externalProducts);
+    return { rows, total: Number(totalRes[0]?.count ?? 0), page, pageSize };
   }
 };
 var storage = new DatabaseStorage();
 
 // server/services/OrderSyncService.ts
+import { eq as eq2, and as and2 } from "drizzle-orm";
+function pickDate(a, b) {
+  const raw = a ?? b ?? null;
+  return raw ? new Date(raw) : null;
+}
 var OrderSyncService = class {
   client;
   storeNumber;
@@ -811,42 +955,88 @@ var OrderSyncService = class {
     const last = o.customer?.last_name ?? null;
     const ship = o.shipping_address ?? void 0;
     return {
-      // Campos básicos existentes
-      orderId: idStr,
-      channelId: this.channelId,
-      customerName: first || last ? `${first ?? ""} ${last ?? ""}`.trim() : o.email || "Sin nombre",
-      totalAmount: o.total_price ?? null,
-      isManaged: false,
-      hasTicket: false,
-      status: "pending",
-      // Shopify
+      // Identificadores
       idShopify: idStr,
       shopId: this.storeNumber,
+      orderId: idStr,
+      channelId: this.channelId,
+      // Display/cliente
       name: o.name ?? null,
       orderNumber: o.order_number != null ? String(o.order_number) : null,
-      financialStatus: o.financial_status ?? null,
-      fulfillmentStatus: o.fulfillment_status ?? null,
-      currency: o.currency ?? null,
-      subtotalPrice: o.subtotal_price ?? null,
+      customerName: first || last ? `${first ?? ""} ${last ?? ""}`.trim() : o.email || "Sin nombre",
       customerEmail: o.email ?? null,
-      tags: o.tags ? o.tags.split(",").map((t) => t.trim()).filter(Boolean) : [],
-      // 👇 Estos 4 requieren columnas en tu schema (ver sección 2)
-      // Si aún no agregas esas columnas, comenta estas líneas.
-      createdAtShopify: o.created_at ? new Date(o.created_at) : null,
-      updatedAtShopify: o.updated_at ? new Date(o.updated_at) : null,
-      cancelReason: o.cancel_reason ?? null,
-      cancelledAt: o.cancelled_at ? new Date(o.cancelled_at) : null,
-      // Ya tienes estas columnas en tu schema:
       customerFirstName: first,
       customerLastName: last,
+      // Monetarios/estatus
+      currency: o.currency ?? null,
+      subtotalPrice: o.subtotal_price ?? null,
+      totalAmount: o.total_price ? Number(o.total_price) : null,
+      financialStatus: o.financial_status ?? null,
+      fulfillmentStatus: o.fulfillment_status ?? null,
+      status: "pending",
+      isManaged: false,
+      hasTicket: false,
+      // Tags (ARRAY text)
+      tags: o.tags ? o.tags.split(",").map((t) => t.trim()).filter(Boolean) : [],
+      // Envío
       shipName: ship?.name ?? null,
       shipPhone: ship?.phone ?? null,
       shipAddress1: ship?.address1 ?? null,
       shipCity: ship?.city ?? null,
       shipProvince: ship?.province ?? null,
       shipCountry: ship?.country ?? null,
-      shipZip: ship?.zip ?? null
+      shipZip: ship?.zip ?? null,
+      // 👇 Fechas/estados *reales* de Shopify (usa tus columnas nuevas)
+      shopifyCreatedAt: pickDate(o.created_at, o.createdAt),
+      shopifyUpdatedAt: pickDate(o.updated_at, o.updatedAt),
+      shopifyProcessedAt: pickDate(void 0, o.processedAt),
+      // REST no lo trae
+      shopifyClosedAt: pickDate(void 0, o.closedAt),
+      // REST no lo trae
+      shopifyCancelledAt: pickDate(o.cancelled_at, o.cancelledAt),
+      cancelReason: o.cancel_reason ?? null
     };
+  }
+  // === UPSERT idempotente por (id_shopify, shop_id) ===
+  async upsertOrderFromShopify(shopifyOrder) {
+    const row = this.convertShopifyOrder(shopifyOrder);
+    await db2.insert(orders).values(row).onConflictDoUpdate({
+      target: [orders.idShopify, orders.shopId],
+      set: {
+        // Identidad visual / monetarios / estatus
+        name: row.name,
+        orderNumber: row.orderNumber,
+        customerName: row.customerName,
+        customerEmail: row.customerEmail,
+        currency: row.currency,
+        subtotalPrice: row.subtotalPrice,
+        totalAmount: row.totalAmount,
+        financialStatus: row.financialStatus,
+        fulfillmentStatus: row.fulfillmentStatus,
+        status: row.status,
+        isManaged: row.isManaged,
+        hasTicket: row.hasTicket,
+        tags: row.tags,
+        // Envío
+        shipName: row.shipName,
+        shipPhone: row.shipPhone,
+        shipAddress1: row.shipAddress1,
+        shipCity: row.shipCity,
+        shipProvince: row.shipProvince,
+        shipCountry: row.shipCountry,
+        shipZip: row.shipZip,
+        // Fechas Shopify
+        shopifyCreatedAt: row.shopifyCreatedAt,
+        shopifyUpdatedAt: row.shopifyUpdatedAt,
+        shopifyProcessedAt: row.shopifyProcessedAt,
+        shopifyClosedAt: row.shopifyClosedAt,
+        shopifyCancelledAt: row.shopifyCancelledAt,
+        cancelReason: row.cancelReason
+        // updated_at => trigger
+      }
+    });
+    const [local] = await db2.select({ id: orders.id }).from(orders).where(and2(eq2(orders.idShopify, row.idShopify), eq2(orders.shopId, row.shopId))).limit(1);
+    return local?.id;
   }
   convertOrderItems(shopifyOrder, localOrderId) {
     return shopifyOrder.line_items.map((item) => ({
@@ -870,17 +1060,26 @@ var OrderSyncService = class {
       success: false,
       ordersProcessed: 0,
       errors: [],
-      hasNextPage: false
+      hasNextPage: false,
+      lastCursor: void 0
     };
     try {
-      const params = {
-        limit: Math.min(limit, 250),
-        status: "any",
-        //  trae line_items y datos útiles
-        fields: "id,name,order_number,email,created_at,updated_at,financial_status,fulfillment_status,currency,total_price,subtotal_price,tags,line_items,customer,shipping_address,cancel_reason,cancelled_at"
-      };
-      if (sinceDate) params.created_at_min = sinceDate;
-      if (cursor) params.page_info = cursor;
+      const firstPage = !cursor;
+      let params;
+      if (firstPage) {
+        params = {
+          limit: Math.min(limit, 250),
+          status: "any",
+          fields: "id,name,order_number,email,created_at,updated_at,financial_status,fulfillment_status,currency,total_price,subtotal_price,tags,line_items,customer,shipping_address,cancel_reason,cancelled_at"
+        };
+        if (sinceDate) params.created_at_min = sinceDate;
+      } else {
+        params = {
+          limit: Math.min(limit, 250),
+          page_info: cursor
+          // opcional: podrías omitir fields también (más seguro con Shopify REST)
+        };
+      }
       const response = await this.client.getOrders(params);
       const orders2 = response.orders || [];
       console.log(`Ordenes Obtenidas ${orders2.length} \xF3rdenes de tienda ${this.storeNumber}`);
@@ -908,7 +1107,8 @@ var OrderSyncService = class {
           result.errors.push(msg);
         }
       }
-      result.hasNextPage = orders2.length === params.limit;
+      result.hasNextPage = response.hasNextPage;
+      result.lastCursor = response.nextPageInfo || void 0;
       result.success = result.errors.length === 0;
       console.log(`\u2705 Backfill tienda ${this.storeNumber}: ${result.ordersProcessed} \xF3rdenes`);
       if (result.errors.length) console.log(`\u26A0\uFE0F ${result.errors.length} errores`);
@@ -926,7 +1126,8 @@ var OrderSyncService = class {
       success: false,
       ordersProcessed: 0,
       errors: [],
-      hasNextPage: false
+      hasNextPage: false,
+      lastCursor: void 0
     };
     try {
       const params = {
@@ -961,8 +1162,9 @@ var OrderSyncService = class {
           result.errors.push(msg);
         }
       }
+      result.hasNextPage = response.hasNextPage;
+      result.lastCursor = response.nextPageInfo || void 0;
       result.success = result.errors.length === 0;
-      result.hasNextPage = orders2.length === 100;
       console.log(`Sync incremental ok: ${result.ordersProcessed}`);
       return result;
     } catch (e) {
@@ -986,83 +1188,118 @@ var OrderSyncService = class {
 };
 
 // server/services/ProductService.ts
+import { eq as eq3 } from "drizzle-orm";
 var ProductService = class {
   client;
   storeNumber;
   constructor(storeParam = "1") {
     this.client = new ShopifyAdminClient(storeParam);
-    this.storeNumber = parseInt(storeParam);
+    this.storeNumber = parseInt(storeParam, 10);
   }
-  convertShopifyProduct(shopifyProduct) {
+  convertShopifyProduct(sp) {
+    const statusNorm = sp.status === "active" ? "active" : sp.status === "draft" ? "draft" : "draft";
     return {
-      idShopify: shopifyProduct.id,
+      idShopify: String(sp.id),
       shopId: this.storeNumber,
-      title: shopifyProduct.title,
-      vendor: shopifyProduct.vendor || null,
-      productType: shopifyProduct.product_type || null,
-      status: shopifyProduct.status,
-      tags: shopifyProduct.tags ? shopifyProduct.tags.split(", ").filter(Boolean) : []
+      title: sp.title,
+      vendor: sp.vendor ?? null,
+      productType: sp.product_type ?? null,
+      status: statusNorm,
+      // 'active' | 'draft'
+      tags: sp.tags ? sp.tags.split(",").map((t) => t.trim()).filter(Boolean) : []
     };
   }
-  convertShopifyVariant(shopifyVariant, localProductId) {
+  convertShopifyVariant(sv, localProductId) {
     return {
-      idShopify: shopifyVariant.id,
+      idShopify: String(sv.id),
       productId: localProductId,
-      sku: shopifyVariant.sku || null,
-      price: shopifyVariant.price || null,
-      compareAtPrice: shopifyVariant.compare_at_price || null,
-      barcode: shopifyVariant.barcode || null,
-      inventoryQty: shopifyVariant.inventory_quantity || 0
+      sku: sv.sku ?? null,
+      price: sv.price ?? null,
+      compareAtPrice: sv.compare_at_price ?? null,
+      barcode: sv.barcode ?? null,
+      inventoryQty: sv.inventory_quantity ?? 0
     };
   }
-  async syncProductsFromShopify(limit = 50) {
-    console.log(`\u{1F504} Sincronizando productos desde Shopify tienda ${this.storeNumber}`);
-    const result = {
-      success: false,
-      productsProcessed: 0,
-      errors: []
-    };
-    try {
-      const response = await this.client.getProducts({ limit });
-      const products2 = response.products || [];
-      console.log(`\u{1F4E6} Obtenidos ${products2.length} productos de Shopify`);
-      for (const shopifyProduct of products2) {
-        try {
-          const existingProduct = await storage.getProductByShopifyId(
-            shopifyProduct.id,
-            this.storeNumber
-          );
-          let localProduct;
-          if (existingProduct) {
-            const productData = this.convertShopifyProduct(shopifyProduct);
-            localProduct = await storage.updateProduct(existingProduct.id, productData);
-            console.log(`\u{1F504} Producto actualizado: ${shopifyProduct.title}`);
-          } else {
-            const productData = this.convertShopifyProduct(shopifyProduct);
-            localProduct = await storage.createProduct(productData);
-            console.log(`\u2795 Nuevo producto: ${shopifyProduct.title}`);
-          }
-          if (shopifyProduct.variants && shopifyProduct.variants.length > 0) {
-            for (const shopifyVariant of shopifyProduct.variants) {
-              const variantData = this.convertShopifyVariant(shopifyVariant, localProduct.id);
-              await storage.createVariant(variantData);
-            }
-          }
-          result.productsProcessed++;
-        } catch (error) {
-          const errorMsg = `Error procesando producto ${shopifyProduct.title}: ${error}`;
-          console.log(`\u274C ${errorMsg}`);
-          result.errors.push(errorMsg);
+  // Upsert de un producto + variantes
+  async upsertOne(sp) {
+    const existing = await storage.getProductByShopifyId(String(sp.id), this.storeNumber);
+    const productData = this.convertShopifyProduct(sp);
+    let local;
+    if (existing) {
+      local = await storage.updateProduct(existing.id, productData);
+    } else {
+      local = await storage.createProduct(productData);
+    }
+    if (sp.variants && sp.variants.length > 0) {
+      for (const sv of sp.variants) {
+        const vData = this.convertShopifyVariant(sv, local.id);
+        const [vExisting] = await db2.select().from(variants).where(eq3(variants.idShopify, String(sv.id))).limit(1);
+        if (vExisting) {
+          await storage.updateVariant(vExisting.id, vData);
+        } else {
+          await storage.createVariant(vData);
         }
+      }
+    }
+  }
+  /**
+   * Sincroniza productos con soporte opcional de incremental por fecha y paginación completa.
+   * - updatedSince: ISO8601 para traer solo productos actualizados desde esa fecha
+   * - limit: tamaño de página (<=250)
+   */
+  async syncProductsFromShopify(limit = 250, updatedSince) {
+    console.log(`\u{1F504} Sincronizando productos tienda ${this.storeNumber} (limit=${limit}${updatedSince ? `, updated>=${updatedSince}` : ""})`);
+    const result = { success: false, productsProcessed: 0, errors: [] };
+    try {
+      let cursor = void 0;
+      let firstPage = true;
+      while (true) {
+        let params;
+        if (firstPage) {
+          params = { limit: Math.min(limit, 250) };
+          if (updatedSince) params.updated_at_min = updatedSince;
+          firstPage = false;
+        } else {
+          params = { limit: Math.min(limit, 250), page_info: cursor };
+        }
+        const resp = await this.client.getProducts(params);
+        const prods = resp.products || [];
+        for (const sp of prods) {
+          try {
+            await this.upsertOne(sp);
+            result.productsProcessed++;
+          } catch (e) {
+            const msg = `Producto "${sp.title}" error: ${e?.message || e}`;
+            console.log("\u274C", msg);
+            result.errors.push(msg);
+          }
+        }
+        if (!resp.hasNextPage) break;
+        cursor = resp.nextPageInfo;
+        await new Promise((r) => setTimeout(r, 500));
       }
       result.success = result.errors.length === 0;
       return result;
-    } catch (error) {
-      const errorMsg = `Error sincronizando productos: ${error}`;
-      console.log(`\u274C ${errorMsg}`);
-      result.errors.push(errorMsg);
+    } catch (e) {
+      const msg = `Error general sync productos: ${e?.message || e}`;
+      console.log("\u274C", msg);
+      result.errors.push(msg);
       return result;
     }
+  }
+  // Mantén este método para el script de backfill por chunks
+  async syncProductsChunk(shopifyProducts) {
+    const result = { success: false, productsProcessed: 0, errors: [] };
+    for (const sp of shopifyProducts) {
+      try {
+        await this.upsertOne(sp);
+        result.productsProcessed++;
+      } catch (e) {
+        result.errors.push(`Producto "${sp.title}" error: ${e?.message || e}`);
+      }
+    }
+    result.success = result.errors.length === 0;
+    return result;
   }
   async updateProductInShopify(productId, updates) {
     console.log(`\u{1F504} Actualizando producto ${productId} en Shopify tienda ${this.storeNumber}`);
@@ -1231,7 +1468,7 @@ import MemoryStore from "memorystore";
 import { z as z2 } from "zod";
 
 // server/syncShopifyOrders.ts
-import { eq as eq2 } from "drizzle-orm";
+import { eq as eq4 } from "drizzle-orm";
 function listStoreNumbersFromEnv2() {
   const nums = /* @__PURE__ */ new Set();
   for (const k of Object.keys(process.env)) {
@@ -1243,9 +1480,9 @@ function listStoreNumbersFromEnv2() {
 async function getChannelIdForStore(storeNumber) {
   const code = process.env[`SHOPIFY_CHANNEL_CODE_${storeNumber}`] || // fallback simples (ajusta si quieres)
   (storeNumber === 1 ? "CT" : storeNumber === 2 ? "WW" : "WW");
-  const [ch] = await db.select().from(channels).where(eq2(channels.code, code));
+  const [ch] = await db2.select().from(channels).where(eq4(channels.code, code));
   if (ch?.id) return ch.id;
-  const all = await db.select().from(channels).limit(1);
+  const all = await db2.select().from(channels).limit(1);
   return all[0]?.id ?? 1;
 }
 async function shopifyRestGet(storeNumber, path3) {
@@ -1320,12 +1557,12 @@ async function syncShopifyOrders(opts = {}) {
           createdAt: o.created_at ? new Date(o.created_at) : void 0,
           updatedAt: /* @__PURE__ */ new Date()
         };
-        const existing = await db.select().from(orders).where(eq2(orders.orderId, orderIdStr)).limit(1);
+        const existing = await db2.select().from(orders).where(eq4(orders.orderId, orderIdStr)).limit(1);
         if (existing[0]) {
-          await db.update(orders).set(baseRow).where(eq2(orders.id, existing[0].id));
+          await db2.update(orders).set(baseRow).where(eq4(orders.id, existing[0].id));
           upserted++;
         } else {
-          await db.insert(orders).values(baseRow);
+          await db2.insert(orders).values(baseRow);
           inserted++;
         }
       }
@@ -1544,32 +1781,95 @@ async function registerRoutes(app) {
       res.status(500).json({ message: "Error del servidor" });
     }
   });
-  app.get(
-    "/api/dashboard/metrics",
-    requiereAutenticacion,
-    async (_req, res) => {
-      try {
-        const metricas = await storage.getDashboardMetrics();
-        res.json(metricas);
-      } catch {
-        res.status(500).json({ message: "No se pudieron obtener m\xE9tricas" });
-      }
-    }
-  );
-  app.get("/api/orders", requiereAutenticacion, async (req, res) => {
+  app.get("/api/dashboard/metrics", requiereAutenticacion, async (req, res) => {
     try {
-      const { channelId, managed, hasTicket } = req.query;
-      const filtros = {};
-      if (channelId !== void 0) {
-        const channelIdNum = Number(channelId);
-        if (!Number.isNaN(channelIdNum)) filtros.channelId = channelIdNum;
-      }
-      if (managed !== void 0) filtros.managed = managed === "true";
-      if (hasTicket !== void 0) filtros.hasTicket = hasTicket === "true";
-      const ordenes = await storage.getOrders(filtros);
-      res.json(ordenes);
+      const { from, to } = req.query;
+      const fromDate = from ? new Date(String(from)) : new Date(Date.now() - 30 * 24 * 60 * 60 * 1e3);
+      const toDate = to ? new Date(String(to)) : /* @__PURE__ */ new Date();
+      const metricas = await storage.getDashboardMetricsRange(fromDate, toDate);
+      res.json(metricas);
     } catch {
-      res.status(500).json({ message: "No se pudieron obtener \xF3rdenes" });
+      res.status(500).json({ message: "No se pudieron obtener m\xE9tricas" });
+    }
+  });
+  app.get("/orders", async (req, res) => {
+    try {
+      const {
+        page = 1,
+        pageSize = 15,
+        statusFilter,
+        channelId,
+        search,
+        sortField = "createdAt",
+        sortOrder = "desc"
+      } = req.query;
+      const pageInt = Math.max(1, Number(page));
+      const pageSizeInt = Math.min(100, Number(pageSize));
+      const offset = (pageInt - 1) * pageSizeInt;
+      const allowedSortFields = /* @__PURE__ */ new Set([
+        "id",
+        "name",
+        "customerName",
+        "totalAmount",
+        "createdAt",
+        "fulfillmentStatus",
+        "uiStatus"
+      ]);
+      const validSortField = allowedSortFields.has(String(sortField)) ? String(sortField) : "createdAt";
+      const validOrder = sortOrder === "asc" ? "ASC" : "DESC";
+      const conditions = [];
+      const params = [];
+      if (statusFilter === "unmanaged") {
+        conditions.push("uiStatus = 'SIN_GESTIONAR'");
+      } else if (statusFilter === "managed") {
+        conditions.push("uiStatus = 'GESTIONADA'");
+      }
+      if (channelId) {
+        conditions.push("channelId = ?");
+        params.push(channelId);
+      }
+      if (search) {
+        conditions.push("(name LIKE ? OR customerName LIKE ? OR id = ?)");
+        const searchStr = `%${search}%`;
+        params.push(searchStr, searchStr, search);
+      }
+      const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+      const rowsQuery = `
+      SELECT *
+      FROM orders
+      ${whereClause}
+      ORDER BY ${validSortField} ${validOrder}
+      LIMIT ? OFFSET ?
+    `;
+      params.push(pageSizeInt, offset);
+      const [rows] = await db.execute(rowsQuery, params);
+      const countQuery = `
+      SELECT COUNT(*) as total
+      FROM orders
+      ${whereClause.split("LIMIT")[0]} -- remueve OFFSET/LIMIT
+    `;
+      const [countResult] = await db.execute(countQuery, params.slice(0, -2));
+      const total = countResult[0]?.total || 0;
+      res.json({
+        rows,
+        total,
+        page: pageInt,
+        pageSize: pageSizeInt
+      });
+    } catch (error) {
+      console.error("Error en /api/orders:", error);
+      res.status(500).json({ error: "Error interno del servidor" });
+    }
+  });
+  app.get("/api/orders/:orderId/items", requiereAutenticacion, async (req, res) => {
+    const orderId = Number(req.params.orderId);
+    if (!Number.isFinite(orderId)) return res.status(400).json({ message: "orderId inv\xE1lido" });
+    try {
+      const items = await storage.getOrderItems(orderId);
+      res.json({ items });
+    } catch (e) {
+      console.error("[items]", e?.message);
+      res.status(500).json({ message: "No se pudieron obtener items" });
     }
   });
   app.get("/api/orders/:id", requiereAutenticacion, async (req, res) => {
@@ -1652,7 +1952,10 @@ async function registerRoutes(app) {
   });
   app.get("/api/notes", requiereAutenticacion, async (req, res) => {
     try {
-      const notas = await storage.getNotes(req.session.userId);
+      const { from, to } = req.query;
+      const fromDate = from ? new Date(String(from)) : /* @__PURE__ */ new Date();
+      const toDate = to ? new Date(String(to)) : /* @__PURE__ */ new Date();
+      const notas = await storage.getNotesRange(fromDate, toDate);
       res.json(notas);
     } catch {
       res.status(500).json({ message: "No se pudieron obtener notas" });
@@ -1660,14 +1963,22 @@ async function registerRoutes(app) {
   });
   app.post("/api/notes", requiereAutenticacion, async (req, res) => {
     try {
-      const datosNota = insertNoteSchema.parse({
-        ...req.body,
-        userId: req.session.userId
-      });
+      const datosNota = insertNoteSchema.parse(req.body);
       const nota = await storage.createNote(datosNota);
       res.status(201).json(nota);
     } catch {
       res.status(400).json({ message: "Datos de nota inv\xE1lidos" });
+    }
+  });
+  app.put("/api/notes/:id", requiereAutenticacion, async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      if (Number.isNaN(id))
+        return res.status(400).json({ message: "ID de nota inv\xE1lido" });
+      const nota = await storage.updateNote(id, req.body);
+      res.json(nota);
+    } catch {
+      res.status(500).json({ message: "No se pudo actualizar la nota" });
     }
   });
   app.delete("/api/notes/:id", requiereAutenticacion, async (req, res) => {
@@ -1679,6 +1990,37 @@ async function registerRoutes(app) {
       res.status(204).send();
     } catch {
       res.status(500).json({ message: "No se pudo eliminar la nota" });
+    }
+  });
+  app.get("/api/products", requiereAutenticacion, async (req, res) => {
+    try {
+      const shopId = Number(req.query.shopId);
+      const page = req.query.page ? Number(req.query.page) : 1;
+      const pageSize = req.query.pageSize ? Number(req.query.pageSize) : 15;
+      const data = await storage.getProductsPaginated(shopId, page, pageSize);
+      res.json(data);
+    } catch {
+      res.status(500).json({ message: "No se pudieron obtener productos" });
+    }
+  });
+  app.get("/api/catalog-products", requiereAutenticacion, async (req, res) => {
+    try {
+      const page = req.query.page ? Number(req.query.page) : 1;
+      const pageSize = req.query.pageSize ? Number(req.query.pageSize) : 15;
+      const data = await storage.getCatalogProductsPaginated(page, pageSize);
+      res.json(data);
+    } catch {
+      res.status(500).json({ message: "No se pudieron obtener productos" });
+    }
+  });
+  app.get("/api/external-products", requiereAutenticacion, async (req, res) => {
+    try {
+      const page = req.query.page ? Number(req.query.page) : 1;
+      const pageSize = req.query.pageSize ? Number(req.query.pageSize) : 15;
+      const data = await storage.getExternalProductsPaginated(page, pageSize);
+      res.json(data);
+    } catch {
+      res.status(500).json({ message: "No se pudieron obtener productos" });
     }
   });
   app.get("/api/admin/users", requiereAdmin, async (_req, res) => {
@@ -2073,8 +2415,6 @@ if (typeof _g.fetch !== "function") {
   _g.fetch = fetchOrig;
 }
 var aplicacion = express2();
-aplicacion.use(express2.json());
-aplicacion.use(express2.urlencoded({ extended: true }));
 aplicacion.use(
   cors({
     origin: (origin, cb) => {
@@ -2084,6 +2424,8 @@ aplicacion.use(
     credentials: true
   })
 );
+aplicacion.use(express2.json());
+aplicacion.use(express2.urlencoded({ extended: true }));
 aplicacion.use((req, res, next) => {
   const inicio = Date.now();
   const ruta = req.path;

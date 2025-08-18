@@ -1,4 +1,5 @@
 import { useState } from "react";
+
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -22,7 +23,7 @@ export default function Navbar() {
             <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center">
               <i className="fas fa-shipping-fast text-white text-sm"></i>
             </div>
-            <h1 className="text-xl font-semibold text-primary">LogiSys</h1>
+            <h1 className="text-xl font-semibold text-primary">ULUM PLUS</h1>
           </div>
         </div>
         

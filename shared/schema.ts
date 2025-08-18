@@ -40,7 +40,7 @@ export const catalogProducts = pgTable("catalog_products", {
   id: serial("id").primaryKey(),
   sku: text("sku").notNull().unique(),           // SKU único
   brandId: integer("brand_id").notNull(),        // referencia a brands.id (no FK explícita aquí)
-  name: text("name").notNull(),                  // nombre del producto
+  nombreProducto: text("name").notNull(),                  // nombre del producto
   description: text("description"),              // descripción (opcional)
   price: decimal("price"),                        // precio de venta (opcional)
   cost: decimal("cost"),                          // costo (opcional)
@@ -190,7 +190,7 @@ export type InsertProduct = typeof products.$inferInsert;
 export const externalProducts = pgTable("external_products", {
   id: serial("id").primaryKey(),
   sku: text("sku").notNull().unique(),
-  name: text("name").notNull(),
+  productName: text("name").notNull(),
   createdAt: timestamp("created_at").defaultNow(),
 });
 export type ExternalProduct = typeof externalProducts.$inferSelect;

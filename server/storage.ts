@@ -50,7 +50,8 @@ import {
 } from "@shared/schema";
 
 import { db as baseDatos } from "./db";
-import { eq, and, desc, asc, sql, count, gte, lte } from "drizzle-orm";
+import { eq, and, or, isNull, desc, asc, sql, count, gte, lte } from "drizzle-orm";
+
 
 // --- Interfaz original (compatibilidad) ---
 export interface IStorage {
@@ -113,7 +114,7 @@ export interface IStorage {
   getProductByShopifyId(shopifyId: string, shopId: number): Promise<Producto | undefined>;
   createProduct(product: InsertarProducto): Promise<Producto>;
   updateProduct(id: number, updates: Partial<InsertarProducto>): Promise<Producto>;
-  
+
   getVariants(productId?: number): Promise<Variante[]>;
   getVariant(id: number): Promise<Variante | undefined>;
   createVariant(variant: InsertarVariante): Promise<Variante>;
@@ -549,7 +550,6 @@ export class DatabaseStorage implements IStorage {
   }
 
   // ==== ÓRDENES PAGINADAS ====
-
   async getOrdersPaginated(params: {
     statusFilter: "unmanaged" | "managed" | "all";
     channelId?: number;
@@ -557,20 +557,23 @@ export class DatabaseStorage implements IStorage {
     pageSize: number;
   }): Promise<{ rows: any[]; total: number; page: number; pageSize: number }> {
     const { statusFilter, channelId, page, pageSize } = params;
-    const conditions: any[] = [];
+
+    const conds: any[] = [];
     if (statusFilter === "unmanaged") {
-      conditions.push(
+      conds.push(
         or(isNull(tablaOrdenes.fulfillmentStatus), eq(tablaOrdenes.fulfillmentStatus, "UNFULFILLED")),
       );
     } else if (statusFilter === "managed") {
-      conditions.push(eq(tablaOrdenes.fulfillmentStatus, "FULFILLED"));
+      conds.push(eq(tablaOrdenes.fulfillmentStatus, "FULFILLED"));
     }
     if (channelId !== undefined) {
-      conditions.push(eq(tablaOrdenes.channelId, channelId));
+      conds.push(eq(tablaOrdenes.channelId, channelId));
     }
-    const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
-    const offset = (page - 1) * pageSize;
-    const rows = await baseDatos
+    const whereClause = conds.length ? and(...conds) : undefined;
+    const offset = Math.max(0, (page - 1) * pageSize);
+
+    // SELECT base
+    const baseSelect = baseDatos
       .select({
         id: tablaOrdenes.id,
         name: tablaOrdenes.name,
@@ -579,19 +582,40 @@ export class DatabaseStorage implements IStorage {
         totalAmount: tablaOrdenes.totalAmount,
         fulfillmentStatus: tablaOrdenes.fulfillmentStatus,
         createdAt: tablaOrdenes.createdAt,
-        uiStatus: sql`CASE WHEN ${tablaOrdenes.fulfillmentStatus} IS NULL OR ${tablaOrdenes.fulfillmentStatus}='UNFULFILLED' THEN 'SIN_GESTIONAR' WHEN ${tablaOrdenes.fulfillmentStatus}='FULFILLED' THEN 'GESTIONADA' ELSE 'ERROR' END`,
+        itemsCount: sql<number>`COUNT(${tablaItemsOrden.id})`.as("items_count"),
+        uiStatus: sql`
+        CASE
+          WHEN ${tablaOrdenes.fulfillmentStatus} IS NULL OR ${tablaOrdenes.fulfillmentStatus} = 'UNFULFILLED' THEN 'SIN_GESTIONAR'
+          WHEN ${tablaOrdenes.fulfillmentStatus} = 'FULFILLED' THEN 'GESTIONADA'
+          ELSE 'ERROR'
+        END
+      `.as('ui_status'),
       })
       .from(tablaOrdenes)
-      .where(whereClause as any)
+      .leftJoin(tablaItemsOrden, eq(tablaItemsOrden.orderId, tablaOrdenes.id));
+
+    const dataQ = whereClause ? baseSelect.where(whereClause) : baseSelect;
+    const rows = await dataQ
+      .groupBy(
+        tablaOrdenes.id,
+        tablaOrdenes.name,
+        tablaOrdenes.customerName,
+        tablaOrdenes.channelId,
+        tablaOrdenes.totalAmount,
+        tablaOrdenes.fulfillmentStatus,
+        tablaOrdenes.createdAt,
+      )
       .orderBy(desc(tablaOrdenes.createdAt))
       .limit(pageSize)
       .offset(offset);
-    const totalRes = await baseDatos
-      .select({ count: count() })
-      .from(tablaOrdenes)
-      .where(whereClause as any);
-    return { rows, total: Number(totalRes[0]?.count ?? 0), page, pageSize };
+
+    const baseCount = baseDatos.select({ count: count() }).from(tablaOrdenes);
+    const countQ = whereClause ? baseCount.where(whereClause) : baseCount;
+    const totalRes = await countQ;
+
+    return { rows, page, pageSize, total: Number(totalRes[0]?.count ?? 0) };
   }
+
 
   // Items de una orden
   async getOrderItems(orderId: number) {
@@ -632,7 +656,7 @@ export class DatabaseStorage implements IStorage {
     const rows = await baseDatos
       .select()
       .from(tablaProductosCatalogo)
-      .orderBy(asc(tablaProductosCatalogo.name))
+      .orderBy(asc(tablaProductosCatalogo.nombreProducto))
       .limit(pageSize)
       .offset(offset);
     const totalRes = await baseDatos
@@ -646,7 +670,7 @@ export class DatabaseStorage implements IStorage {
     const rows = await baseDatos
       .select()
       .from(tablaProductosExternos)
-      .orderBy(asc(tablaProductosExternos.name))
+      .orderBy(asc(tablaProductosExternos.productName))
       .limit(pageSize)
       .offset(offset);
     const totalRes = await baseDatos

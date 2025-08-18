@@ -1,4 +1,4 @@
-// server/services/OrderSyncService.ts
+// server/services/OrderSyncService.tsz
 import { ShopifyAdminClient } from "./ShopifyAdminClient";
 import { storage } from "../storage";
 import type { InsertOrder, InsertOrderItem } from "@shared/schema";

@@ -34,7 +34,7 @@ import { syncShopifyOrders } from "./syncShopifyOrders"; // archivo de sincriniz
 import { getShopifyCredentials } from "./shopifyEnv"; // Helper para múltiples tiendas
 import { OrderSyncService } from "./services/OrderSyncService"; // Servicio de sync de órdenes
 import { ProductService } from "./services/ProductService"; // Servicio de productos
-import { ShopifyAdminClient } from "./services/ShopifyAdminClient"; // Cliente de Shopify
+
 
 // Adaptador de store en memoria para sesiones (con limpieza automática)
 const AlmacenSesionesMemoria = MemoryStore(session);
@@ -123,7 +123,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/integrations/shopify/ping", async (req, res) => {
     try {
 
-      
+
       // Obtener parámetro de tienda (por defecto '1')
       const storeParam = (req.query.store as string) || "1";
       console.log(` Shopify ping solicitado para tienda ${storeParam}`);
@@ -145,7 +145,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const bodyText = await r.text();
 
-      
+
 
       // Si hay error de Shopify, responder con detalles completos
       if (!r.ok) {
@@ -245,15 +245,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // ---------- Rutas de Integración Shopify ----------
 
   app.get("/api/integrations/shopify/sync", requiereAutenticacion, async (req, res) => {
-  try {
-    const storeParam = (req.query.store as string) || "all";   // "1" | "2" | "all"
-    const limit = Number(req.query.limit ?? 50);
-    const r = await syncShopifyOrders({ store: storeParam, limit });
-    res.json({ message: "Sincronización Shopify OK", ...r, status: "success" });
-  } catch (e: any) {
-    res.status(500).json({ message: "Falló la sincronización", error: e.message, status: "error" });
-  }
-});
+    try {
+      const storeParam = (req.query.store as string) || "all";   // "1" | "2" | "all"
+      const limit = Number(req.query.limit ?? 50);
+      const r = await syncShopifyOrders({ store: storeParam, limit });
+      res.json({ message: "Sincronización Shopify OK", ...r, status: "success" });
+    } catch (e: any) {
+      res.status(500).json({ message: "Falló la sincronización", error: e.message, status: "error" });
+    }
+  });
 
 
   // Crea datos base si no existen (usuarios, canales, paqueterías, marcas)
@@ -339,15 +339,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+
   app.get("/api/orders/:orderId/items", requiereAutenticacion, async (req, res) => {
+    const orderId = Number(req.params.orderId);
+    if (!Number.isFinite(orderId)) return res.status(400).json({ message: "orderId inválido" });
     try {
-      const orderId = Number(req.params.orderId);
       const items = await almacenamiento.getOrderItems(orderId);
-      res.json(items);
-    } catch {
+      res.json({ items });
+    } catch (e: any) {
+      console.error("[items]", e?.message);
       res.status(500).json({ message: "No se pudieron obtener items" });
     }
   });
+
 
   app.get("/api/orders/:id", requiereAutenticacion, async (req, res) => {
     try {
@@ -386,6 +390,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(400).json({ message: "No se pudo actualizar la orden" });
     }
   });
+
 
   // ---------- Tickets ----------
   app.get("/api/tickets", requiereAutenticacion, async (_req, res) => {
