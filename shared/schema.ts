@@ -84,14 +84,14 @@ export type InsertCarrier = typeof carriers.$inferInsert;
 
 // === ÓRDENES MEJORADAS (Shopify Integration) ===
 // Registro de órdenes integradas con datos completos de Shopify
+// === ÓRDENES (Shopify Integration) ===
 export const orders = pgTable("orders", {
   id: serial("id").primaryKey(),
 
-  // Cliente 
+  // Datos de cliente / envío
   customerFirstName: text("customer_first_name"),
   customerLastName: text("customer_last_name"),
 
-  // Dirección de envío básica (puedes detallar más si quieres)
   shipName: text("ship_name"),
   shipPhone: text("ship_phone"),
   shipAddress1: text("ship_address1"),
@@ -100,30 +100,48 @@ export const orders = pgTable("orders", {
   shipCountry: text("ship_country"),
   shipZip: text("ship_zip"),
 
-  // Campos originales (compatibilidad)
-  orderId: text("order_id").notNull().unique(),   // ID externo (ej. Shopify)
-  channelId: integer("channel_id").notNull(),     // referencia a channels.id
-  customerName: text("customer_name"),            // nombre del cliente
-  totalAmount: decimal("total_amount"),           // total de la orden
-  isManaged: boolean("is_managed").notNull().default(false), // gestionada por logística
-  hasTicket: boolean("has_ticket").notNull().default(false), // tiene ticket asociado
-  status: text("status").notNull().default("pending"),      // estado interno
+  // Compatibilidad / legacy
+  orderId: text("order_id").notNull().unique(),    // si lo usas como ID externo legible
+  channelId: integer("channel_id").notNull(),
+  customerName: text("customer_name"),
+  totalAmount: decimal("total_amount"),
+  isManaged: boolean("is_managed").notNull().default(false),
+  hasTicket: boolean("has_ticket").notNull().default(false),
+  status: text("status").notNull().default("pending"),
 
-  // Nuevos campos Shopify
-  idShopify: text("id_shopify").notNull(),        // ID oficial de Shopify
-  shopId: integer("shop_id").notNull(),           // 1 o 2 (tienda)
-  name: text("name"),                             // nombre de la orden (ej. #1001)
-  orderNumber: text("order_number"),              // número de orden
-  financialStatus: text("financial_status"),      // paid, pending, etc.
-  fulfillmentStatus: text("fulfillment_status"), // fulfilled, partial, etc.
-  currency: text("currency").default("MXN"),      // moneda
-  subtotalPrice: decimal("subtotal_price"),       // subtotal sin impuestos
-  customerEmail: text("customer_email"),          // email del cliente
-  tags: text("tags").array(),                     // etiquetas (array)
+  // Identificación Shopify
+  idShopify: text("id_shopify").notNull(),
+  shopId: integer("shop_id").notNull(),
 
+  // Datos generales de la orden
+  name: text("name"),
+  orderNumber: text("order_number"),
+  financialStatus: text("financial_status"),
+  fulfillmentStatus: text("fulfillment_status"),
+  currency: text("currency").default("MXN"),
+  subtotalPrice: decimal("subtotal_price"),
+  customerEmail: text("customer_email"),
+  contactPhone: text("contact_phone"),
+
+  // Notas & tags
+  orderNote: text("order_note"),
+  tags: text("tags").array(),
+
+  // Fechas nativas de Shopify (timestamptz)
+  shopifyCreatedAt: timestamp("shopify_created_at", { withTimezone: true }),
+  shopifyUpdatedAt: timestamp("shopify_updated_at", { withTimezone: true }),
+  shopifyProcessedAt: timestamp("shopify_processed_at", { withTimezone: true }),
+  shopifyClosedAt: timestamp("shopify_closed_at", { withTimezone: true }),
+  shopifyCancelledAt: timestamp("shopify_cancelled_at", { withTimezone: true }),
+
+  // Motivo de cancelación (Shopify)
+  cancelReason: text("cancel_reason"),
+
+  // Timestamps internos de tu app
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at"),
 });
+
 export type Order = typeof orders.$inferSelect;
 export type InsertOrder = typeof orders.$inferInsert;
 
@@ -190,7 +208,7 @@ export type InsertProduct = typeof products.$inferInsert;
 export const externalProducts = pgTable("external_products", {
   id: serial("id").primaryKey(),
   sku: text("sku").notNull().unique(),
-  productName: text("name").notNull(),
+  prod: text("name").notNull(),
   createdAt: timestamp("created_at").defaultNow(),
 });
 export type ExternalProduct = typeof externalProducts.$inferSelect;

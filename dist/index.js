@@ -363,10 +363,18 @@ var carriers = pgTable("carriers", {
 });
 var orders = pgTable("orders", {
   id: serial("id").primaryKey(),
-  // Cliente 
+  // Identificadores / orígenes
+  idShopify: text("id_shopify"),
+  // id de Shopify como texto
+  orderId: text("order_id"),
+  // si lo usas aparte de idShopify
+  shopId: integer("shop_id").notNull(),
+  // tienda (1, 2, ...)
+  // Datos cliente / envío
   customerFirstName: text("customer_first_name"),
   customerLastName: text("customer_last_name"),
-  // Dirección de envío básica (puedes detallar más si quieres)
+  customerName: text("customer_name"),
+  customerEmail: text("customer_email"),
   shipName: text("ship_name"),
   shipPhone: text("ship_phone"),
   shipAddress1: text("ship_address1"),
@@ -374,42 +382,30 @@ var orders = pgTable("orders", {
   shipProvince: text("ship_province"),
   shipCountry: text("ship_country"),
   shipZip: text("ship_zip"),
-  // Campos originales (compatibilidad)
-  orderId: text("order_id").notNull().unique(),
-  // ID externo (ej. Shopify)
-  channelId: integer("channel_id").notNull(),
-  // referencia a channels.id
-  customerName: text("customer_name"),
-  // nombre del cliente
+  // Económicos / estatus
   totalAmount: decimal("total_amount"),
-  // total de la orden
-  isManaged: boolean("is_managed").notNull().default(false),
-  // gestionada por logística
-  hasTicket: boolean("has_ticket").notNull().default(false),
-  // tiene ticket asociado
-  status: text("status").notNull().default("pending"),
-  // estado interno
-  // Nuevos campos Shopify
-  idShopify: text("id_shopify").notNull(),
-  // ID oficial de Shopify
-  shopId: integer("shop_id").notNull(),
-  // 1 o 2 (tienda)
-  name: text("name"),
-  // nombre de la orden (ej. #1001)
-  orderNumber: text("order_number"),
-  // número de orden
-  financialStatus: text("financial_status"),
-  // paid, pending, etc.
-  fulfillmentStatus: text("fulfillment_status"),
-  // fulfilled, partial, etc.
-  currency: text("currency").default("MXN"),
-  // moneda
   subtotalPrice: decimal("subtotal_price"),
-  // subtotal sin impuestos
-  customerEmail: text("customer_email"),
-  // email del cliente
+  currency: text("currency"),
+  financialStatus: text("financial_status"),
+  fulfillmentStatus: text("fulfillment_status"),
+  status: text("status"),
+  // Metadatos Shopify visibles en tu tabla
+  name: text("name"),
+  orderNumber: text("order_number"),
   tags: text("tags").array(),
-  // etiquetas (array)
+  // Fechas “nativas” de Shopify (timestamptz en BD)
+  shopifyCreatedAt: timestamp("shopify_created_at", { withTimezone: true }),
+  shopifyUpdatedAt: timestamp("shopify_updated_at", { withTimezone: true }),
+  shopifyProcessedAt: timestamp("shopify_processed_at", { withTimezone: true }),
+  shopifyClosedAt: timestamp("shopify_closed_at", { withTimezone: true }),
+  shopifyCancelledAt: timestamp("shopify_cancelled_at", { withTimezone: true }),
+  // (opcional pero útil)
+  cancelReason: text("cancel_reason"),
+  // Flags de gestión interna
+  channelId: integer("channel_id"),
+  isManaged: boolean("is_managed").default(false),
+  hasTicket: boolean("has_ticket").default(false),
+  // Timestamps internos de tu app
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at")
 });
@@ -474,7 +470,7 @@ var products = pgTable("products", {
 var externalProducts = pgTable("external_products", {
   id: serial("id").primaryKey(),
   sku: text("sku").notNull().unique(),
-  productName: text("name").notNull(),
+  prod: text("name").notNull(),
   createdAt: timestamp("created_at").defaultNow()
 });
 var variants = pgTable("variants", {
@@ -589,60 +585,61 @@ var pool = new Pool({
 });
 var u = new URL(process.env.DATABASE_URL);
 console.log("[DB] Conectando a:", u.hostname);
-var db2 = drizzle(pool, { schema: schema_exports });
+var db = drizzle(pool, { schema: schema_exports });
 
 // server/storage.ts
 import { eq, and, or, isNull, desc, asc, sql, count, gte, lte } from "drizzle-orm";
+var createdAtEff = (tabla) => sql`COALESCE(${tabla.shopifyCreatedAt}, ${tabla.createdAt})`;
 var DatabaseStorage = class {
   // ==== USUARIOS ====
   /** Obtiene un usuario por su ID. */
   async getUser(id) {
-    const [usuario] = await db2.select().from(users).where(eq(users.id, id));
+    const [usuario] = await db.select().from(users).where(eq(users.id, id));
     return usuario;
   }
   /** Busca un usuario por correo electrónico. */
   async getUserByEmail(email) {
-    const [usuario] = await db2.select().from(users).where(eq(users.email, email));
+    const [usuario] = await db.select().from(users).where(eq(users.email, email));
     return usuario;
   }
   /** Crea un nuevo usuario. */
   async createUser(datos) {
-    const [usuario] = await db2.insert(users).values(datos).returning();
+    const [usuario] = await db.insert(users).values(datos).returning();
     return usuario;
   }
   /** Actualiza campos de un usuario existente. */
   async updateUser(id, updates) {
-    const [usuario] = await db2.update(users).set({ ...updates, updatedAt: /* @__PURE__ */ new Date() }).where(eq(users.id, id)).returning();
+    const [usuario] = await db.update(users).set({ ...updates, updatedAt: /* @__PURE__ */ new Date() }).where(eq(users.id, id)).returning();
     return usuario;
   }
   /** Lista todos los usuarios ordenados por correo. */
   async getAllUsers() {
-    return await db2.select().from(users).orderBy(asc(users.email));
+    return await db.select().from(users).orderBy(asc(users.email));
   }
   // ==== MARCAS ====
   /** Devuelve las marcas activas ordenadas por nombre. */
   async getBrands() {
-    return await db2.select().from(brands).where(eq(brands.isActive, true)).orderBy(asc(brands.name));
+    return await db.select().from(brands).where(eq(brands.isActive, true)).orderBy(asc(brands.name));
   }
   /** Obtiene una marca por ID. */
   async getBrand(id) {
-    const [marca] = await db2.select().from(brands).where(eq(brands.id, id));
+    const [marca] = await db.select().from(brands).where(eq(brands.id, id));
     return marca;
   }
   /** Crea una nueva marca. */
   async createBrand(datos) {
-    const [marcaNueva] = await db2.insert(brands).values(datos).returning();
+    const [marcaNueva] = await db.insert(brands).values(datos).returning();
     return marcaNueva;
   }
   /** Actualiza una marca. */
   async updateBrand(id, updates) {
-    const [marca] = await db2.update(brands).set(updates).where(eq(brands.id, id)).returning();
+    const [marca] = await db.update(brands).set(updates).where(eq(brands.id, id)).returning();
     return marca;
   }
   // ==== CATÁLOGO ====
   /** Lista productos de catálogo; puede filtrar por ID de marca. */
   async getCatalogProducts(brandId) {
-    const consulta = db2.select().from(catalogProducts);
+    const consulta = db.select().from(catalogProducts);
     if (brandId) {
       return await consulta.where(eq(catalogProducts.brandId, brandId)).orderBy(asc(catalogProducts.sku));
     }
@@ -650,42 +647,42 @@ var DatabaseStorage = class {
   }
   /** Crea un producto de catálogo. */
   async createCatalogProduct(datos) {
-    const [productoNuevo] = await db2.insert(catalogProducts).values(datos).returning();
+    const [productoNuevo] = await db.insert(catalogProducts).values(datos).returning();
     return productoNuevo;
   }
   /** Actualiza un producto de catálogo. */
   async updateCatalogProduct(id, updates) {
-    const [producto] = await db2.update(catalogProducts).set({ ...updates, updatedAt: /* @__PURE__ */ new Date() }).where(eq(catalogProducts.id, id)).returning();
+    const [producto] = await db.update(catalogProducts).set({ ...updates, updatedAt: /* @__PURE__ */ new Date() }).where(eq(catalogProducts.id, id)).returning();
     return producto;
   }
   // ==== CANALES ====
   /** Devuelve canales activos ordenados por nombre. */
   async getChannels() {
-    return await db2.select().from(channels).where(eq(channels.isActive, true)).orderBy(asc(channels.name));
+    return await db.select().from(channels).where(eq(channels.isActive, true)).orderBy(asc(channels.name));
   }
   /** Obtiene un canal por ID. */
   async getChannel(id) {
-    const [canal] = await db2.select().from(channels).where(eq(channels.id, id));
+    const [canal] = await db.select().from(channels).where(eq(channels.id, id));
     return canal;
   }
   /** Crea un canal. */
   async createChannel(datos) {
-    const [canalNuevo] = await db2.insert(channels).values(datos).returning();
+    const [canalNuevo] = await db.insert(channels).values(datos).returning();
     return canalNuevo;
   }
   // ==== PAQUETERÍAS ====
   /** Devuelve paqueterías activas ordenadas por nombre. */
   async getCarriers() {
-    return await db2.select().from(carriers).where(eq(carriers.isActive, true)).orderBy(asc(carriers.name));
+    return await db.select().from(carriers).where(eq(carriers.isActive, true)).orderBy(asc(carriers.name));
   }
   /** Obtiene una paquetería por ID. */
   async getCarrier(id) {
-    const [paq] = await db2.select().from(carriers).where(eq(carriers.id, id));
+    const [paq] = await db.select().from(carriers).where(eq(carriers.id, id));
     return paq;
   }
   /** Crea una paquetería. */
   async createCarrier(datos) {
-    const [paqueteriaNueva] = await db2.insert(carriers).values(datos).returning();
+    const [paqueteriaNueva] = await db.insert(carriers).values(datos).returning();
     return paqueteriaNueva;
   }
   // ==== ÓRDENES ====
@@ -696,62 +693,62 @@ var DatabaseStorage = class {
     if (filtros?.managed !== void 0) condiciones.push(eq(orders.isManaged, filtros.managed));
     if (filtros?.hasTicket !== void 0) condiciones.push(eq(orders.hasTicket, filtros.hasTicket));
     if (condiciones.length > 0) {
-      return await db2.select().from(orders).where(and(...condiciones)).orderBy(desc(orders.createdAt));
+      return await db.select().from(orders).where(and(...condiciones)).orderBy(desc(createdAtEff(orders)));
     }
-    return await db2.select().from(orders).orderBy(desc(orders.createdAt));
+    return await db.select().from(orders).orderBy(desc(createdAtEff(orders)));
   }
   /** Obtiene una orden por ID. */
   async getOrder(id) {
-    const [orden] = await db2.select().from(orders).where(eq(orders.id, id));
+    const [orden] = await db.select().from(orders).where(eq(orders.id, id));
     return orden;
   }
   /** Crea una orden. */
   async createOrder(datos) {
-    const [ordenNueva] = await db2.insert(orders).values(datos).returning();
+    const [ordenNueva] = await db.insert(orders).values(datos).returning();
     return ordenNueva;
   }
   /** Actualiza una orden. */
   async updateOrder(id, updates) {
-    const [orden] = await db2.update(orders).set({ ...updates, updatedAt: /* @__PURE__ */ new Date() }).where(eq(orders.id, id)).returning();
+    const [orden] = await db.update(orders).set({ ...updates, updatedAt: /* @__PURE__ */ new Date() }).where(eq(orders.id, id)).returning();
     return orden;
   }
   /** Lista órdenes por nombre de cliente. */
   async getOrdersByCustomer(nombreCliente) {
-    return await db2.select().from(orders).where(eq(orders.customerName, nombreCliente)).orderBy(desc(orders.createdAt));
+    return await db.select().from(orders).where(eq(orders.customerName, nombreCliente)).orderBy(desc(orders.createdAt));
   }
   /** Obtiene una orden por ID de Shopify y tienda. */
   async getOrderByShopifyId(shopifyId, shopId) {
-    const [orden] = await db2.select().from(orders).where(and(eq(orders.idShopify, shopifyId), eq(orders.shopId, shopId)));
+    const [orden] = await db.select().from(orders).where(and(eq(orders.idShopify, shopifyId), eq(orders.shopId, shopId)));
     return orden;
   }
   // ==== TICKETS ====
   /** Lista tickets ordenados por fecha de creación descendente. */
   async getTickets() {
-    return await db2.select().from(tickets).orderBy(desc(tickets.createdAt));
+    return await db.select().from(tickets).orderBy(desc(tickets.createdAt));
   }
   /** Obtiene un ticket por ID. */
   async getTicket(id) {
-    const [ticket] = await db2.select().from(tickets).where(eq(tickets.id, id));
+    const [ticket] = await db.select().from(tickets).where(eq(tickets.id, id));
     return ticket;
   }
   /** Crea un ticket. */
   async createTicket(datos) {
-    const [ticketNuevo] = await db2.insert(tickets).values(datos).returning();
+    const [ticketNuevo] = await db.insert(tickets).values(datos).returning();
     return ticketNuevo;
   }
   /** Actualiza un ticket. */
   async updateTicket(id, updates) {
-    const [ticket] = await db2.update(tickets).set({ ...updates, updatedAt: /* @__PURE__ */ new Date() }).where(eq(tickets.id, id)).returning();
+    const [ticket] = await db.update(tickets).set({ ...updates, updatedAt: /* @__PURE__ */ new Date() }).where(eq(tickets.id, id)).returning();
     return ticket;
   }
   // ==== REGLAS DE ENVÍO ====
   /** Devuelve reglas de envío activas. */
   async getShippingRules() {
-    return await db2.select().from(shippingRules).where(eq(shippingRules.isActive, true));
+    return await db.select().from(shippingRules).where(eq(shippingRules.isActive, true));
   }
   /** Crea una regla de envío. */
   async createShippingRule(regla) {
-    const [nuevaRegla] = await db2.insert(shippingRules).values(regla).returning();
+    const [nuevaRegla] = await db.insert(shippingRules).values(regla).returning();
     return nuevaRegla;
   }
   // ==== NOTAS ====
@@ -759,75 +756,75 @@ var DatabaseStorage = class {
   async getNotesRange(from, to) {
     const fromStr = from.toISOString().slice(0, 10);
     const toStr = to.toISOString().slice(0, 10);
-    return await db2.select().from(notes).where(and(gte(notes.date, fromStr), lte(notes.date, toStr))).orderBy(asc(notes.date));
+    return await db.select().from(notes).where(and(gte(notes.date, fromStr), lte(notes.date, toStr))).orderBy(asc(notes.date));
   }
   /** Crea una nota. */
   async createNote(nota) {
-    const [nuevaNota] = await db2.insert(notes).values(nota).returning();
+    const [nuevaNota] = await db.insert(notes).values(nota).returning();
     return nuevaNota;
   }
   /** Actualiza una nota. */
   async updateNote(id, updates) {
-    const [nota] = await db2.update(notes).set(updates).where(eq(notes.id, id)).returning();
+    const [nota] = await db.update(notes).set(updates).where(eq(notes.id, id)).returning();
     return nota;
   }
   /** Elimina una nota por ID. */
   async deleteNote(id) {
-    await db2.delete(notes).where(eq(notes.id, id));
+    await db.delete(notes).where(eq(notes.id, id));
   }
   // ==== NUEVOS MÉTODOS SHOPIFY ====
   /** Crea un item de orden. */
   async createOrderItem(datos) {
-    const [item] = await db2.insert(orderItems).values(datos).returning();
+    const [item] = await db.insert(orderItems).values(datos).returning();
     return item;
   }
   /** Lista productos por tienda (opcional). */
   async getProducts(shopId) {
     if (shopId !== void 0) {
-      return await db2.select().from(products).where(eq(products.shopId, shopId)).orderBy(asc(products.title));
+      return await db.select().from(products).where(eq(products.shopId, shopId)).orderBy(asc(products.title));
     }
-    return await db2.select().from(products).orderBy(asc(products.title));
+    return await db.select().from(products).orderBy(asc(products.title));
   }
   /** Obtiene un producto por ID. */
   async getProduct(id) {
-    const [producto] = await db2.select().from(products).where(eq(products.id, id));
+    const [producto] = await db.select().from(products).where(eq(products.id, id));
     return producto;
   }
   /** Obtiene un producto por ID de Shopify y tienda. */
   async getProductByShopifyId(shopifyId, shopId) {
-    const [producto] = await db2.select().from(products).where(and(eq(products.idShopify, shopifyId), eq(products.shopId, shopId)));
+    const [producto] = await db.select().from(products).where(and(eq(products.idShopify, shopifyId), eq(products.shopId, shopId)));
     return producto;
   }
   /** Crea un producto. */
   async createProduct(datos) {
-    const [producto] = await db2.insert(products).values(datos).returning();
+    const [producto] = await db.insert(products).values(datos).returning();
     return producto;
   }
   /** Actualiza un producto. */
   async updateProduct(id, updates) {
-    const [producto] = await db2.update(products).set({ ...updates, updatedAt: /* @__PURE__ */ new Date() }).where(eq(products.id, id)).returning();
+    const [producto] = await db.update(products).set({ ...updates, updatedAt: /* @__PURE__ */ new Date() }).where(eq(products.id, id)).returning();
     return producto;
   }
   /** Lista variantes por producto (opcional). */
   async getVariants(productId) {
     if (productId !== void 0) {
-      return await db2.select().from(variants).where(eq(variants.productId, productId)).orderBy(asc(variants.sku));
+      return await db.select().from(variants).where(eq(variants.productId, productId)).orderBy(asc(variants.sku));
     }
-    return await db2.select().from(variants).orderBy(asc(variants.sku));
+    return await db.select().from(variants).orderBy(asc(variants.sku));
   }
   /** Obtiene una variante por ID. */
   async getVariant(id) {
-    const [variante] = await db2.select().from(variants).where(eq(variants.id, id));
+    const [variante] = await db.select().from(variants).where(eq(variants.id, id));
     return variante;
   }
   /** Crea una variante. */
   async createVariant(datos) {
-    const [variante] = await db2.insert(variants).values(datos).returning();
+    const [variante] = await db.insert(variants).values(datos).returning();
     return variante;
   }
   /** Actualiza una variante. */
   async updateVariant(id, updates) {
-    const [variante] = await db2.update(variants).set({ ...updates, updatedAt: /* @__PURE__ */ new Date() }).where(eq(variants.id, id)).returning();
+    const [variante] = await db.update(variants).set({ ...updates, updatedAt: /* @__PURE__ */ new Date() }).where(eq(variants.id, id)).returning();
     return variante;
   }
   // ==== MÉTRICAS DE DASHBOARD ====
@@ -835,15 +832,15 @@ var DatabaseStorage = class {
    * Métricas de dashboard entre dos fechas.
    */
   async getDashboardMetricsRange(from, to) {
-    const totalResult = await db2.select({ count: count() }).from(orders).where(and(gte(orders.createdAt, from), lte(orders.createdAt, to)));
-    const unmanagedResult = await db2.select({ count: count() }).from(orders).where(
+    const totalResult = await db.select({ count: count() }).from(orders).where(and(gte(orders.createdAt, from), lte(orders.createdAt, to)));
+    const unmanagedResult = await db.select({ count: count() }).from(orders).where(
       and(
         or(isNull(orders.fulfillmentStatus), eq(orders.fulfillmentStatus, "UNFULFILLED")),
         gte(orders.createdAt, from),
         lte(orders.createdAt, to)
       )
     );
-    const ordersByDay = await db2.execute(
+    const ordersByDay = await db.execute(
       sql`SELECT DATE(created_at) AS day, COUNT(*)::int FROM orders WHERE created_at BETWEEN ${from} AND ${to} GROUP BY 1 ORDER BY 1`
     );
     return {
@@ -868,7 +865,7 @@ var DatabaseStorage = class {
     }
     const whereClause = conds.length ? and(...conds) : void 0;
     const offset = Math.max(0, (page - 1) * pageSize);
-    const baseSelect = db2.select({
+    const baseSelect = db.select({
       id: orders.id,
       name: orders.name,
       customerName: orders.customerName,
@@ -895,14 +892,14 @@ var DatabaseStorage = class {
       orders.fulfillmentStatus,
       orders.createdAt
     ).orderBy(desc(orders.createdAt)).limit(pageSize).offset(offset);
-    const baseCount = db2.select({ count: count() }).from(orders);
+    const baseCount = db.select({ count: count() }).from(orders);
     const countQ = whereClause ? baseCount.where(whereClause) : baseCount;
     const totalRes = await countQ;
     return { rows, page, pageSize, total: Number(totalRes[0]?.count ?? 0) };
   }
   // Items de una orden
   async getOrderItems(orderId) {
-    return await db2.select({
+    return await db.select({
       id: orderItems.id,
       sku: orderItems.sku,
       quantity: orderItems.quantity,
@@ -914,31 +911,26 @@ var DatabaseStorage = class {
   // Productos paginados por tienda
   async getProductsPaginated(shopId, page, pageSize) {
     const offset = (page - 1) * pageSize;
-    const rows = await db2.select().from(products).where(eq(products.shopId, shopId)).orderBy(asc(products.title)).limit(pageSize).offset(offset);
-    const totalRes = await db2.select({ count: count() }).from(products).where(eq(products.shopId, shopId));
+    const rows = await db.select().from(products).where(eq(products.shopId, shopId)).orderBy(asc(products.title)).limit(pageSize).offset(offset);
+    const totalRes = await db.select({ count: count() }).from(products).where(eq(products.shopId, shopId));
     return { rows, total: Number(totalRes[0]?.count ?? 0), page, pageSize };
   }
   async getCatalogProductsPaginated(page, pageSize) {
     const offset = (page - 1) * pageSize;
-    const rows = await db2.select().from(catalogProducts).orderBy(asc(catalogProducts.nombreProducto)).limit(pageSize).offset(offset);
-    const totalRes = await db2.select({ count: count() }).from(catalogProducts);
+    const rows = await db.select().from(catalogProducts).orderBy(asc(catalogProducts.nombreProducto)).limit(pageSize).offset(offset);
+    const totalRes = await db.select({ count: count() }).from(catalogProducts);
     return { rows, total: Number(totalRes[0]?.count ?? 0), page, pageSize };
   }
   async getExternalProductsPaginated(page, pageSize) {
     const offset = (page - 1) * pageSize;
-    const rows = await db2.select().from(externalProducts).orderBy(asc(externalProducts.productName)).limit(pageSize).offset(offset);
-    const totalRes = await db2.select({ count: count() }).from(externalProducts);
+    const rows = await db.select().from(externalProducts).orderBy(asc(externalProducts.prod)).limit(pageSize).offset(offset);
+    const totalRes = await db.select({ count: count() }).from(externalProducts);
     return { rows, total: Number(totalRes[0]?.count ?? 0), page, pageSize };
   }
 };
 var storage = new DatabaseStorage();
 
 // server/services/OrderSyncService.ts
-import { eq as eq2, and as and2 } from "drizzle-orm";
-function pickDate(a, b) {
-  const raw = a ?? b ?? null;
-  return raw ? new Date(raw) : null;
-}
 var OrderSyncService = class {
   client;
   storeNumber;
@@ -955,88 +947,41 @@ var OrderSyncService = class {
     const last = o.customer?.last_name ?? null;
     const ship = o.shipping_address ?? void 0;
     return {
-      // Identificadores
-      idShopify: idStr,
-      shopId: this.storeNumber,
+      // Campos básicos existentes
       orderId: idStr,
       channelId: this.channelId,
-      // Display/cliente
-      name: o.name ?? null,
-      orderNumber: o.order_number != null ? String(o.order_number) : null,
       customerName: first || last ? `${first ?? ""} ${last ?? ""}`.trim() : o.email || "Sin nombre",
-      customerEmail: o.email ?? null,
-      customerFirstName: first,
-      customerLastName: last,
-      // Monetarios/estatus
-      currency: o.currency ?? null,
-      subtotalPrice: o.subtotal_price ?? null,
-      totalAmount: o.total_price ? Number(o.total_price) : null,
-      financialStatus: o.financial_status ?? null,
-      fulfillmentStatus: o.fulfillment_status ?? null,
-      status: "pending",
+      totalAmount: o.total_price ?? null,
       isManaged: false,
       hasTicket: false,
-      // Tags (ARRAY text)
+      status: "pending",
+      // Shopify
+      idShopify: idStr,
+      shopId: this.storeNumber,
+      name: o.name ?? null,
+      orderNumber: o.order_number != null ? String(o.order_number) : null,
+      financialStatus: o.financial_status ?? null,
+      fulfillmentStatus: o.fulfillment_status ?? null,
+      currency: o.currency ?? null,
+      subtotalPrice: o.subtotal_price ?? null,
+      customerEmail: o.email ?? null,
       tags: o.tags ? o.tags.split(",").map((t) => t.trim()).filter(Boolean) : [],
-      // Envío
+      // Fechas Nativas de Shopify
+      shopifyCreatedAt: o.created_at ? new Date(o.created_at) : null,
+      shopifyUpdatedAt: o.updated_at ? new Date(o.updated_at) : null,
+      shopifyCancelledAt: o.cancelled_at ? new Date(o.cancelled_at) : null,
+      cancelReason: o.cancel_reason ?? null,
+      // Datos de envío/cliente
+      customerFirstName: first,
+      customerLastName: last,
       shipName: ship?.name ?? null,
       shipPhone: ship?.phone ?? null,
       shipAddress1: ship?.address1 ?? null,
       shipCity: ship?.city ?? null,
       shipProvince: ship?.province ?? null,
       shipCountry: ship?.country ?? null,
-      shipZip: ship?.zip ?? null,
-      // 👇 Fechas/estados *reales* de Shopify (usa tus columnas nuevas)
-      shopifyCreatedAt: pickDate(o.created_at, o.createdAt),
-      shopifyUpdatedAt: pickDate(o.updated_at, o.updatedAt),
-      shopifyProcessedAt: pickDate(void 0, o.processedAt),
-      // REST no lo trae
-      shopifyClosedAt: pickDate(void 0, o.closedAt),
-      // REST no lo trae
-      shopifyCancelledAt: pickDate(o.cancelled_at, o.cancelledAt),
-      cancelReason: o.cancel_reason ?? null
+      shipZip: ship?.zip ?? null
     };
-  }
-  // === UPSERT idempotente por (id_shopify, shop_id) ===
-  async upsertOrderFromShopify(shopifyOrder) {
-    const row = this.convertShopifyOrder(shopifyOrder);
-    await db2.insert(orders).values(row).onConflictDoUpdate({
-      target: [orders.idShopify, orders.shopId],
-      set: {
-        // Identidad visual / monetarios / estatus
-        name: row.name,
-        orderNumber: row.orderNumber,
-        customerName: row.customerName,
-        customerEmail: row.customerEmail,
-        currency: row.currency,
-        subtotalPrice: row.subtotalPrice,
-        totalAmount: row.totalAmount,
-        financialStatus: row.financialStatus,
-        fulfillmentStatus: row.fulfillmentStatus,
-        status: row.status,
-        isManaged: row.isManaged,
-        hasTicket: row.hasTicket,
-        tags: row.tags,
-        // Envío
-        shipName: row.shipName,
-        shipPhone: row.shipPhone,
-        shipAddress1: row.shipAddress1,
-        shipCity: row.shipCity,
-        shipProvince: row.shipProvince,
-        shipCountry: row.shipCountry,
-        shipZip: row.shipZip,
-        // Fechas Shopify
-        shopifyCreatedAt: row.shopifyCreatedAt,
-        shopifyUpdatedAt: row.shopifyUpdatedAt,
-        shopifyProcessedAt: row.shopifyProcessedAt,
-        shopifyClosedAt: row.shopifyClosedAt,
-        shopifyCancelledAt: row.shopifyCancelledAt,
-        cancelReason: row.cancelReason
-        // updated_at => trigger
-      }
-    });
-    const [local] = await db2.select({ id: orders.id }).from(orders).where(and2(eq2(orders.idShopify, row.idShopify), eq2(orders.shopId, row.shopId))).limit(1);
-    return local?.id;
   }
   convertOrderItems(shopifyOrder, localOrderId) {
     return shopifyOrder.line_items.map((item) => ({
@@ -1188,7 +1133,7 @@ var OrderSyncService = class {
 };
 
 // server/services/ProductService.ts
-import { eq as eq3 } from "drizzle-orm";
+import { eq as eq2 } from "drizzle-orm";
 var ProductService = class {
   client;
   storeNumber;
@@ -1233,7 +1178,7 @@ var ProductService = class {
     if (sp.variants && sp.variants.length > 0) {
       for (const sv of sp.variants) {
         const vData = this.convertShopifyVariant(sv, local.id);
-        const [vExisting] = await db2.select().from(variants).where(eq3(variants.idShopify, String(sv.id))).limit(1);
+        const [vExisting] = await db.select().from(variants).where(eq2(variants.idShopify, String(sv.id))).limit(1);
         if (vExisting) {
           await storage.updateVariant(vExisting.id, vData);
         } else {
@@ -1468,7 +1413,7 @@ import MemoryStore from "memorystore";
 import { z as z2 } from "zod";
 
 // server/syncShopifyOrders.ts
-import { eq as eq4 } from "drizzle-orm";
+import { eq as eq3 } from "drizzle-orm";
 function listStoreNumbersFromEnv2() {
   const nums = /* @__PURE__ */ new Set();
   for (const k of Object.keys(process.env)) {
@@ -1480,9 +1425,9 @@ function listStoreNumbersFromEnv2() {
 async function getChannelIdForStore(storeNumber) {
   const code = process.env[`SHOPIFY_CHANNEL_CODE_${storeNumber}`] || // fallback simples (ajusta si quieres)
   (storeNumber === 1 ? "CT" : storeNumber === 2 ? "WW" : "WW");
-  const [ch] = await db2.select().from(channels).where(eq4(channels.code, code));
+  const [ch] = await db.select().from(channels).where(eq3(channels.code, code));
   if (ch?.id) return ch.id;
-  const all = await db2.select().from(channels).limit(1);
+  const all = await db.select().from(channels).limit(1);
   return all[0]?.id ?? 1;
 }
 async function shopifyRestGet(storeNumber, path3) {
@@ -1557,12 +1502,12 @@ async function syncShopifyOrders(opts = {}) {
           createdAt: o.created_at ? new Date(o.created_at) : void 0,
           updatedAt: /* @__PURE__ */ new Date()
         };
-        const existing = await db2.select().from(orders).where(eq4(orders.orderId, orderIdStr)).limit(1);
+        const existing = await db.select().from(orders).where(eq3(orders.orderId, orderIdStr)).limit(1);
         if (existing[0]) {
-          await db2.update(orders).set(baseRow).where(eq4(orders.id, existing[0].id));
+          await db.update(orders).set(baseRow).where(eq3(orders.id, existing[0].id));
           upserted++;
         } else {
-          await db2.insert(orders).values(baseRow);
+          await db.insert(orders).values(baseRow);
           inserted++;
         }
       }
@@ -1792,73 +1737,21 @@ async function registerRoutes(app) {
       res.status(500).json({ message: "No se pudieron obtener m\xE9tricas" });
     }
   });
-  app.get("/orders", async (req, res) => {
+  app.get("/api/orders", requiereAutenticacion, async (req, res) => {
     try {
-      const {
-        page = 1,
-        pageSize = 15,
+      const statusFilter = req.query.statusFilter || "unmanaged";
+      const channelId = req.query.channelId && req.query.channelId !== "all" ? Number(req.query.channelId) : void 0;
+      const page = req.query.page ? Number(req.query.page) : 1;
+      const pageSize = req.query.pageSize ? Number(req.query.pageSize) : 15;
+      const data = await storage.getOrdersPaginated({
         statusFilter,
         channelId,
-        search,
-        sortField = "createdAt",
-        sortOrder = "desc"
-      } = req.query;
-      const pageInt = Math.max(1, Number(page));
-      const pageSizeInt = Math.min(100, Number(pageSize));
-      const offset = (pageInt - 1) * pageSizeInt;
-      const allowedSortFields = /* @__PURE__ */ new Set([
-        "id",
-        "name",
-        "customerName",
-        "totalAmount",
-        "createdAt",
-        "fulfillmentStatus",
-        "uiStatus"
-      ]);
-      const validSortField = allowedSortFields.has(String(sortField)) ? String(sortField) : "createdAt";
-      const validOrder = sortOrder === "asc" ? "ASC" : "DESC";
-      const conditions = [];
-      const params = [];
-      if (statusFilter === "unmanaged") {
-        conditions.push("uiStatus = 'SIN_GESTIONAR'");
-      } else if (statusFilter === "managed") {
-        conditions.push("uiStatus = 'GESTIONADA'");
-      }
-      if (channelId) {
-        conditions.push("channelId = ?");
-        params.push(channelId);
-      }
-      if (search) {
-        conditions.push("(name LIKE ? OR customerName LIKE ? OR id = ?)");
-        const searchStr = `%${search}%`;
-        params.push(searchStr, searchStr, search);
-      }
-      const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
-      const rowsQuery = `
-      SELECT *
-      FROM orders
-      ${whereClause}
-      ORDER BY ${validSortField} ${validOrder}
-      LIMIT ? OFFSET ?
-    `;
-      params.push(pageSizeInt, offset);
-      const [rows] = await db.execute(rowsQuery, params);
-      const countQuery = `
-      SELECT COUNT(*) as total
-      FROM orders
-      ${whereClause.split("LIMIT")[0]} -- remueve OFFSET/LIMIT
-    `;
-      const [countResult] = await db.execute(countQuery, params.slice(0, -2));
-      const total = countResult[0]?.total || 0;
-      res.json({
-        rows,
-        total,
-        page: pageInt,
-        pageSize: pageSizeInt
+        page,
+        pageSize
       });
-    } catch (error) {
-      console.error("Error en /api/orders:", error);
-      res.status(500).json({ error: "Error interno del servidor" });
+      res.json(data);
+    } catch {
+      res.status(500).json({ message: "No se pudieron obtener \xF3rdenes" });
     }
   });
   app.get("/api/orders/:orderId/items", requiereAutenticacion, async (req, res) => {

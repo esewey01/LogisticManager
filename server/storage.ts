@@ -52,6 +52,8 @@ import {
 import { db as baseDatos } from "./db";
 import { eq, and, or, isNull, desc, asc, sql, count, gte, lte } from "drizzle-orm";
 
+const createdAtEff = (tabla: typeof tablaOrdenes) =>
+  sql`COALESCE(${tabla.shopifyCreatedAt}, ${tabla.createdAt})`;
 
 // --- Interfaz original (compatibilidad) ---
 export interface IStorage {
@@ -90,6 +92,7 @@ export interface IStorage {
   createOrder(order: InsertarOrden): Promise<Orden>;
   updateOrder(id: number, updates: Partial<InsertarOrden>): Promise<Orden>;
   getOrdersByCustomer(customerName: string): Promise<Orden[]>;
+  getOrdersByChannel(): Promise<{ channelCode: string; channelName: string; orders: number }[]>;
 
   // Tickets
   getTickets(): Promise<Ticket[]>;
@@ -304,13 +307,15 @@ export class DatabaseStorage implements IStorage {
         .select()
         .from(tablaOrdenes)
         .where(and(...condiciones))
-        .orderBy(desc(tablaOrdenes.createdAt));
+        .orderBy(desc(createdAtEff(tablaOrdenes)))
+
     }
 
     return await baseDatos
       .select()
       .from(tablaOrdenes)
-      .orderBy(desc(tablaOrdenes.createdAt));
+      .orderBy(desc(createdAtEff(tablaOrdenes)))
+
   }
 
 
@@ -343,6 +348,26 @@ export class DatabaseStorage implements IStorage {
       .from(tablaOrdenes)
       .where(eq(tablaOrdenes.customerName, nombreCliente))
       .orderBy(desc(tablaOrdenes.createdAt));
+  }
+
+  async getOrdersByChannel(): Promise<{ channelCode: string; channelName: string; orders: number }[]> {
+    const result = await baseDatos.execute<{ channel_code: string; channel_name: string; orders: number }>(sql`
+    SELECT 
+      c.code as channel_code,
+      c.name as channel_name,
+      COUNT(o.id)::int as orders
+    FROM orders o
+    JOIN channels c ON o.channel_id = c.id
+    WHERE o.created_at >= NOW() - INTERVAL '30 days'
+    GROUP BY c.code, c.name
+    ORDER BY orders DESC
+  `);
+
+    return result.rows.map(row => ({
+      channelCode: row.channel_code,
+      channelName: row.channel_name,
+      orders: row.orders
+    }));
   }
 
   /** Obtiene una orden por ID de Shopify y tienda. */
@@ -670,7 +695,7 @@ export class DatabaseStorage implements IStorage {
     const rows = await baseDatos
       .select()
       .from(tablaProductosExternos)
-      .orderBy(asc(tablaProductosExternos.productName))
+      .orderBy(asc(tablaProductosExternos.prod))
       .limit(pageSize)
       .offset(offset);
     const totalRes = await baseDatos

@@ -18,9 +18,27 @@ export default function Dashboard() {
     refetchInterval: 30000,
   });
 
+  // Consulta de estadísticas por canal
+  const { data: channelStats } = useQuery({
+    queryKey: ["/api/dashboard/channel-stats"],
+    queryFn: async () => {
+      const response = await apiRequest("GET", "/api/dashboard/channel-stats");
+      return response;
+    }
+  });
+
   // Consulta de lista de notas rápidas
+  // En dashboard.tsx, modifica la consulta de notas:
   const { data: notes = [] } = useQuery({
     queryKey: ["/api/notes"],
+    queryFn: async () => {
+      const today = new Date();
+      const thirtyDaysAgo = new Date();
+      thirtyDaysAgo.setDate(today.getDate() - 30);
+
+      const response = await apiRequest("GET", `/api/notes?from=${thirtyDaysAgo.toISOString()}&to=${today.toISOString()}`);
+      return response;
+    }
   });
 
   // Mutación para agregar una nueva nota
@@ -61,6 +79,7 @@ export default function Dashboard() {
       </div>
     );
   }
+
 
   return (
     <div>
@@ -137,15 +156,15 @@ export default function Dashboard() {
 
       {/* Tarjetas de resumen por canal */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-        {metrics?.channelStats?.map((channel) => (
-          <Card key={channel.channelId}>
+        {channelStats?.map((channel) => (
+          <Card key={channel.channelCode}>
             <CardContent className="p-6">
               <div className="flex items-center space-x-4">
-                <div 
+                <div
                   className="w-12 h-12 rounded-lg flex items-center justify-center"
                   style={{ backgroundColor: `${getChannelColor(channel.channelCode)}20` }}
                 >
-                  <i 
+                  <i
                     className={`${getChannelIcon(channel.channelCode)} text-xl`}
                     style={{ color: getChannelColor(channel.channelCode) }}
                   ></i>
@@ -178,8 +197,8 @@ export default function Dashboard() {
             <CardHeader>
               <div className="flex items-center justify-between">
                 <CardTitle className="text-lg">Notas Rápidas</CardTitle>
-                <Button 
-                  size="sm" 
+                <Button
+                  size="sm"
                   variant="outline"
                   onClick={handleAddNote}
                   disabled={!newNote.trim() || addNoteMutation.isPending}

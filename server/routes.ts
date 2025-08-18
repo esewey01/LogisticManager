@@ -35,6 +35,9 @@ import { getShopifyCredentials } from "./shopifyEnv"; // Helper para múltiples 
 import { OrderSyncService } from "./services/OrderSyncService"; // Servicio de sync de órdenes
 import { ProductService } from "./services/ProductService"; // Servicio de productos
 
+import { Router } from "express";
+
+
 
 // Adaptador de store en memoria para sesiones (con limpieza automática)
 const AlmacenSesionesMemoria = MemoryStore(session);
@@ -391,6 +394,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  
 
   // ---------- Tickets ----------
   app.get("/api/tickets", requiereAutenticacion, async (_req, res) => {
