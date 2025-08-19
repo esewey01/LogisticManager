@@ -31,7 +31,11 @@ export default function Dashboard() {
     refetchInterval: 30000,
   });
 
-  const { data: notesResp } = useQuery<{ notes: NoteDTO[] }>({
+  const {
+    data: notesResp,
+    isLoading: notesLoading,
+    error: notesError,
+  } = useQuery<{ notes: NoteDTO[] }>({
     queryKey: ["/api/notes"],
     queryFn: async () => {
       const today = new Date();
@@ -161,47 +165,55 @@ export default function Dashboard() {
               </CardTitle>
             </CardHeader>
             <CardContent className="p-0">
-              <div className="space-y-3">
-                {notes.length > 0 ? (
-                  notes.map((note) => (
-                    <div
-                      key={note.id}
-                      className="text-sm text-gray-700 p-3 bg-yellow-50 border-l-4 border-yellow-400 rounded"
-                    >
-                      <div className="flex justify-between items-start">
-                        <p>{note.text}</p>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-6 w-6 p-0"
-                          onClick={() => deleteNoteMutation.mutate(note.id)}
+              {notesLoading ? (
+                <p className="text-sm text-muted-foreground">Cargando notas…</p>
+              ) : notesError ? (
+                <p className="text-sm text-red-600">No se pudieron cargar las notas.</p>
+              ) : (
+                <>
+                  <div className="space-y-3">
+                    {notes.length > 0 ? (
+                      notes.map((note) => (
+                        <div
+                          key={note.id}
+                          className="text-sm text-gray-700 p-3 bg-yellow-50 border-l-4 border-yellow-400 rounded"
                         >
-                          ×
-                        </Button>
-                      </div>
-                      <p className="text-xs text-gray-500 mt-1">
-                        {new Date(note.createdAt).toLocaleString()}
-                      </p>
-                    </div>
-                  ))
-                ) : (
-                  <p className="text-sm text-gray-500 italic">No hay notas por ahora.</p>
-                )}
-              </div>
-              <div className="mt-4 flex gap-2">
-                <Textarea
-                  placeholder="Escribe una nueva nota..."
-                  value={newNote}
-                  onChange={(e) => setNewNote(e.target.value)}
-                  className="flex-1"
-                />
-                <Button
-                  onClick={handleAddNote}
-                  disabled={!newNote.trim() || addNoteMutation.isPending}
-                >
-                  Agregar
-                </Button>
-              </div>
+                          <div className="flex justify-between items-start">
+                            <p>{note.text}</p>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-6 w-6 p-0"
+                              onClick={() => deleteNoteMutation.mutate(note.id)}
+                            >
+                              ×
+                            </Button>
+                          </div>
+                          <p className="text-xs text-gray-500 mt-1">
+                            {new Date(note.createdAt).toLocaleString()}
+                          </p>
+                        </div>
+                      ))
+                    ) : (
+                      <p className="text-sm text-gray-500 italic">No hay notas por ahora.</p>
+                    )}
+                  </div>
+                  <div className="mt-4 flex gap-2">
+                    <Textarea
+                      placeholder="Escribe una nueva nota..."
+                      value={newNote}
+                      onChange={(e) => setNewNote(e.target.value)}
+                      className="flex-1"
+                    />
+                    <Button
+                      onClick={handleAddNote}
+                      disabled={!newNote.trim() || addNoteMutation.isPending}
+                    >
+                      Agregar
+                    </Button>
+                  </div>
+                </>
+              )}
             </CardContent>
           </Card>
         </div>

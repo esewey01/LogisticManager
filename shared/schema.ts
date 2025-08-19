@@ -315,8 +315,24 @@ export const insertTicketSchema = z.object({
 
 export const insertNoteSchema = z.object({
   text: z.string().min(1, "El contenido es obligatorio"),
-  date: z.string().optional(),
+  date: z
+    .string()
+    .refine((d) => !Number.isNaN(Date.parse(d)), "Fecha inválida")
+    .optional(),
 });
+
+export const notesQuerySchema = z.object({
+  from: z
+    .string()
+    .refine((d) => !Number.isNaN(Date.parse(d)), "Fecha inválida")
+    .optional(),
+  to: z
+    .string()
+    .refine((d) => !Number.isNaN(Date.parse(d)), "Fecha inválida")
+    .optional(),
+});
+
+export type NotesQuery = z.infer<typeof notesQuerySchema>;
 
 export interface NoteDTO {
   id: number;

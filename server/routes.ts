@@ -29,6 +29,7 @@ import {
   insertOrderSchema,
   insertTicketSchema,
   insertNoteSchema,
+  notesQuerySchema,
 } from "@shared/schema";
 import { syncShopifyOrders } from "./syncShopifyOrders"; // archivo de sincrinizacion
 import { getShopifyCredentials } from "./shopifyEnv"; // Helper para múltiples tiendas
@@ -507,32 +508,48 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // ---------- Notas ----------
   app.get("/api/notes", requiereAutenticacion, async (req: any, res) => {
     try {
-      const { from, to } = req.query;
-      const fromDate = from ? new Date(String(from)) : new Date();
-      const toDate = to ? new Date(String(to)) : new Date();
+      const { from, to } = notesQuerySchema.parse(req.query);
+      const toDate = to ? new Date(to) : new Date();
+      const fromDate = from
+        ? new Date(from)
+        : new Date(toDate.getTime() - 30 * 24 * 60 * 60 * 1000); // últimos 30 días por defecto
+
       const notas = await almacenamiento.getNotesRange(fromDate, toDate);
-      const mapped = notas?.map((n) => ({
+      const mapped = notas.map((n) => ({
         id: n.id,
         text: n.content,
         createdAt: n.createdAt,
         author: (n as any).user ?? null,
-      })) ?? [];
+      }));
       res.json({ notes: mapped });
-    } catch {
-      res.status(500).json({ notes: [] });
+    } catch (err) {
+      if (err instanceof z.ZodError) {
+        res.status(400).json({ notes: [], message: "Parámetros de fecha inválidos" });
+      } else {
+        res.status(500).json({ notes: [] });
+      }
     }
   });
 
   app.post("/api/notes", requiereAutenticacion, async (req: any, res) => {
     try {
       const { text, date } = insertNoteSchema.parse(req.body);
+      const dateStr = date
+        ? new Date(date).toISOString().slice(0, 10)
+        : new Date().toISOString().slice(0, 10);
       const nota = await almacenamiento.createNote({
         content: text,
-        date: date ?? new Date().toISOString().slice(0, 10),
+        date: dateStr,
       });
-      res.status(201).json({ id: nota.id, text: nota.content, createdAt: nota.createdAt, author: null });
-    } catch {
-      res.status(400).json({ message: "Datos de nota inválidos" });
+      res
+        .status(201)
+        .json({ id: nota.id, text: nota.content, createdAt: nota.createdAt, author: null });
+    } catch (err) {
+      if (err instanceof z.ZodError) {
+        res.status(400).json({ message: "Datos de nota inválidos" });
+      } else {
+        res.status(500).json({ message: "No se pudo crear la nota" });
+      }
     }
   });
 
