@@ -8,6 +8,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { apiRequest } from "@/lib/queryClient";
 import OrdersChart from "@/components/charts/OrdersChart";
+import Calendar from "@/components/Calendar";
 import type { DashboardMetrics, NoteDTO } from "@shared/schema";
 import {
   FaClipboardList,
@@ -138,7 +139,7 @@ export default function Dashboard() {
             </CardHeader>
             <CardContent className="p-0">
               <div className="space-y-4">
-                {metrics?.byChannel?.map((c) => (
+                {metrics?.byChannel?.map((c: any) => (
                   <div key={c.channelId} className="flex items-center justify-between p-3 bg-gray-50 rounded">
                     <div className="flex items-center space-x-3">
                       <span className="block w-4 h-4 rounded-full bg-indigo-500"></span>
@@ -163,7 +164,7 @@ export default function Dashboard() {
             <CardContent className="p-0">
               <div className="space-y-3">
                 {notes.length > 0 ? (
-                  notes.map((note) => (
+                  notes.map((note: NoteDTO) => (
                     <div
                       key={note.id}
                       className="text-sm text-gray-700 p-3 bg-yellow-50 border-l-4 border-yellow-400 rounded"
@@ -236,6 +237,11 @@ export default function Dashboard() {
             </div>
           </CardContent>
         </Card>
+
+        {/* Añadir Calendario */}
+        <div className="mb-8">
+          <Calendar />
+        </div>
 
         <Card className="p-6">
           <CardHeader className="p-0 mb-4">

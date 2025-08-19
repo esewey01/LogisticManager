@@ -116,7 +116,7 @@ export default function Pedidos() {
   const filteredOrders = orders; // el backend ya aplica filtros y búsqueda
 
   const getChannelInfo = (channelId: number | string) => {
-    const channel = channels.find((c) => String(c.id) === String(channelId));
+    const channel = channels.find((c: Channel) => String(c.id) === String(channelId));
     return channel || { code: "N/A", name: "Desconocido", color: "#6B7280", icon: "fas fa-circle" };
   };
 
@@ -283,7 +283,7 @@ export default function Pedidos() {
                     </TableCell>
                     <TableCell>
                       <div className="flex flex-wrap gap-1">
-                        {order.skus.slice(0, 4).map((sku) => (
+                        {order.skus.slice(0, 4).map((sku: string) => (
                           <Badge key={sku} variant="outline">
                             {sku}
                           </Badge>

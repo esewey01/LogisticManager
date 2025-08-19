@@ -5,12 +5,13 @@ CREA LA APLICACION EXPRESS, CONFIGURA MIDDLEWARE PARA RECIBIR DATOS EN JSON Y FO
 =================*/
 
 // Compatibilidad fetch en runtimes sin fetch global
-import fetchOrig from "node-fetch";
+// import fetchOrig from "node-fetch"; // Removed problematic import
 //SINCRONIZACION DE AMBAS TIENDAS
 import { startSchedulers } from "./scheduler";
 const _g: any = globalThis as any;
+// Modern Node.js has built-in fetch
 if (typeof _g.fetch !== "function") {
-  _g.fetch = fetchOrig as any;
+  console.log("Using built-in fetch");
 }
 
 // Importa Express y tipos para Tiposcript
