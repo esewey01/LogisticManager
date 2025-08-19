@@ -180,9 +180,10 @@ export type InsertShippingRule = typeof shippingRules.$inferInsert;
 // Notas privadas por usuario (cuaderno personal)
 export const notes = pgTable("notes", {
   id: serial("id").primaryKey(),
-  date: date("date").notNull(),                  // fecha asociada a la nota
+  userId: integer("user_id").notNull(),          // usuario propietario de la nota
   content: text("content").notNull(),             // contenido de la nota
   createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
 });
 export type Note = typeof notes.$inferSelect;
 export type InsertNote = typeof notes.$inferInsert;

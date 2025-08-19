@@ -49,11 +49,23 @@ const esquemaLogin = z.object({
 });
 
 // Middleware: requiere usuario autenticado
-const requiereAutenticacion = (req: any, res: any, next: any) => {
+const requiereAutenticacion = async (req: any, res: any, next: any) => {
   if (!req.session.userId) {
     return res.status(401).json({ message: "No autorizado" });
   }
-  next();
+  
+  // Obtener datos del usuario y asignarlos a req.user
+  try {
+    const usuario = await almacenamiento.getUser(req.session.userId);
+    if (!usuario) {
+      return res.status(401).json({ message: "Usuario no encontrado" });
+    }
+    req.user = usuario;
+    next();
+  } catch (error) {
+    console.log('Error en middleware autenticación:', error);
+    return res.status(500).json({ message: "Error interno" });
+  }
 };
 
 // Middleware: requiere rol admin
@@ -507,32 +519,48 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // ---------- Notas ----------
   app.get("/api/notes", requiereAutenticacion, async (req: any, res) => {
     try {
-      const { from, to } = req.query;
-      const fromDate = from ? new Date(String(from)) : new Date();
-      const toDate = to ? new Date(String(to)) : new Date();
-      const notas = await almacenamiento.getNotesRange(fromDate, toDate);
+      const userId = req.user.id;
+      const notas = await almacenamiento.getUserNotes(userId);
+      
       const mapped = notas?.map((n) => ({
         id: n.id,
-        text: n.content,
+        content: n.content,
+        date: new Date(n.createdAt!).toISOString().split('T')[0], // Para el calendario
         createdAt: n.createdAt,
-        author: (n as any).user ?? null,
       })) ?? [];
-      res.json({ notes: mapped });
-    } catch {
-      res.status(500).json({ notes: [] });
+      
+      res.json(mapped);
+    } catch (error) {
+      console.log('Error en GET /api/notes:', error);
+      res.status(500).json([]);
     }
   });
 
   app.post("/api/notes", requiereAutenticacion, async (req: any, res) => {
     try {
-      const { text, date } = insertNoteSchema.parse(req.body);
+      const userId = req.user.id;
+      const { text } = insertNoteSchema.parse(req.body);
+      
+      console.log('Creando nota para usuario:', userId, 'con contenido:', text);
+      
       const nota = await almacenamiento.createNote({
+        userId: userId,
         content: text,
-        date: date ?? new Date().toISOString().slice(0, 10),
       });
-      res.status(201).json({ id: nota.id, text: nota.content, createdAt: nota.createdAt, author: null });
-    } catch {
-      res.status(400).json({ message: "Datos de nota inválidos" });
+      
+      console.log('Nota creada:', nota);
+      res.status(201).json({ 
+        id: nota.id, 
+        content: nota.content, 
+        date: new Date(nota.createdAt!).toISOString().split('T')[0],
+        createdAt: nota.createdAt 
+      });
+    } catch (error) {
+      console.log('Error en POST /api/notes:', error);
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Datos de nota inválidos", errors: error.errors });
+      }
+      res.status(500).json({ message: "Error interno del servidor" });
     }
   });
 
