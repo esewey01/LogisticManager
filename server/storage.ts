@@ -35,8 +35,10 @@ import {
   type InsertTicket as InsertarTicket,
   type ShippingRule as ReglaEnvio,
   type InsertShippingRule as InsertarReglaEnvio,
-  type Note as Nota,
+  type DBNote as Nota,
   type InsertNote as InsertarNota,
+  type Note,
+  type DashboardMetrics,
   type Product as Producto,
   type InsertProduct as InsertarProducto,
   type Variant as Variante,
@@ -105,10 +107,8 @@ export interface IStorage {
   createShippingRule(rule: InsertarReglaEnvio): Promise<ReglaEnvio>;
 
   // Notas
-  getNotesRange(from: Date, to: Date): Promise<Nota[]>;
+  getNotes(): Promise<Nota[]>;
   createNote(note: InsertarNota): Promise<Nota>;
-  updateNote(id: number, updates: Partial<InsertarNota>): Promise<Nota>;
-  deleteNote(id: number): Promise<void>;
 
   // Nuevos métodos Shopify
   createOrderItem(item: InsertarItemOrden): Promise<ItemOrden>;
@@ -124,17 +124,14 @@ export interface IStorage {
   updateVariant(id: number, updates: Partial<InsertarVariante>): Promise<Variante>;
 
   // Métricas de dashboard
-  getDashboardMetricsRange(from: Date, to: Date): Promise<{
-    totalOrders: number;
-    unmanaged: number;
-    ordersByDay: { day: string; count: number }[];
-  }>;
+  getDashboardMetricsRange(from: Date, to: Date): Promise<DashboardMetrics>;
 
   getOrdersPaginated(params: {
     statusFilter: "unmanaged" | "managed" | "all";
     channelId?: number;
     page: number;
     pageSize: number;
+    search?: string;
   }): Promise<{ rows: any[]; total: number; page: number; pageSize: number }>;
 
   getOrderItems(orderId: number): Promise<any[]>;
@@ -423,36 +420,21 @@ export class DatabaseStorage implements IStorage {
 
   // ==== NOTAS ====
 
-  /** Lista notas; si se pasa userId, filtra por usuario. */
-  async getNotesRange(from: Date, to: Date): Promise<Nota[]> {
-    const fromStr = from.toISOString().slice(0, 10);
-    const toStr = to.toISOString().slice(0, 10);
+  /** Lista todas las notas ordenadas por fecha de creación descendente. */
+  async getNotes(): Promise<Nota[]> {
     return await baseDatos
       .select()
       .from(tablaNotas)
-      .where(and(gte(tablaNotas.date, fromStr), lte(tablaNotas.date, toStr)))
-      .orderBy(asc(tablaNotas.date));
+      .orderBy(desc(tablaNotas.createdAt));
   }
 
   /** Crea una nota. */
   async createNote(nota: InsertarNota): Promise<Nota> {
-    const [nuevaNota] = await baseDatos.insert(tablaNotas).values(nota).returning();
-    return nuevaNota;
-  }
-
-  /** Actualiza una nota. */
-  async updateNote(id: number, updates: Partial<InsertarNota>): Promise<Nota> {
-    const [nota] = await baseDatos
-      .update(tablaNotas)
-      .set(updates)
-      .where(eq(tablaNotas.id, id))
+    const [nuevaNota] = await baseDatos
+      .insert(tablaNotas)
+      .values({ ...nota, createdAt: new Date(), updatedAt: new Date() })
       .returning();
-    return nota;
-  }
-
-  /** Elimina una nota por ID. */
-  async deleteNote(id: number): Promise<void> {
-    await baseDatos.delete(tablaNotas).where(eq(tablaNotas.id, id));
+    return nuevaNota;
   }
 
   // ==== NUEVOS MÉTODOS SHOPIFY ====
@@ -547,30 +529,91 @@ export class DatabaseStorage implements IStorage {
    */
   async getDashboardMetricsRange(from: Date, to: Date): Promise<{
     totalOrders: number;
+    totalSales: number;
     unmanaged: number;
-    ordersByDay: { day: string; count: number }[];
+    managed: number;
+    byChannel: { channelId: number; channelName: string; count: number }[];
+    byShop: { shopId: number; shopName: string | null; count: number }[];
   }> {
-    const totalResult = await baseDatos
+    const range = and(gte(tablaOrdenes.createdAt, from), lte(tablaOrdenes.createdAt, to));
+
+    const totalOrdersRes = await baseDatos
       .select({ count: count() })
       .from(tablaOrdenes)
-      .where(and(gte(tablaOrdenes.createdAt, from), lte(tablaOrdenes.createdAt, to)));
-    const unmanagedResult = await baseDatos
+      .where(range);
+
+    const totalSalesRes = await baseDatos
+      .select({ sum: sql<number>`COALESCE(SUM(${tablaOrdenes.totalAmount}),0)` })
+      .from(tablaOrdenes)
+      .where(range);
+
+    const managedRes = await baseDatos
+      .select({ count: count() })
+      .from(tablaOrdenes)
+      .where(and(eq(tablaOrdenes.fulfillmentStatus, "FULFILLED"), range));
+
+    const unmanagedRes = await baseDatos
       .select({ count: count() })
       .from(tablaOrdenes)
       .where(
         and(
-          or(isNull(tablaOrdenes.fulfillmentStatus), eq(tablaOrdenes.fulfillmentStatus, "UNFULFILLED")),
-          gte(tablaOrdenes.createdAt, from),
-          lte(tablaOrdenes.createdAt, to),
+          or(
+            isNull(tablaOrdenes.fulfillmentStatus),
+            eq(tablaOrdenes.fulfillmentStatus, "UNFULFILLED"),
+          ),
+          range,
         ),
       );
-    const ordersByDay = await baseDatos.execute<{ day: string; count: number }>(
-      sql`SELECT DATE(created_at) AS day, COUNT(*)::int FROM orders WHERE created_at BETWEEN ${from} AND ${to} GROUP BY 1 ORDER BY 1`
-    );
+
+    const returnedRes = await baseDatos
+      .select({ count: count() })
+      .from(tablaOrdenes)
+      .where(
+        and(
+          or(
+            eq(tablaOrdenes.fulfillmentStatus, "RESTOCKED"),
+            eq(tablaOrdenes.status, "RESTOCKED"),
+          ),
+          range,
+        ),
+      );
+
+    const byChannelRes = await baseDatos
+      .select({
+        channelId: tablaOrdenes.channelId,
+        channelName: tablaCanales.name,
+        count: sql<number>`COUNT(*)`,
+      })
+      .from(tablaOrdenes)
+      .leftJoin(tablaCanales, eq(tablaCanales.id, tablaOrdenes.channelId))
+      .where(range)
+      .groupBy(tablaOrdenes.channelId, tablaCanales.name);
+
+    const byShopRes = await baseDatos
+      .select({
+        shopId: tablaOrdenes.shopId,
+        count: sql<number>`COUNT(*)`,
+      })
+      .from(tablaOrdenes)
+      .where(range)
+      .groupBy(tablaOrdenes.shopId);
+
     return {
-      totalOrders: Number(totalResult[0]?.count ?? 0),
-      unmanaged: Number(unmanagedResult[0]?.count ?? 0),
-      ordersByDay: ordersByDay.rows ?? ordersByDay ?? [],
+      totalOrders: Number(totalOrdersRes[0]?.count ?? 0),
+      totalSales: Number(totalSalesRes[0]?.sum ?? 0),
+      managed: Number(managedRes[0]?.count ?? 0),
+      unmanaged: Number(unmanagedRes[0]?.count ?? 0),
+      returned: Number(returnedRes[0]?.count ?? 0),
+      byChannel: byChannelRes.map((r) => ({
+        channelId: Number(r.channelId ?? 0),
+        channelName: r.channelName ?? "",
+        count: Number(r.count ?? 0),
+      })),
+      byShop: byShopRes.map((r) => ({
+        shopId: Number(r.shopId ?? 0),
+        shopName: null,
+        count: Number(r.count ?? 0),
+      })),
     };
   }
 
@@ -580,8 +623,9 @@ export class DatabaseStorage implements IStorage {
     channelId?: number;
     page: number;
     pageSize: number;
+    search?: string;
   }): Promise<{ rows: any[]; total: number; page: number; pageSize: number }> {
-    const { statusFilter, channelId, page, pageSize } = params;
+    const { statusFilter, channelId, page, pageSize, search } = params;
 
     const conds: any[] = [];
     if (statusFilter === "unmanaged") {
@@ -594,6 +638,17 @@ export class DatabaseStorage implements IStorage {
     if (channelId !== undefined) {
       conds.push(eq(tablaOrdenes.channelId, channelId));
     }
+    if (search) {
+      const like = `%${search.toLowerCase()}%`;
+      conds.push(
+        or(
+          sql`LOWER(${tablaOrdenes.name}) LIKE ${like}`,
+          sql`LOWER(${tablaOrdenes.customerName}) LIKE ${like}`,
+          sql`LOWER(${tablaItemsOrden.sku}) LIKE ${like}`,
+        ),
+      );
+    }
+
     const whereClause = conds.length ? and(...conds) : undefined;
     const offset = Math.max(0, (page - 1) * pageSize);
 
@@ -606,12 +661,15 @@ export class DatabaseStorage implements IStorage {
         channelId: tablaOrdenes.channelId,
         totalAmount: tablaOrdenes.totalAmount,
         fulfillmentStatus: tablaOrdenes.fulfillmentStatus,
-        createdAt: tablaOrdenes.createdAt,
+        status: tablaOrdenes.status,
+        createdAt: tablaOrdenes.shopifyCreatedAt,
         itemsCount: sql<number>`COUNT(${tablaItemsOrden.id})`.as("items_count"),
+        skus: sql<string[]>`ARRAY_AGG(${tablaItemsOrden.sku})`.as("skus"),
         uiStatus: sql`
         CASE
           WHEN ${tablaOrdenes.fulfillmentStatus} IS NULL OR ${tablaOrdenes.fulfillmentStatus} = 'UNFULFILLED' THEN 'SIN_GESTIONAR'
           WHEN ${tablaOrdenes.fulfillmentStatus} = 'FULFILLED' THEN 'GESTIONADA'
+          WHEN ${tablaOrdenes.fulfillmentStatus} = 'RESTOCKED' OR ${tablaOrdenes.status} = 'RESTOCKED' THEN 'DEVUELTO'
           ELSE 'ERROR'
         END
       `.as('ui_status'),
@@ -628,15 +686,19 @@ export class DatabaseStorage implements IStorage {
         tablaOrdenes.channelId,
         tablaOrdenes.totalAmount,
         tablaOrdenes.fulfillmentStatus,
-        tablaOrdenes.createdAt,
+        tablaOrdenes.status,
+        tablaOrdenes.shopifyCreatedAt,
       )
-      .orderBy(desc(tablaOrdenes.createdAt))
+      .orderBy(desc(tablaOrdenes.shopifyCreatedAt))
       .limit(pageSize)
       .offset(offset);
 
-    const baseCount = baseDatos.select({ count: count() }).from(tablaOrdenes);
-    const countQ = whereClause ? baseCount.where(whereClause) : baseCount;
-    const totalRes = await countQ;
+    const countQ = baseDatos
+      .select({ count: sql<number>`COUNT(DISTINCT ${tablaOrdenes.id})` })
+      .from(tablaOrdenes)
+      .leftJoin(tablaItemsOrden, eq(tablaItemsOrden.orderId, tablaOrdenes.id));
+    const countWhere = whereClause ? countQ.where(whereClause) : countQ;
+    const totalRes = await countWhere;
 
     return { rows, page, pageSize, total: Number(totalRes[0]?.count ?? 0) };
   }
