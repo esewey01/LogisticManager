@@ -9,6 +9,8 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { apiRequest } from "@/lib/queryClient";
 import OrderDetailsModal from "@/components/modals/OrderDetailsModal";
 import CancelOrderModal from "@/components/modals/CancelOrderModal";
+import { mapOrderUiStatus, type UiEstado } from "@shared/schema";
+import { useToast } from "@/hooks/use-toast";
 
 
 import {
@@ -22,16 +24,20 @@ import {
 
 
 type OrderRow = {
-  id: number | string
-  name: string
-  customerName: string | null
-  channelId: number | null
-  totalAmount: number | null
-  fulfillmentStatus: "FULFILLED" | "UNFULFILLED" | string | null
-  createdAt: string
-  uiStatus: "SIN_GESTIONAR" | "GESTIONADA" | "ERROR"
-  itemsCount: number
-  skus: string[]
+  id: number | string;
+  name: string;
+  customerName: string | null;
+  channelId: number | null;
+  totalAmount: number | null;
+  fulfillmentStatus: string | null;
+  status: string | null;
+  createdAt: string;
+  isManaged?: boolean;
+  hasTicket?: boolean;
+  isCombo?: boolean;
+  itemsCount: number;
+  skus: string[];
+  uiStatus?: UiEstado;
 };
 
 type OrdersResp = {
@@ -60,6 +66,7 @@ export default function Pedidos() {
   const queryClient = useQueryClient();
   const [sortField, setSortField] = useState<keyof OrderRow | null>(null);
   const [sortOrder, setSortOrder] = useState<"asc" | "desc" | null>(null);
+  const { toast } = useToast();
 
   // TODO: si agregas filtros/paginación, ponlos aquí y en queryKey
 
@@ -113,6 +120,21 @@ export default function Pedidos() {
     },
   });
 
+  const convertToTicketMutation = useMutation({
+    mutationFn: async (orderId: number | string) => {
+      const res = await apiRequest("POST", `/api/orders/${orderId}/tickets`);
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/dashboard/metrics"] });
+      toast({ description: "Ticket creado" });
+    },
+    onError: () => {
+      toast({ variant: "destructive", description: "No se pudo crear el ticket" });
+    },
+  });
+
   const filteredOrders = orders; // el backend ya aplica filtros y búsqueda
 
   const getChannelInfo = (channelId: number | string) => {
@@ -134,10 +156,7 @@ export default function Pedidos() {
 
   const handleCreateTickets = async () => {
     for (const orderId of selectedOrders) {
-      await updateOrderMutation.mutateAsync({
-        orderId,
-        updates: { isManaged: true, hasTicket: true }
-      });
+      await convertToTicketMutation.mutateAsync(orderId);
     }
     setSelectedOrders([]);
   };
@@ -204,9 +223,9 @@ export default function Pedidos() {
             </div>
             <div className="flex space-x-2">
               {selectedOrders.length > 0 && (
-                <Button onClick={handleCreateTickets} disabled={updateOrderMutation.isPending}>
+                <Button onClick={handleCreateTickets} disabled={convertToTicketMutation.isPending}>
                   <i className="fas fa-ticket-alt mr-2"></i>
-                  Crear Tickets ({selectedOrders.length})
+                  Convertir a Ticket ({selectedOrders.length})
                 </Button>
               )}
               <Button variant="outline">
@@ -315,15 +334,22 @@ export default function Pedidos() {
                     </TableCell>
                     <TableCell>${Number(order.totalAmount).toFixed(2)}</TableCell>
                     <TableCell>
-                      {order.uiStatus === "GESTIONADA" && (
-                        <Badge variant="default">Gestionada</Badge>
-                      )}
-                      {order.uiStatus === "SIN_GESTIONAR" && (
-                        <Badge variant="destructive">Sin gestionar</Badge>
-                      )}
-                      {order.uiStatus === "ERROR" && (
-                        <Badge variant="outline" className="border-red-500 text-red-600">Error</Badge>
-                      )}
+                      {(() => {
+                        const uiStatus: UiEstado = mapOrderUiStatus(
+                          order.fulfillmentStatus,
+                          order.status,
+                        );
+                        if (uiStatus === "GESTIONADA") return <Badge variant="default">Gestionada</Badge>;
+                        if (uiStatus === "SIN_GESTIONAR")
+                          return <Badge variant="destructive">Sin gestionar</Badge>;
+                        if (uiStatus === "DEVUELTO")
+                          return <Badge variant="secondary">Devuelto</Badge>;
+                        return (
+                          <Badge variant="outline" className="border-red-500 text-red-600">
+                            Error
+                          </Badge>
+                        );
+                      })()}
                     </TableCell>
 
                     <TableCell>
@@ -349,7 +375,16 @@ export default function Pedidos() {
                             disabled={updateOrderMutation.isPending}
                           >
                             <i className="fas fa-check mr-1"></i>
-                            {/* Gestionar */}
+                          </Button>
+                        )}
+                        {!order.hasTicket && (
+                          <Button
+                            size="sm"
+                            onClick={() => convertToTicketMutation.mutate(order.id)}
+                            disabled={convertToTicketMutation.isPending}
+                          >
+                            <i className="fas fa-ticket-alt mr-1"></i>
+                            Convertir
                           </Button>
                         )}
                         <Button
@@ -358,7 +393,7 @@ export default function Pedidos() {
                           onClick={() => setCancelOrderId(order.id)}
                         >
                           <i className="fas fa-trash mr-1"></i>
-                          
+
                         </Button>
                       </div>
                     </TableCell>

@@ -1,5 +1,3 @@
-import { useState } from "react";
-
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -12,13 +10,31 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/hooks/useAuth";
 
-export default function Navbar() {
+interface NavbarProps {
+  collapsed: boolean;
+  onToggle: () => void;
+}
+
+export default function Navbar({ collapsed, onToggle }: NavbarProps) {
   const { user, logout } = useAuth();
 
   return (
     <nav className="fixed top-0 left-0 right-0 z-50 bg-surface shadow-md h-16">
       <div className="flex items-center justify-between h-full px-6">
         <div className="flex items-center space-x-4">
+          <button
+            aria-pressed={collapsed}
+            onClick={onToggle}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                onToggle();
+              }
+            }}
+            className="p-2 rounded focus:outline-none focus-visible:ring"
+          >
+            <i className="fas fa-bars"></i>
+          </button>
           <div className="flex items-center space-x-3">
             <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center">
               <i className="fas fa-shipping-fast text-white text-sm"></i>
