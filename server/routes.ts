@@ -10,7 +10,7 @@ Tickets: GET /api/tickets, POST /api/tickets
 
 Catálogos: GET /api/channels, GET /api/brands, GET /api/carriers
 
-Notas: GET /api/notes, POST /api/notes, DELETE /api/notes/:id
+Notas: GET /api/notes, POST /api/notes
 
 Admin: GET /api/admin/users
 
@@ -29,7 +29,11 @@ import {
   insertOrderSchema,
   insertTicketSchema,
   insertNoteSchema,
+  ordenes as tablaOrdenes,
+  ticketsTabla as tablaTickets,
 } from "@shared/schema";
+import { db } from "./db";
+import { eq, sql } from "drizzle-orm";
 import { syncShopifyOrders } from "./syncShopifyOrders"; // archivo de sincrinizacion
 import { getShopifyCredentials } from "./shopifyEnv"; // Helper para múltiples tiendas
 import { OrderSyncService } from "./services/OrderSyncService"; // Servicio de sync de órdenes
@@ -330,11 +334,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const channelId = req.query.channelId && req.query.channelId !== "all" ? Number(req.query.channelId) : undefined;
       const page = req.query.page ? Number(req.query.page) : 1;
       const pageSize = req.query.pageSize ? Number(req.query.pageSize) : 15;
+      const search = req.query.search as string | undefined;
       const data = await almacenamiento.getOrdersPaginated({
         statusFilter: statusFilter as any,
         channelId,
         page,
         pageSize,
+        search,
       });
       res.json(data);
     } catch {
@@ -368,6 +374,140 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json(orden);
     } catch {
       res.status(500).json({ message: "No se pudo obtener la orden" });
+    }
+  });
+
+  app.post("/api/orders/:id/cancel", requiereAutenticacion, async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      if (Number.isNaN(id))
+        return res.status(400).json({ message: "ID de orden inválido" });
+
+      const orden = await almacenamiento.getOrder(id);
+      if (!orden) return res.status(404).json({ ok: false, errors: "Orden no encontrada" });
+
+      const { reason, staffNote, notifyCustomer, restock, refundToOriginal } = req.body;
+      const { shop, token, apiVersion } = getShopifyCredentials(String(orden.shopId));
+      const gid = orden.idShopify.startsWith("gid://")
+        ? orden.idShopify
+        : `gid://shopify/Order/${orden.idShopify}`;
+
+      const mutation = `mutation orderCancel($id: ID!, $reason: OrderCancelReason, $staffNote: String, $email: Boolean, $restock: Boolean, $refund: Boolean){
+        orderCancel(id: $id, reason: $reason, staffNote: $staffNote, email: $email, restock: $restock, refund: $refund){
+          job { id }
+          userErrors { field message }
+        }
+      }`;
+
+      const variables = {
+        id: gid,
+        reason,
+        staffNote,
+        email: !!notifyCustomer,
+        restock: !!restock,
+        refund: !!refundToOriginal,
+      };
+
+      const r = await fetch(`https://${shop}/admin/api/${apiVersion}/graphql.json`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Shopify-Access-Token": token,
+        },
+        body: JSON.stringify({ query: mutation, variables }),
+      });
+
+      const data = await r.json();
+      const userErrors = data?.data?.orderCancel?.userErrors || data?.errors;
+      if (!r.ok || (userErrors && userErrors.length)) {
+        return res.status(400).json({ ok: false, errors: userErrors });
+      }
+      return res.json({ ok: true, job: data?.data?.orderCancel?.job });
+    } catch (e: any) {
+      console.error("cancel order", e?.message);
+      res.status(500).json({ ok: false, errors: e?.message });
+    }
+  });
+
+  app.post("/api/orders/:id/tickets", requiereAutenticacion, async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      if (Number.isNaN(id)) return res.status(400).json({ ok: false, errors: "ID inválido" });
+
+      const orden = await almacenamiento.getOrder(id);
+      if (!orden) return res.status(404).json({ ok: false, errors: "Orden no encontrada" });
+
+      const { notes } = req.body ?? {};
+      const { shop, token, apiVersion } = getShopifyCredentials(String(orden.shopId));
+      const gid = orden.idShopify.startsWith("gid://")
+        ? orden.idShopify
+        : `gid://shopify/Order/${orden.idShopify}`;
+
+      const result = await db.transaction(async (tx) => {
+        const [maxRes] = await tx
+          .select({ max: sql<number>`COALESCE(MAX(${tablaTickets.ticketNumber}::int),29999)` })
+          .from(tablaTickets);
+        const next = String(Number(maxRes?.max ?? 29999) + 1);
+
+        const [ticket] = await tx
+          .insert(tablaTickets)
+          .values({
+            ticketNumber: next,
+            orderId: id,
+            status: "ABIERTO",
+            notes: notes ?? null,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          })
+          .returning();
+
+        const [updatedOrder] = await tx
+          .update(tablaOrdenes)
+          .set({ hasTicket: true, isManaged: true, fulfillmentStatus: "FULFILLED" })
+          .where(eq(tablaOrdenes.id, id))
+          .returning();
+
+        const foQuery = `query getFO($id: ID!){ order(id:$id){ fulfillmentOrders(first:50){ nodes{ id lineItems(first:50){ edges{ node{ id remainingQuantity } } } } } } }`;
+        const foResp = await fetch(`https://${shop}/admin/api/${apiVersion}/graphql.json`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Shopify-Access-Token": token,
+          },
+          body: JSON.stringify({ query: foQuery, variables: { id: gid } }),
+        });
+        const foData = await foResp.json();
+        const nodes = foData?.data?.order?.fulfillmentOrders?.nodes || [];
+        const lineItemsByFulfillmentOrder = nodes.map((fo: any) => ({
+          fulfillmentOrderId: fo.id,
+          fulfillmentOrderLineItems: fo.lineItems.edges.map((e: any) => ({
+            id: e.node.id,
+            quantity: e.node.remainingQuantity,
+          })),
+        }));
+
+        const mutation = `mutation fulfill($fulfillment: FulfillmentInput!){ fulfillmentCreateV2(fulfillment:$fulfillment){ fulfillment{ id } userErrors{ field message } } }`;
+        const mResp = await fetch(`https://${shop}/admin/api/${apiVersion}/graphql.json`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Shopify-Access-Token": token,
+          },
+          body: JSON.stringify({ query: mutation, variables: { fulfillment: { lineItemsByFulfillmentOrder } } }),
+        });
+        const mData = await mResp.json();
+        const userErrors = mData?.data?.fulfillmentCreateV2?.userErrors || mData?.errors;
+        if (userErrors && userErrors.length) {
+          throw new Error(JSON.stringify(userErrors));
+        }
+
+        return { ticket, updatedOrder, shopifyJob: mData?.data?.fulfillmentCreateV2?.fulfillment };
+      });
+
+      res.json({ ok: true, ...result });
+    } catch (e: any) {
+      console.error("create ticket", e?.message);
+      res.status(500).json({ ok: false, errors: e?.message });
     }
   });
 
@@ -451,50 +591,35 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // ---------- Notas ----------
-  app.get("/api/notes", requiereAutenticacion, async (req: any, res) => {
+  app.get("/api/notes", requiereAutenticacion, async (_req, res) => {
     try {
-      const { from, to } = req.query;
-      const fromDate = from ? new Date(String(from)) : new Date();
-      const toDate = to ? new Date(String(to)) : new Date();
-      const notas = await almacenamiento.getNotesRange(fromDate, toDate);
-      res.json(notas);
+      const notas = await almacenamiento.getNotes();
+      const mapped = notas.map((n) => ({
+        id: n.id,
+        content: n.content,
+        created_at: n.createdAt?.toISOString(),
+        updated_at: n.updatedAt?.toISOString(),
+        user_id: n.userId ?? null,
+      }));
+      res.json(mapped);
     } catch {
-      res.status(500).json({ message: "No se pudieron obtener notas" });
+      res.status(500).json([]);
     }
   });
 
   app.post("/api/notes", requiereAutenticacion, async (req: any, res) => {
     try {
-      const datosNota = insertNoteSchema.parse(req.body);
-      const nota = await almacenamiento.createNote(datosNota);
-      res.status(201).json(nota);
+      const { content, userId } = insertNoteSchema.parse(req.body);
+      const nota = await almacenamiento.createNote({ content, userId: userId ?? null });
+      res.status(201).json({
+        id: nota.id,
+        content: nota.content,
+        created_at: nota.createdAt?.toISOString(),
+        updated_at: nota.updatedAt?.toISOString(),
+        user_id: nota.userId ?? null,
+      });
     } catch {
       res.status(400).json({ message: "Datos de nota inválidos" });
-    }
-  });
-
-  app.put("/api/notes/:id", requiereAutenticacion, async (req, res) => {
-    try {
-      const id = Number(req.params.id);
-      if (Number.isNaN(id))
-        return res.status(400).json({ message: "ID de nota inválido" });
-      const nota = await almacenamiento.updateNote(id, req.body);
-      res.json(nota);
-    } catch {
-      res.status(500).json({ message: "No se pudo actualizar la nota" });
-    }
-  });
-
-  app.delete("/api/notes/:id", requiereAutenticacion, async (req, res) => {
-    try {
-      const id = Number(req.params.id);
-      if (Number.isNaN(id))
-        return res.status(400).json({ message: "ID de nota inválido" });
-
-      await almacenamiento.deleteNote(id);
-      res.status(204).send();
-    } catch {
-      res.status(500).json({ message: "No se pudo eliminar la nota" });
     }
   });
 
