@@ -333,6 +333,11 @@ export const insertTicketSchema = z.object({
   notes: z.string().optional(),
 });
 
+export const createBulkTicketsSchema = z.object({
+  orderIds: z.array(z.union([z.number().int().positive(), z.string().min(1)])).min(1, "Debe seleccionar al menos una orden"),
+  notes: z.string().optional(),
+});
+
 export const insertNoteSchema = z.object({
   text: z.string().min(1, "El contenido es obligatorio"),
   date: z.string().optional(),

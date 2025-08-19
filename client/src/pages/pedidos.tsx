@@ -135,14 +135,37 @@ export default function Pedidos() {
     setSelectedOrders(checked ? filteredOrders.map((order: any) => order.id) : []);
   };
 
-  const handleCreateTickets = async () => {
-    for (const orderId of selectedOrders) {
-      await updateOrderMutation.mutateAsync({
-        orderId,
-        updates: { isManaged: true, hasTicket: true }
+  // Mutación para crear tickets masivos
+  const createBulkTicketsMutation = useMutation({
+    mutationFn: async (orderIds: (number | string)[]) => {
+      const response = await apiRequest("POST", "/api/tickets/bulk", {
+        orderIds,
+        notes: `Tickets creados masivamente el ${new Date().toLocaleDateString()}`
       });
-    }
-    setSelectedOrders([]);
+      return response.json();
+    },
+    onSuccess: (data: any) => {
+      toast({
+        title: "Tickets creados exitosamente",
+        description: `Se crearon ${data.tickets?.length || 0} tickets para las órdenes seleccionadas`,
+      });
+      // Limpiar selección y refrescar datos
+      setSelectedOrders([]);
+      queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/dashboard/metrics"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/tickets"] });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Error al crear tickets",
+        description: error?.message || "No se pudieron crear los tickets",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const handleCreateTickets = async () => {
+    createBulkTicketsMutation.mutate(selectedOrders);
   };
 
   // Mutación para sincronización manual
@@ -164,6 +187,29 @@ export default function Pedidos() {
       toast({
         title: "Error en sincronización",
         description: error?.message || "No se pudo sincronizar con Shopify",
+        variant: "destructive",
+      });
+    },
+  });
+
+  // Mutación para normalizar fulfillment_status NULL
+  const normalizeFulfillmentMutation = useMutation({
+    mutationFn: async () => {
+      const response = await apiRequest("POST", "/api/orders/normalize-fulfillment");
+      return response.json();
+    },
+    onSuccess: (data: any) => {
+      toast({
+        title: "Normalización completada",
+        description: `Se actualizaron ${data.updated} órdenes con fulfillment_status NULL`,
+      });
+      queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/dashboard/metrics"] });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Error en normalización",
+        description: error?.message || "No se pudieron normalizar las órdenes",
         variant: "destructive",
       });
     },
@@ -229,7 +275,7 @@ export default function Pedidos() {
                 </SelectContent>
               </Select>
             </div>
-            <div className="flex space-x-2">
+            <div className="flex space-x-2 flex-wrap">
               <Button 
                 onClick={() => syncOrdersMutation.mutate()}
                 disabled={syncOrdersMutation.isPending}
@@ -239,13 +285,28 @@ export default function Pedidos() {
                 <RefreshCw className={`mr-2 h-4 w-4 ${syncOrdersMutation.isPending ? 'animate-spin' : ''}`} />
                 Sincronizar ahora
               </Button>
+
+              <Button 
+                onClick={() => normalizeFulfillmentMutation.mutate()}
+                disabled={normalizeFulfillmentMutation.isPending}
+                variant="outline"
+                data-testid="button-normalize-fulfillment"
+              >
+                <i className={`fas fa-tools mr-2 ${normalizeFulfillmentMutation.isPending ? 'animate-pulse' : ''}`}></i>
+                Normalizar Estados
+              </Button>
               
               {selectedOrders.length > 0 && (
-                <Button onClick={handleCreateTickets} disabled={updateOrderMutation.isPending}>
-                  <i className="fas fa-ticket-alt mr-2"></i>
+                <Button 
+                  onClick={handleCreateTickets} 
+                  disabled={createBulkTicketsMutation.isPending}
+                  data-testid="button-create-bulk-tickets"
+                >
+                  <i className={`fas fa-ticket-alt mr-2 ${createBulkTicketsMutation.isPending ? 'animate-pulse' : ''}`}></i>
                   Crear Tickets ({selectedOrders.length})
                 </Button>
               )}
+              
               <Button variant="outline">
                 <i className="fas fa-upload mr-2"></i>
                 Importar Excel

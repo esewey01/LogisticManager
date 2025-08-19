@@ -100,6 +100,9 @@ export interface IStorage {
   getTicket(id: number): Promise<Ticket | undefined>;
   createTicket(ticket: InsertarTicket): Promise<Ticket>;
   updateTicket(id: number, updates: Partial<InsertarTicket>): Promise<Ticket>;
+  createBulkTickets(orderIds: (number | string)[], notes?: string): Promise<{ tickets: Ticket[]; updated: number }>;
+  getNextTicketNumber(): Promise<string>;
+  normalizeNullFulfillmentStatus(): Promise<{ updated: number }>;
 
   // Reglas de envío
   getShippingRules(): Promise<ReglaEnvio[]>;
@@ -404,6 +407,83 @@ export class DatabaseStorage implements IStorage {
       .where(eq(tablaTickets.id, id))
       .returning();
     return ticket;
+  }
+
+  /** Obtiene el siguiente número de ticket secuencial empezando en 30000. */
+  async getNextTicketNumber(): Promise<string> {
+    const resultado = await baseDatos
+      .select({ maxTicket: sql<string>`MAX(${tablaTickets.ticketNumber})` })
+      .from(tablaTickets)
+      .where(sql`${tablaTickets.ticketNumber} ~ '^[0-9]+$'`); // Solo números
+
+    const maxTicket = resultado[0]?.maxTicket;
+    let nextNumber = 30000;
+
+    if (maxTicket && !isNaN(Number(maxTicket))) {
+      nextNumber = Math.max(30000, Number(maxTicket) + 1);
+    }
+
+    return nextNumber.toString();
+  }
+
+  /** Crea tickets masivos para múltiples órdenes. */
+  async createBulkTickets(orderIds: (number | string)[], notes?: string): Promise<{ tickets: Ticket[]; updated: number }> {
+    const tickets: Ticket[] = [];
+    let updated = 0;
+
+    // Procesar cada orden
+    for (const orderId of orderIds) {
+      const numeroOrdenNumerica = typeof orderId === 'string' ? parseInt(orderId) : orderId;
+      
+      // Verificar que la orden existe
+      const orden = await this.getOrder(numeroOrdenNumerica);
+      if (!orden) {
+        console.log(`⚠️  Orden ${orderId} no encontrada, omitiendo...`);
+        continue;
+      }
+
+      // Obtener siguiente número de ticket
+      const numeroTicket = await this.getNextTicketNumber();
+
+      // Crear el ticket
+      const ticketNuevo = await this.createTicket({
+        ticketNumber: numeroTicket,
+        orderId: numeroOrdenNumerica,
+        status: "open",
+        notes: notes || `Ticket creado masivamente para orden ${orden.name || orderId}`,
+      });
+
+      tickets.push(ticketNuevo);
+
+      // Actualizar la orden para marcarla como gestionada y con ticket
+      await this.updateOrder(numeroOrdenNumerica, {
+        isManaged: true,
+        hasTicket: true,
+      });
+
+      updated++;
+    }
+
+    return { tickets, updated };
+  }
+
+  /** Normaliza órdenes con fulfillment_status NULL marcándolas como fulfilled. */
+  async normalizeNullFulfillmentStatus(): Promise<{ updated: number }> {
+    console.log('🔄 Normalizando fulfillment_status NULL...');
+    
+    const resultado = await baseDatos
+      .update(tablaOrdenes)
+      .set({ 
+        fulfillmentStatus: 'FULFILLED',
+        updatedAt: new Date()
+      })
+      .where(isNull(tablaOrdenes.fulfillmentStatus))
+      .returning({ id: tablaOrdenes.id });
+
+    const updated = resultado.length;
+    console.log(`✅ ${updated} órdenes normalizadas con fulfillment_status FULFILLED`);
+
+    return { updated };
   }
 
   // ==== REGLAS DE ENVÍO ====

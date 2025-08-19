@@ -29,6 +29,7 @@ import {
   insertOrderSchema,
   insertTicketSchema,
   insertNoteSchema,
+  createBulkTicketsSchema,
 } from "@shared/schema";
 import { syncShopifyOrders } from "./syncShopifyOrders"; // archivo de sincrinizacion
 import { getShopifyCredentials } from "./shopifyEnv"; // Helper para múltiples tiendas
@@ -476,8 +477,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/tickets", requiereAutenticacion, async (req, res) => {
     try {
       const datosTicket = insertTicketSchema.parse(req.body);
-      // Genera número de ticket
-      const numeroTicket = `TK-${new Date().getFullYear()}-${String(Date.now()).slice(-6)}`;
+      // Obtiene número de ticket secuencial
+      const numeroTicket = await almacenamiento.getNextTicketNumber();
 
       const ticket = await almacenamiento.createTicket({
         ...datosTicket,
@@ -486,6 +487,53 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(201).json(ticket);
     } catch {
       res.status(400).json({ message: "Datos de ticket inválidos" });
+    }
+  });
+
+  // Crear tickets masivos
+  app.post("/api/tickets/bulk", requiereAutenticacion, async (req, res) => {
+    try {
+      const { orderIds, notes } = createBulkTicketsSchema.parse(req.body);
+      
+      console.log(`🎫 Creando tickets masivos para ${orderIds.length} órdenes...`);
+      const resultado = await almacenamiento.createBulkTickets(orderIds, notes);
+      
+      console.log(`✅ ${resultado.tickets.length} tickets creados, ${resultado.updated} órdenes actualizadas`);
+      
+      res.status(201).json({
+        ok: true,
+        message: `Se crearon ${resultado.tickets.length} tickets exitosamente`,
+        tickets: resultado.tickets,
+        ordersUpdated: resultado.updated,
+      });
+    } catch (error: any) {
+      console.error("❌ Error creando tickets masivos:", error);
+      res.status(400).json({ 
+        ok: false, 
+        message: "Error al crear tickets masivos",
+        error: error?.message 
+      });
+    }
+  });
+
+  // Normalizar fulfillment_status NULL
+  app.post("/api/orders/normalize-fulfillment", requiereAutenticacion, async (req, res) => {
+    try {
+      console.log('🔄 Iniciando normalización de fulfillment_status...');
+      const resultado = await almacenamiento.normalizeNullFulfillmentStatus();
+      
+      res.json({
+        ok: true,
+        message: `Se normalizaron ${resultado.updated} órdenes con fulfillment_status NULL`,
+        updated: resultado.updated,
+      });
+    } catch (error: any) {
+      console.error("❌ Error en normalización:", error);
+      res.status(500).json({ 
+        ok: false, 
+        message: "Error al normalizar órdenes",
+        error: error?.message 
+      });
     }
   });
 
