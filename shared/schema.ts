@@ -183,7 +183,7 @@ export const notes = pgTable("notes", {
   userId: integer("user_id").notNull(),          // usuario propietario de la nota
   content: text("content").notNull(),             // contenido de la nota
   createdAt: timestamp("created_at").defaultNow(),
-  updatedAt: timestamp("updated_at"),
+  updatedAt: timestamp("updated_at").defaultNow(),
 });
 export type Note = typeof notes.$inferSelect;
 export type InsertNote = typeof notes.$inferInsert;

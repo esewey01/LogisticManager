@@ -49,11 +49,23 @@ const esquemaLogin = z.object({
 });
 
 // Middleware: requiere usuario autenticado
-const requiereAutenticacion = (req: any, res: any, next: any) => {
+const requiereAutenticacion = async (req: any, res: any, next: any) => {
   if (!req.session.userId) {
     return res.status(401).json({ message: "No autorizado" });
   }
-  next();
+  
+  // Obtener datos del usuario y asignarlos a req.user
+  try {
+    const usuario = await almacenamiento.getUser(req.session.userId);
+    if (!usuario) {
+      return res.status(401).json({ message: "Usuario no encontrado" });
+    }
+    req.user = usuario;
+    next();
+  } catch (error) {
+    console.log('Error en middleware autenticación:', error);
+    return res.status(500).json({ message: "Error interno" });
+  }
 };
 
 // Middleware: requiere rol admin
@@ -509,13 +521,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const userId = req.user.id;
       const notas = await almacenamiento.getUserNotes(userId);
+      
       const mapped = notas?.map((n) => ({
         id: n.id,
         content: n.content,
         date: new Date(n.createdAt!).toISOString().split('T')[0], // Para el calendario
         createdAt: n.createdAt,
-        author: null,
       })) ?? [];
+      
       res.json(mapped);
     } catch (error) {
       console.log('Error en GET /api/notes:', error);
@@ -527,6 +540,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const userId = req.user.id;
       const { text } = insertNoteSchema.parse(req.body);
+      
       console.log('Creando nota para usuario:', userId, 'con contenido:', text);
       
       const nota = await almacenamiento.createNote({
@@ -543,7 +557,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
     } catch (error) {
       console.log('Error en POST /api/notes:', error);
-      res.status(400).json({ message: "Datos de nota inválidos" });
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Datos de nota inválidos", errors: error.errors });
+      }
+      res.status(500).json({ message: "Error interno del servidor" });
     }
   });
 
