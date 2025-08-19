@@ -272,26 +272,38 @@ export type InsertProductComboItem = typeof productComboItems.$inferInsert;
 // === ESQUEMAS ZOD (validación en rutas) ===
 // Se usan para validar cuerpo de peticiones en endpoints.
 export const insertOrderSchema = z.object({
-  // Campos originales
-  orderId: z.string().min(1, "El ID de la orden es obligatorio"),
-  channelId: z.number().int().positive("El ID del canal debe ser un número positivo"),
+  // Campos originales (más flexibles)
+  orderId: z.string().optional(),
+  channelId: z.number().int().optional(),
   customerName: z.string().optional(),
-  totalAmount: z.string().optional(), // se acepta como string para evitar issues de decimal
+  totalAmount: z.string().optional(),
   isManaged: z.boolean().optional().default(false),
   hasTicket: z.boolean().optional().default(false),
-  status: z.string().default("pending"),
+  status: z.string().optional().default("pending"),
 
-  // Nuevos campos Shopify
-  idShopify: z.string().min(1, "ID de Shopify requerido"),
-  shopId: z.number().int().min(1).max(2, "Shop ID debe ser 1 o 2"),
+  // Campos Shopify (más flexibles)
+  idShopify: z.string().optional(),
+  shopId: z.number().int().optional(),
   name: z.string().optional(),
   orderNumber: z.string().optional(),
   financialStatus: z.string().optional(),
   fulfillmentStatus: z.string().optional(),
-  currency: z.string().default("MXN"),
+  currency: z.string().optional().default("MXN"),
   subtotalPrice: z.string().optional(),
-  customerEmail: z.string().email().optional(),
+  customerEmail: z.string().optional(),
+  customerFirstName: z.string().optional(),
+  customerLastName: z.string().optional(),
+  contactPhone: z.string().optional(),
+  shipName: z.string().optional(),
+  shipPhone: z.string().optional(),
+  shipAddress1: z.string().optional(),
+  shipCity: z.string().optional(),
+  shipProvince: z.string().optional(),
+  shipCountry: z.string().optional(),
+  shipZip: z.string().optional(),
   tags: z.array(z.string()).optional().default([]),
+  orderNote: z.string().optional(),
+  cancelReason: z.string().optional(),
 });
 
 export const insertProductSchema = z.object({

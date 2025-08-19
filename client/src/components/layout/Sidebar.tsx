@@ -3,7 +3,11 @@ import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/hooks/useAuth";
 import { useQuery } from "@tanstack/react-query";
 
-export default function Sidebar() {
+interface SidebarProps {
+  collapsed: boolean;
+}
+
+export default function Sidebar({ collapsed }: SidebarProps) {
   const [location] = useLocation();
   const { user } = useAuth();
 
@@ -66,22 +70,26 @@ export default function Sidebar() {
 
     return (
       <Link href={item.path}>
-        {/* ✅ Link ya es un <a>, no necesitas envolverlo */}
         <div
-          className={`flex items-center space-x-3 px-4 py-3 rounded-lg transition-colors cursor-pointer ${isActive
+          className={`flex items-center ${collapsed ? 'justify-center px-2' : 'space-x-3 px-4'} py-3 rounded-lg transition-all cursor-pointer ${isActive
               ? "bg-primary text-white font-medium"
               : "text-gray-600 hover:bg-gray-100"
             }`}
+          title={collapsed ? item.label : undefined}
         >
-          <i className={`${item.icon} w-5`}></i>
-          <span>{item.label}</span>
-          {item.badge && item.badge > 0 && (
-            <Badge
-              variant={isActive ? "secondary" : "destructive"}
-              className="ml-auto text-xs"
-            >
-              {item.badge}
-            </Badge>
+          <i className={`${item.icon} w-5 ${collapsed ? 'text-center' : ''}`}></i>
+          {!collapsed && (
+            <>
+              <span>{item.label}</span>
+              {item.badge && item.badge > 0 && (
+                <Badge
+                  variant={isActive ? "secondary" : "destructive"}
+                  className="ml-auto text-xs"
+                >
+                  {item.badge}
+                </Badge>
+              )}
+            </>
           )}
         </div>
       </Link>
@@ -89,24 +97,33 @@ export default function Sidebar() {
   };
 
   return (
-    <aside className="fixed left-0 top-16 h-[calc(100vh-4rem)] w-60 bg-surface shadow-lg z-40">
-      <div className="p-6">
+    <aside className={`fixed left-0 top-16 h-[calc(100vh-4rem)] bg-surface shadow-lg z-40 transition-all duration-300 ${
+      collapsed ? 'w-16' : 'w-60'
+    }`}>
+      <div className={`${collapsed ? 'p-2' : 'p-6'}`}>
         <nav className="space-y-2">
           {navItems.map((item) => (
             <NavItem key={item.path} item={item} />
           ))}
 
-          {user?.role === "admin" && (
-            <>
-              <div className="pt-4 border-t border-gray-200">
-                <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2 px-4">
-                  Administración
-                </div>
-                {adminItems.map((item) => (
-                  <NavItem key={item.path} item={item} />
-                ))}
+          {user?.role === "admin" && !collapsed && (
+            <div className="pt-4 border-t border-gray-200">
+              <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2 px-4">
+                Administración
               </div>
-            </>
+              {adminItems.map((item) => (
+                <NavItem key={item.path} item={item} />
+              ))}
+            </div>
+          )}
+          
+          {/* Admin items en modo colapsado */}
+          {user?.role === "admin" && collapsed && (
+            <div className="pt-4 border-t border-gray-200 space-y-2">
+              {adminItems.map((item) => (
+                <NavItem key={item.path} item={item} />
+              ))}
+            </div>
           )}
         </nav>
       </div>

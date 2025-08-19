@@ -34,6 +34,7 @@ import { syncShopifyOrders } from "./syncShopifyOrders"; // archivo de sincriniz
 import { getShopifyCredentials } from "./shopifyEnv"; // Helper para múltiples tiendas
 import { OrderSyncService } from "./services/OrderSyncService"; // Servicio de sync de órdenes
 import { ProductService } from "./services/ProductService"; // Servicio de productos
+import { mapearEstadoGestion, esOrdenGestionada, obtenerColorEstado, obtenerVarianteBadge } from "./businessRules.js";
 
 import { Router } from "express";
 
@@ -706,6 +707,32 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(500).json({
         ok: false,
         error: e.message,
+      });
+    }
+  });
+
+  // Sincronización manual de órdenes (botón "Sincronizar ahora")
+  app.post("/api/integrations/shopify/sync-now", requiereAutenticacion, async (req, res) => {
+    try {
+      console.log('🔄 Iniciando sincronización manual de Shopify...');
+      
+      // Usar la función existente syncShopifyOrders
+      const resultado = await syncShopifyOrders({ store: "all", limit: 50 });
+      
+      console.log('✅ Sincronización manual completada');
+      
+      res.json({
+        ok: true,
+        message: "Sincronización completada exitosamente",
+        resultado,
+        timestamp: new Date().toISOString()
+      });
+    } catch (error: any) {
+      console.error('❌ Error en sincronización manual:', error);
+      res.status(500).json({
+        ok: false,
+        message: "Error durante la sincronización",
+        error: error?.message || "Error desconocido"
       });
     }
   });

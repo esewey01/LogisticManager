@@ -1,11 +1,13 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { RefreshCw } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
+import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import OrderDetailsModal from "@/components/modals/OrderDetailsModal";
 import CancelOrderModal from "@/components/modals/CancelOrderModal";
@@ -58,6 +60,7 @@ export default function Pedidos() {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
   const queryClient = useQueryClient();
+  const { toast } = useToast();
   const [sortField, setSortField] = useState<keyof OrderRow | null>(null);
   const [sortOrder, setSortOrder] = useState<"asc" | "desc" | null>(null);
 
@@ -120,7 +123,7 @@ export default function Pedidos() {
     return channel || { code: "N/A", name: "Desconocido", color: "#6B7280", icon: "fas fa-circle" };
   };
 
-  const handleSelectOrder = (orderId: string, checked: boolean) => {
+  const handleSelectOrder = (orderId: number | string, checked: boolean) => {
     setSelectedOrders(prev =>
       checked
         ? [...prev, orderId]
@@ -141,6 +144,30 @@ export default function Pedidos() {
     }
     setSelectedOrders([]);
   };
+
+  // Mutación para sincronización manual
+  const syncOrdersMutation = useMutation({
+    mutationFn: async () => {
+      const response = await apiRequest("POST", "/api/integrations/shopify/sync-now");
+      return response.json();
+    },
+    onSuccess: (data: any) => {
+      toast({
+        title: "Sincronización completada",
+        description: `Se sincronizaron correctamente los pedidos de Shopify`,
+      });
+      // Invalidar queries para refrescar los datos
+      queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/dashboard/metrics"] });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Error en sincronización",
+        description: error?.message || "No se pudo sincronizar con Shopify",
+        variant: "destructive",
+      });
+    },
+  });
 
 
   if (isLoading) {
@@ -203,6 +230,16 @@ export default function Pedidos() {
               </Select>
             </div>
             <div className="flex space-x-2">
+              <Button 
+                onClick={() => syncOrdersMutation.mutate()}
+                disabled={syncOrdersMutation.isPending}
+                variant="outline"
+                data-testid="button-sync-orders"
+              >
+                <RefreshCw className={`mr-2 h-4 w-4 ${syncOrdersMutation.isPending ? 'animate-spin' : ''}`} />
+                Sincronizar ahora
+              </Button>
+              
               {selectedOrders.length > 0 && (
                 <Button onClick={handleCreateTickets} disabled={updateOrderMutation.isPending}>
                   <i className="fas fa-ticket-alt mr-2"></i>

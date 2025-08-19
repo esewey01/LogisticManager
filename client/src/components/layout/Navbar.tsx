@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Menu } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -12,13 +13,28 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/hooks/useAuth";
 
-export default function Navbar() {
+interface NavbarProps {
+  onToggleSidebar?: () => void;
+}
+
+export default function Navbar({ onToggleSidebar }: NavbarProps) {
   const { user, logout } = useAuth();
 
   return (
     <nav className="fixed top-0 left-0 right-0 z-50 bg-surface shadow-md h-16">
       <div className="flex items-center justify-between h-full px-6">
         <div className="flex items-center space-x-4">
+          {/* Botón para colapsar sidebar */}
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={onToggleSidebar}
+            className="p-2 hover:bg-gray-100"
+            data-testid="button-toggle-sidebar"
+          >
+            <Menu className="h-5 w-5" />
+          </Button>
+          
           <div className="flex items-center space-x-3">
             <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center">
               <i className="fas fa-shipping-fast text-white text-sm"></i>
