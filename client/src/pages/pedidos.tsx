@@ -5,9 +5,10 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { Checkbox } from "@/components/ui/checkbox";
 import { apiRequest } from "@/lib/queryClient";
 import OrderDetailsModal from "@/components/modals/OrderDetailsModal";
+import CancelOrderModal from "@/components/modals/CancelOrderModal";
+import { mapOrderUiStatus, type OrderUiStatus } from "@shared/status";
 
 
 import {
@@ -27,9 +28,11 @@ type OrderRow = {
   channelId: number | null
   totalAmount: number | null
   fulfillmentStatus: "FULFILLED" | "UNFULFILLED" | string | null
+  status: string | null
   createdAt: string
-  uiStatus: "SIN_GESTIONAR" | "GESTIONADA" | "ERROR"
+  uiStatus: OrderUiStatus
   itemsCount: number
+  skus: string[]
 };
 
 type OrdersResp = {
@@ -50,8 +53,8 @@ export default function Pedidos() {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<"unmanaged" | "managed" | "all">("unmanaged");
   const [channelFilter, setChannelFilter] = useState<string>("all");
-  const [selectedOrders, setSelectedOrders] = useState<Array<number | string>>([]);
   const [selectedOrder, setSelectedOrder] = useState<OrderRow | null>(null);
+  const [cancelOrderId, setCancelOrderId] = useState<number | string | null>(null);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(15);
   const queryClient = useQueryClient();
@@ -81,7 +84,10 @@ export default function Pedidos() {
     },
   });
 
-  const orders: OrderRow[] = ordersResp?.rows ?? [];
+  const orders: OrderRow[] = (ordersResp?.rows ?? []).map((o: any) => ({
+    ...o,
+    uiStatus: mapOrderUiStatus(o.fulfillmentStatus, o.status),
+  }));
 
   const { data: channels = [] } = useQuery<Channel[]>({
     queryKey: ["/api/channels"],
@@ -100,9 +106,9 @@ export default function Pedidos() {
     },
   });
 
-  const updateOrderMutation = useMutation({
-    mutationFn: async ({ orderId, updates }: { orderId: number | string; updates: any }) => {
-      await apiRequest("PATCH", `/api/orders/${orderId}`, updates);
+  const createTicketMutation = useMutation({
+    mutationFn: async (orderId: number | string) => {
+      await apiRequest("POST", `/api/orders/${orderId}/tickets`, {});
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
@@ -110,44 +116,13 @@ export default function Pedidos() {
     },
   });
 
-  // filtrar sobre el array ya “normalizado”
-  const filteredOrders = orders.filter((order) => {
-    const matchesSearch =
-      (order.customerName ?? "").toLowerCase().includes(search.toLowerCase()) ||
-      (order.name ?? "").toLowerCase().includes(search.toLowerCase());
-
-    const matchesChannel =
-      channelFilter === "all" || String(order.channelId) === String(channelFilter);
-
-    return matchesSearch && matchesChannel;
-  });
+  const filteredOrders = orders; // el backend ya aplica filtros y búsqueda
 
   const getChannelInfo = (channelId: number | string) => {
     const channel = channels.find((c) => String(c.id) === String(channelId));
     return channel || { code: "N/A", name: "Desconocido", color: "#6B7280", icon: "fas fa-circle" };
   };
 
-  const handleSelectOrder = (orderId: string, checked: boolean) => {
-    setSelectedOrders(prev =>
-      checked
-        ? [...prev, orderId]
-        : prev.filter(id => id !== orderId)
-    );
-  };
-
-  const handleSelectAll = (checked: boolean) => {
-    setSelectedOrders(checked ? filteredOrders.map((order: any) => order.id) : []);
-  };
-
-  const handleCreateTickets = async () => {
-    for (const orderId of selectedOrders) {
-      await updateOrderMutation.mutateAsync({
-        orderId,
-        updates: { isManaged: true, hasTicket: true }
-      });
-    }
-    setSelectedOrders([]);
-  };
 
 
   if (isLoading) {
@@ -161,6 +136,7 @@ export default function Pedidos() {
 
 
   return (
+    <>
     <div>
       {/* Page Header */}
       <div className="mb-8">
@@ -209,12 +185,6 @@ export default function Pedidos() {
               </Select>
             </div>
             <div className="flex space-x-2">
-              {selectedOrders.length > 0 && (
-                <Button onClick={handleCreateTickets} disabled={updateOrderMutation.isPending}>
-                  <i className="fas fa-ticket-alt mr-2"></i>
-                  Crear Tickets ({selectedOrders.length})
-                </Button>
-              )}
               <Button variant="outline">
                 <i className="fas fa-upload mr-2"></i>
                 Importar Excel
@@ -235,12 +205,6 @@ export default function Pedidos() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead className="w-12">
-                  <Checkbox
-                    checked={filteredOrders.length > 0 && selectedOrders.length === filteredOrders.length}
-                    onCheckedChange={handleSelectAll}
-                  />
-                </TableHead>
                 <TableHead>
                   <Button
                     variant="ghost"
@@ -262,7 +226,7 @@ export default function Pedidos() {
                     )}
                   </Button>
                 </TableHead>
-                <TableHead>Cliente</TableHead>
+                <TableHead>SKU(s)</TableHead>
                 <TableHead>Canal</TableHead>
                 <TableHead>Productos</TableHead>
                 <TableHead>Monto</TableHead>
@@ -274,21 +238,25 @@ export default function Pedidos() {
             <TableBody>
               {filteredOrders.map((order: any) => {
                 const channel = getChannelInfo(order.channelId);
-                const products = Array.isArray(order.products) ? order.products : [];
 
                 return (
 
                   <TableRow key={order.id} className={order.status === 'DELETED' ? 'opacity-60 line-through' : ''}>
-                    <TableCell>
-                      <Checkbox
-                        checked={selectedOrders.includes(order.id)}
-                        onCheckedChange={(checked) => handleSelectOrder(order.id, checked as boolean)}
-                      />
-                    </TableCell>
                     <TableCell className="font-medium">
                       {order.name ?? String(order.id)}  {/* ✅ Nombre del pedido o ID si no existe */}
                     </TableCell>
-                    <TableCell>{order.customerName}</TableCell>
+                    <TableCell>
+                      <div className="flex flex-wrap gap-1">
+                        {order.skus.slice(0, 4).map((sku) => (
+                          <Badge key={sku} variant="secondary">
+                            {sku}
+                          </Badge>
+                        ))}
+                        {order.skus.length > 4 && (
+                          <Badge variant="secondary">+{order.skus.length - 4} más</Badge>
+                        )}
+                      </div>
+                    </TableCell>
                     <TableCell>
                       <Badge
                         style={{ backgroundColor: `${channel.color}20`, color: channel.color }}
@@ -317,6 +285,9 @@ export default function Pedidos() {
                       {order.uiStatus === "SIN_GESTIONAR" && (
                         <Badge variant="destructive">Sin gestionar</Badge>
                       )}
+                      {order.uiStatus === "DEVUELTO" && (
+                        <Badge variant="secondary" className="bg-yellow-100 text-yellow-800 border-0">Devuelto</Badge>
+                      )}
                       {order.uiStatus === "ERROR" && (
                         <Badge variant="outline" className="border-red-500 text-red-600">Error</Badge>
                       )}
@@ -335,34 +306,37 @@ export default function Pedidos() {
                           <i className="fas fa-eye mr-1"></i>
                           Ver
                         </Button>
-                        {!order.isManaged && (
-                          <Button
-                            size="sm"
-                            onClick={() => updateOrderMutation.mutate({
-                              orderId: order.id,
-                              updates: { isManaged: true }
-                            })}
-                            disabled={updateOrderMutation.isPending}
-                          >
-                            <i className="fas fa-check mr-1"></i>
-                            {/* Gestionar */}
-                          </Button>
-                        )}
+                        <Button
+                          size="sm"
+                          onClick={() => createTicketMutation.mutate(order.id)}
+                          disabled={createTicketMutation.isPending}
+                        >
+                          <i className="fas fa-ticket-alt mr-1"></i>
+                          Ticket
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="destructive"
+                          onClick={() => setCancelOrderId(order.id)}
+                        >
+                          <i className="fas fa-ban mr-1"></i>
+                          Cancelar
+                        </Button>
                         <Button
                           size="sm"
                           variant={order.status === 'DELETED' ? 'outline' : 'destructive'}
-                          onClick={() => deleteOrderMutation.mutate({ orderId: order.id, deleted: order.status !== 'DELETED' })}
+                          onClick={() =>
+                            deleteOrderMutation.mutate({ orderId: order.id, deleted: order.status !== 'DELETED' })
+                          }
                           disabled={deleteOrderMutation.isPending}
                         >
                           {order.status === 'DELETED' ? (
                             <>
                               <i className="fas fa-undo mr-1"></i>
-                              {/* Restaurar */}
                             </>
                           ) : (
                             <>
                               <i className="fas fa-trash mr-1"></i>
-                              {/* Borrar */}
                             </>
                           )}
                         </Button>
@@ -449,5 +423,16 @@ export default function Pedidos() {
         />
       )}
     </div>
+    {cancelOrderId && (
+      <CancelOrderModal
+        orderId={cancelOrderId}
+        onClose={() => setCancelOrderId(null)}
+        onCancelled={() => {
+          setCancelOrderId(null);
+          queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
+        }}
+      />
+    )}
+    </>
   );
 }

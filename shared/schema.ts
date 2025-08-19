@@ -180,12 +180,22 @@ export type InsertShippingRule = typeof shippingRules.$inferInsert;
 // Notas privadas por usuario (cuaderno personal)
 export const notes = pgTable("notes", {
   id: serial("id").primaryKey(),
-  date: date("date").notNull(),                  // fecha asociada a la nota
-  content: text("content").notNull(),             // contenido de la nota
-  createdAt: timestamp("created_at").defaultNow(),
+  content: text("content").notNull(), // contenido de la nota
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  userId: integer("user_id").references(() => users.id).nullish(),
 });
-export type Note = typeof notes.$inferSelect;
+export type DBNote = typeof notes.$inferSelect;
 export type InsertNote = typeof notes.$inferInsert;
+
+// Tipo de nota expuesto en la API/cliente
+export interface Note {
+  id: number;
+  content: string;
+  created_at: string;
+  updated_at: string;
+  user_id: number | null;
+}
 
 // === PRODUCTOS SHOPIFY ===
 // Productos sincronizados desde Shopify por tienda
@@ -314,9 +324,19 @@ export const insertTicketSchema = z.object({
 });
 
 export const insertNoteSchema = z.object({
-  date: z.string().min(1),
   content: z.string().min(1, "El contenido es obligatorio"),
+  userId: z.number().int().optional(),
 });
+
+export interface DashboardMetrics {
+  totalOrders: number;
+  totalSales: number;
+  managed: number;
+  unmanaged: number;
+  returned: number;
+  byChannel: Array<{ channelId: number; channelName: string; count: number }>;
+  byShop: Array<{ shopId: number; shopName?: string | null; count: number }>;
+}
 
 // === Alias en español (opcionales) ===
 // Permiten importar en español sin romper los nombres originales.
@@ -349,6 +369,7 @@ export type {
   InsertTicket as InsertarTicket,
   ShippingRule as ReglaEnvio,
   InsertShippingRule as InsertarReglaEnvio,
-  Note as Nota,
+  DBNote as Nota,
   InsertNote as InsertarNota,
+  Note,
 };
