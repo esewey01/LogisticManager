@@ -29,12 +29,15 @@ import {
   insertOrderSchema,
   insertTicketSchema,
   insertNoteSchema,
-  notesQuerySchema,
+  orders as tablaOrdenes,
+  tickets as tablaTickets,
 } from "@shared/schema";
 import { syncShopifyOrders } from "./syncShopifyOrders"; // archivo de sincrinizacion
 import { getShopifyCredentials } from "./shopifyEnv"; // Helper para múltiples tiendas
 import { OrderSyncService } from "./services/OrderSyncService"; // Servicio de sync de órdenes
 import { ProductService } from "./services/ProductService"; // Servicio de productos
+import { db } from "./db";
+import { eq, sql } from "drizzle-orm";
 
 import { Router } from "express";
 
@@ -312,12 +315,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // ---------- Dashboard ----------
-  app.get("/api/dashboard/metrics", requiereAutenticacion, async (req, res) => {
+  app.get("/api/dashboard/metrics", requiereAutenticacion, async (_req, res) => {
     try {
-      const { from, to } = req.query;
-      const fromDate = from ? new Date(String(from)) : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-      const toDate = to ? new Date(String(to)) : new Date();
-      const metricas = await almacenamiento.getDashboardMetricsRange(fromDate, toDate);
+      const metricas = await almacenamiento.getDashboardMetrics();
       res.json(metricas);
     } catch {
       res.status(500).json({ message: "No se pudieron obtener métricas" });
@@ -449,6 +449,100 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.post("/api/orders/:id/tickets", requiereAutenticacion, async (req, res) => {
+    const orderId = Number(req.params.id);
+    const { notes } = req.body || {};
+    if (Number.isNaN(orderId)) {
+      return res.status(400).json({ ok: false, errors: ["ID de orden inválido"] });
+    }
+    try {
+      const result = await db.transaction(async (tx) => {
+        const [order] = await tx
+          .select()
+          .from(tablaOrdenes)
+          .where(eq(tablaOrdenes.id, orderId));
+        if (!order) throw new Error("Orden no encontrada");
+
+        const seq = await tx
+          .select({ next: sql<number>`COALESCE(MAX(${tablaTickets.ticketNumber}::int),29999)+1` })
+          .from(tablaTickets);
+        const ticketNumber = String(seq[0]?.next ?? 30000);
+
+        const [ticket] = await tx
+          .insert(tablaTickets)
+          .values({
+            ticketNumber,
+            orderId,
+            status: "ABIERTO",
+            notes: notes ?? null,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          })
+          .returning();
+
+        const [updatedOrder] = await tx
+          .update(tablaOrdenes)
+          .set({
+            hasTicket: true,
+            isManaged: true,
+            fulfillmentStatus: "FULFILLED",
+            updatedAt: new Date(),
+          })
+          .where(eq(tablaOrdenes.id, orderId))
+          .returning();
+
+        const creds = getShopifyCredentials(String(order.shopId || 1));
+        const url = `https://${creds.shop}/admin/api/${creds.apiVersion}/graphql.json`;
+        const headers = {
+          "Content-Type": "application/json",
+          "X-Shopify-Access-Token": creds.token,
+        };
+
+        const foQuery = await fetch(url, {
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            query: `query GetFulfillmentOrders($id: ID!) { order(id: $id) { id fulfillmentOrders(first: 50) { nodes { id status lineItems(first: 100) { nodes { id remainingQuantity } } } } } }`,
+            variables: { id: order.idShopify },
+          }),
+        }).then((r) => r.json());
+
+        const lineItems = foQuery.data.order.fulfillmentOrders.nodes.map((fo: any) => ({
+          fulfillmentOrderId: fo.id,
+          fulfillmentOrderLineItems: fo.lineItems.nodes.map((li: any) => ({
+            id: li.id,
+            quantity: li.remainingQuantity,
+          })),
+        }));
+
+        const shopify = await fetch(url, {
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            query: `mutation FulfillAll($input: FulfillmentCreateV2Input!) { fulfillmentCreateV2(input: $input) { fulfillment { id status } userErrors { field message } } }`,
+            variables: {
+              input: {
+                notifyCustomer: false,
+                lineItemsByFulfillmentOrder: lineItems,
+              },
+            },
+          }),
+        }).then((r) => r.json());
+
+        const userErrors = shopify?.data?.fulfillmentCreateV2?.userErrors;
+        if (userErrors && userErrors.length) {
+          throw new Error(userErrors.map((e: any) => e.message).join(", "));
+        }
+
+        return { ticket, updatedOrder, shopify };
+      });
+
+      res.json({ ok: true, ...result });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, errors: [e.message] });
+    }
+  });
+
   
 
   // ---------- Tickets ----------
@@ -506,44 +600,34 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // ---------- Notas ----------
-  app.get("/api/notes", requiereAutenticacion, async (req: any, res) => {
+  app.get("/api/notes", requiereAutenticacion, async (_req: any, res) => {
     try {
-      const { from, to } = notesQuerySchema.parse(req.query);
-      const toDate = to ? new Date(to) : new Date();
-      const fromDate = from
-        ? new Date(from)
-        : new Date(toDate.getTime() - 30 * 24 * 60 * 60 * 1000); // últimos 30 días por defecto
-
-      const notas = await almacenamiento.getNotesRange(fromDate, toDate);
-      const mapped = notas.map((n) => ({
-        id: n.id,
-        text: n.content,
-        createdAt: n.createdAt,
-        author: (n as any).user ?? null,
-      }));
-      res.json({ notes: mapped });
-    } catch (err) {
-      if (err instanceof z.ZodError) {
-        res.status(400).json({ notes: [], message: "Parámetros de fecha inválidos" });
-      } else {
-        res.status(500).json({ notes: [] });
-      }
+      const notas = await almacenamiento.getNotes();
+      res.json(
+        notas.map((n) => ({
+          id: n.id,
+          content: n.content,
+          created_at: n.createdAt.toISOString(),
+          updated_at: n.updatedAt.toISOString(),
+          user_id: n.userId ?? null,
+        })),
+      );
+    } catch {
+      res.json([]);
     }
   });
 
   app.post("/api/notes", requiereAutenticacion, async (req: any, res) => {
     try {
-      const { text, date } = insertNoteSchema.parse(req.body);
-      const dateStr = date
-        ? new Date(date).toISOString().slice(0, 10)
-        : new Date().toISOString().slice(0, 10);
-      const nota = await almacenamiento.createNote({
-        content: text,
-        date: dateStr,
+      const data = insertNoteSchema.parse(req.body);
+      const nota = await almacenamiento.createNote(data);
+      res.status(201).json({
+        id: nota.id,
+        content: nota.content,
+        created_at: nota.createdAt.toISOString(),
+        updated_at: nota.updatedAt.toISOString(),
+        user_id: nota.userId ?? null,
       });
-      res
-        .status(201)
-        .json({ id: nota.id, text: nota.content, createdAt: nota.createdAt, author: null });
     } catch (err) {
       if (err instanceof z.ZodError) {
         res.status(400).json({ message: "Datos de nota inválidos" });

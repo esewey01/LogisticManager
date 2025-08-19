@@ -180,12 +180,21 @@ export type InsertShippingRule = typeof shippingRules.$inferInsert;
 // Notas privadas por usuario (cuaderno personal)
 export const notes = pgTable("notes", {
   id: serial("id").primaryKey(),
-  date: date("date").notNull(),                  // fecha asociada a la nota
-  content: text("content").notNull(),             // contenido de la nota
-  createdAt: timestamp("created_at").defaultNow(),
+  content: text("content").notNull(),
+  userId: integer("user_id"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
-export type Note = typeof notes.$inferSelect;
+export type NoteRow = typeof notes.$inferSelect;
 export type InsertNote = typeof notes.$inferInsert;
+
+export type Note = {
+  id: number;
+  content: string;
+  created_at: string;
+  updated_at: string;
+  user_id: number | null;
+};
 
 // === PRODUCTOS SHOPIFY ===
 // Productos sincronizados desde Shopify por tienda
@@ -314,40 +323,31 @@ export const insertTicketSchema = z.object({
 });
 
 export const insertNoteSchema = z.object({
-  text: z.string().min(1, "El contenido es obligatorio"),
-  date: z
-    .string()
-    .refine((d) => !Number.isNaN(Date.parse(d)), "Fecha inválida")
-    .optional(),
+  content: z.string().min(1, "El contenido es obligatorio"),
+  userId: z.number().optional(),
 });
-
-export const notesQuerySchema = z.object({
-  from: z
-    .string()
-    .refine((d) => !Number.isNaN(Date.parse(d)), "Fecha inválida")
-    .optional(),
-  to: z
-    .string()
-    .refine((d) => !Number.isNaN(Date.parse(d)), "Fecha inválida")
-    .optional(),
-});
-
-export type NotesQuery = z.infer<typeof notesQuerySchema>;
-
-export interface NoteDTO {
-  id: number;
-  text: string;
-  createdAt: string;
-  author?: string | null;
-}
 
 export interface DashboardMetrics {
   totalOrders: number;
   totalSales: number;
   unmanaged: number;
   managed: number;
+  returned: number;
   byChannel: Array<{ channelId: number; channelName: string; count: number }>;
   byShop: Array<{ shopId: number; shopName?: string | null; count: number }>;
+}
+
+export type UiEstado = "GESTIONADA" | "SIN_GESTIONAR" | "DEVUELTO" | "ERROR";
+export function mapOrderUiStatus(
+  fulfillment_status?: string | null,
+  status?: string | null,
+): UiEstado {
+  const fs = (fulfillment_status || "").toUpperCase();
+  const st = (status || "").toUpperCase();
+  if (fs === "FULFILLED") return "GESTIONADA";
+  if (fs === "UNFULFILLED" || fs === "" || fs === "NULL") return "SIN_GESTIONAR";
+  if (fs === "RESTOCKED" || st === "RESTOCKED") return "DEVUELTO";
+  return "ERROR";
 }
 
 // === Alias en español (opcionales) ===

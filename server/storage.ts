@@ -35,7 +35,7 @@ import {
   type InsertTicket as InsertarTicket,
   type ShippingRule as ReglaEnvio,
   type InsertShippingRule as InsertarReglaEnvio,
-  type Note as Nota,
+  type NoteRow as Nota,
   type InsertNote as InsertarNota,
   type DashboardMetrics,
   type Product as Producto,
@@ -48,6 +48,7 @@ import {
   type InsertProductComboItem as InsertarItemCombo,
   type ExternalProduct as ProductoExterno,
   type InsertExternalProduct as InsertarProductoExterno,
+  mapOrderUiStatus,
 } from "@shared/schema";
 
 import { db as baseDatos } from "./db";
@@ -106,7 +107,7 @@ export interface IStorage {
   createShippingRule(rule: InsertarReglaEnvio): Promise<ReglaEnvio>;
 
   // Notas
-  getNotesRange(from: Date, to: Date): Promise<Nota[]>;
+  getNotes(): Promise<Nota[]>;
   createNote(note: InsertarNota): Promise<Nota>;
   updateNote(id: number, updates: Partial<InsertarNota>): Promise<Nota>;
   deleteNote(id: number): Promise<void>;
@@ -125,7 +126,7 @@ export interface IStorage {
   updateVariant(id: number, updates: Partial<InsertarVariante>): Promise<Variante>;
 
   // Métricas de dashboard
-  getDashboardMetricsRange(from: Date, to: Date): Promise<DashboardMetrics>;
+  getDashboardMetrics(): Promise<DashboardMetrics>;
 
   getOrdersPaginated(params: {
     statusFilter: "unmanaged" | "managed" | "all";
@@ -422,19 +423,20 @@ export class DatabaseStorage implements IStorage {
   // ==== NOTAS ====
 
   /** Lista notas; si se pasa userId, filtra por usuario. */
-  async getNotesRange(from: Date, to: Date): Promise<Nota[]> {
-    const fromStr = from.toISOString().slice(0, 10);
-    const toStr = to.toISOString().slice(0, 10);
+  async getNotes(): Promise<Nota[]> {
     return await baseDatos
       .select()
       .from(tablaNotas)
-      .where(and(gte(tablaNotas.date, fromStr), lte(tablaNotas.date, toStr)))
-      .orderBy(asc(tablaNotas.date));
+      .orderBy(desc(tablaNotas.createdAt));
   }
 
   /** Crea una nota. */
   async createNote(nota: InsertarNota): Promise<Nota> {
-    const [nuevaNota] = await baseDatos.insert(tablaNotas).values(nota).returning();
+    const now = new Date();
+    const [nuevaNota] = await baseDatos
+      .insert(tablaNotas)
+      .values({ ...nota, createdAt: now, updatedAt: now })
+      .returning();
     return nuevaNota;
   }
 
@@ -442,7 +444,7 @@ export class DatabaseStorage implements IStorage {
   async updateNote(id: number, updates: Partial<InsertarNota>): Promise<Nota> {
     const [nota] = await baseDatos
       .update(tablaNotas)
-      .set(updates)
+      .set({ ...updates, updatedAt: new Date() })
       .where(eq(tablaNotas.id, id))
       .returning();
     return nota;
@@ -543,35 +545,37 @@ export class DatabaseStorage implements IStorage {
   /**
    * Métricas de dashboard entre dos fechas.
    */
-  async getDashboardMetricsRange(from: Date, to: Date): Promise<{
+  async getDashboardMetrics(): Promise<{
     totalOrders: number;
     totalSales: number;
-    unmanaged: number;
     managed: number;
+    unmanaged: number;
+    returned: number;
     byChannel: { channelId: number; channelName: string; count: number }[];
     byShop: { shopId: number; shopName: string | null; count: number }[];
   }> {
-    const range = and(gte(tablaOrdenes.createdAt, from), lte(tablaOrdenes.createdAt, to));
-
     const totalOrdersRes = await baseDatos
       .select({ count: count() })
-      .from(tablaOrdenes)
-      .where(range);
+      .from(tablaOrdenes);
 
     const totalSalesRes = await baseDatos
       .select({ sum: sql<number>`COALESCE(SUM(${tablaOrdenes.totalAmount}),0)` })
-      .from(tablaOrdenes)
-      .where(range);
-
-    const unmanagedRes = await baseDatos
-      .select({ count: count() })
-      .from(tablaOrdenes)
-      .where(and(eq(tablaOrdenes.isManaged, false), range));
+      .from(tablaOrdenes);
 
     const managedRes = await baseDatos
       .select({ count: count() })
       .from(tablaOrdenes)
-      .where(and(eq(tablaOrdenes.isManaged, true), range));
+      .where(eq(tablaOrdenes.fulfillmentStatus, "FULFILLED"));
+
+    const unmanagedRes = await baseDatos
+      .select({ count: count() })
+      .from(tablaOrdenes)
+      .where(or(eq(tablaOrdenes.fulfillmentStatus, "UNFULFILLED"), isNull(tablaOrdenes.fulfillmentStatus)));
+
+    const returnedRes = await baseDatos
+      .select({ count: count() })
+      .from(tablaOrdenes)
+      .where(or(eq(tablaOrdenes.fulfillmentStatus, "RESTOCKED"), eq(tablaOrdenes.status, "RESTOCKED")));
 
     const byChannelRes = await baseDatos
       .select({
@@ -581,7 +585,6 @@ export class DatabaseStorage implements IStorage {
       })
       .from(tablaOrdenes)
       .leftJoin(tablaCanales, eq(tablaCanales.id, tablaOrdenes.channelId))
-      .where(range)
       .groupBy(tablaOrdenes.channelId, tablaCanales.name);
 
     const byShopRes = await baseDatos
@@ -590,14 +593,14 @@ export class DatabaseStorage implements IStorage {
         count: sql<number>`COUNT(*)`,
       })
       .from(tablaOrdenes)
-      .where(range)
       .groupBy(tablaOrdenes.shopId);
 
     return {
       totalOrders: Number(totalOrdersRes[0]?.count ?? 0),
       totalSales: Number(totalSalesRes[0]?.sum ?? 0),
-      unmanaged: Number(unmanagedRes[0]?.count ?? 0),
       managed: Number(managedRes[0]?.count ?? 0),
+      unmanaged: Number(unmanagedRes[0]?.count ?? 0),
+      returned: Number(returnedRes[0]?.count ?? 0),
       byChannel: byChannelRes.map((r) => ({
         channelId: Number(r.channelId ?? 0),
         channelName: r.channelName ?? "",
@@ -655,22 +658,18 @@ export class DatabaseStorage implements IStorage {
         channelId: tablaOrdenes.channelId,
         totalAmount: tablaOrdenes.totalAmount,
         fulfillmentStatus: tablaOrdenes.fulfillmentStatus,
+        status: tablaOrdenes.status,
+        isManaged: tablaOrdenes.isManaged,
+        hasTicket: tablaOrdenes.hasTicket,
         createdAt: tablaOrdenes.shopifyCreatedAt,
         itemsCount: sql<number>`COUNT(${tablaItemsOrden.id})`.as("items_count"),
         skus: sql<string[]>`ARRAY_AGG(${tablaItemsOrden.sku})`.as("skus"),
-        uiStatus: sql`
-        CASE
-          WHEN ${tablaOrdenes.fulfillmentStatus} IS NULL OR ${tablaOrdenes.fulfillmentStatus} = 'UNFULFILLED' THEN 'SIN_GESTIONAR'
-          WHEN ${tablaOrdenes.fulfillmentStatus} = 'FULFILLED' THEN 'GESTIONADA'
-          ELSE 'ERROR'
-        END
-      `.as('ui_status'),
       })
       .from(tablaOrdenes)
       .leftJoin(tablaItemsOrden, eq(tablaItemsOrden.orderId, tablaOrdenes.id));
 
     const dataQ = whereClause ? baseSelect.where(whereClause) : baseSelect;
-    const rows = await dataQ
+    const rowsRaw = await dataQ
       .groupBy(
         tablaOrdenes.id,
         tablaOrdenes.name,
@@ -678,11 +677,19 @@ export class DatabaseStorage implements IStorage {
         tablaOrdenes.channelId,
         tablaOrdenes.totalAmount,
         tablaOrdenes.fulfillmentStatus,
+        tablaOrdenes.status,
+        tablaOrdenes.isManaged,
+        tablaOrdenes.hasTicket,
         tablaOrdenes.shopifyCreatedAt,
       )
       .orderBy(desc(tablaOrdenes.shopifyCreatedAt))
       .limit(pageSize)
       .offset(offset);
+
+    const rows = rowsRaw.map((r) => ({
+      ...r,
+      uiStatus: mapOrderUiStatus(r.fulfillmentStatus, r.status),
+    }));
 
     const countQ = baseDatos
       .select({ count: sql<number>`COUNT(DISTINCT ${tablaOrdenes.id})` })

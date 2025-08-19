@@ -8,7 +8,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { apiRequest } from "@/lib/queryClient";
 import OrdersChart from "@/components/charts/OrdersChart";
-import type { DashboardMetrics, NoteDTO } from "@shared/schema";
+import type { DashboardMetrics, Note } from "@shared/schema";
 import {
   FaClipboardList,
   FaCheckCircle,
@@ -32,27 +32,20 @@ export default function Dashboard() {
   });
 
   const {
-    data: notesResp,
+    data: notes = [],
     isLoading: notesLoading,
     error: notesError,
-  } = useQuery<{ notes: NoteDTO[] }>({
+  } = useQuery<Note[]>({
     queryKey: ["/api/notes"],
     queryFn: async () => {
-      const today = new Date();
-      const thirtyDaysAgo = new Date();
-      thirtyDaysAgo.setDate(today.getDate() - 30);
-      const res = await apiRequest(
-        "GET",
-        `/api/notes?from=${thirtyDaysAgo.toISOString()}&to=${today.toISOString()}`,
-      );
+      const res = await apiRequest("GET", "/api/notes");
       return res.json();
     },
   });
-  const notes = notesResp?.notes ?? [];
 
   const addNoteMutation = useMutation({
     mutationFn: async (text: string) => {
-      await apiRequest("POST", "/api/notes", { text });
+      await apiRequest("POST", "/api/notes", { content: text });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/notes"] });
@@ -179,7 +172,7 @@ export default function Dashboard() {
                           className="text-sm text-gray-700 p-3 bg-yellow-50 border-l-4 border-yellow-400 rounded"
                         >
                           <div className="flex justify-between items-start">
-                            <p>{note.text}</p>
+                            <p>{note.content}</p>
                             <Button
                               variant="ghost"
                               size="sm"
@@ -190,7 +183,7 @@ export default function Dashboard() {
                             </Button>
                           </div>
                           <p className="text-xs text-gray-500 mt-1">
-                            {new Date(note.createdAt).toLocaleString()}
+                            {new Date(note.created_at).toLocaleString()}
                           </p>
                         </div>
                       ))
