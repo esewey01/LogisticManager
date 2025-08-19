@@ -5,7 +5,7 @@ LogiSys is a comprehensive logistics management web application designed for a c
 # User Preferences
 
 Preferred communication style: Simple, everyday language.
-Last migration completed: August 13, 2025 - Successfully migrated from Replit Agent with multi-store Shopify support.
+Last migration completed: August 19, 2025 - Successfully updated database schema to match real structure with bigint IDs and complete business rules implementation.
 
 # System Architecture
 
@@ -30,12 +30,13 @@ Last migration completed: August 13, 2025 - Successfully migrated from Replit Ag
 - **Schema Management**: Drizzle Kit for migrations and schema management
 - **Core Tables**:
   - Users (authentication and role management)
-  - Orders (from multiple channels: Shopify, MercadoLibre)
+  - Orders (bigint PK, complete Shopify integration with fulfillment status mapping)
+  - Order_Items (product line items with bigint order_id references)  
   - Tickets (order fulfillment tracking)
-  - Brands/Catalogs (product inventory management)
-  - Channels (sales platform configuration)
-  - Carriers (shipping provider management)
-  - Notes (dashboard annotations)
+  - Catalogo_Productos (real product catalog with SKU management)
+  - Variants (product variants with inventory tracking)
+  - Notes (dashboard annotations with calendar integration)
+  - Channels, Carriers, Brands (configuration tables)
 
 ## Authentication & Authorization
 - **User Roles**: Basic user and administrator roles
@@ -53,7 +54,7 @@ Last migration completed: August 13, 2025 - Successfully migrated from Replit Ag
 
 ## Database Services
 - **Neon**: Serverless PostgreSQL hosting with connection pooling
-- **Drizzle ORM**: Database toolkit with TypeScript integration
+- **Drizzle ORM**: Database toolkit with TypeScript integration and bigint support
 
 ## UI Framework
 - **Radix UI**: Headless component primitives for accessibility
@@ -62,10 +63,11 @@ Last migration completed: August 13, 2025 - Successfully migrated from Replit Ag
 - **Lucide React**: Icon library
 
 ## API Integrations
-- **Shopify Admin API**: GraphQL integration for order synchronization
-  - Authentication: Basic Auth with API key
+- **Shopify Admin API**: GraphQL integration for dual-store order synchronization
+  - Authentication: Basic Auth with API key per store
   - Endpoint: Shopify GraphQL API
   - Sync frequency: Every 5 minutes
+  - Business Rules: FULFILLED → "Gestionado", UNFULFILLED/NULL → "Sin Gestionar", RESTOCKED → "Devuelto", Others → "Error"
 - **MercadoLibre API**: Order management (currently simulated)
   - Future OAuth implementation planned
   - Order search by seller ID
@@ -81,6 +83,10 @@ Last migration completed: August 13, 2025 - Successfully migrated from Replit Ag
 - **File Upload**: Multi-format support for inventory management
 
 ## Session & Security
-- **express-session**: Session management
+- **express-session**: Session management with memory store
 - **bcrypt**: Password hashing
 - **CORS**: Cross-origin resource sharing configuration
+
+## Business Logic
+- **Business Rules Module**: Centralized fulfillment status mapping and order state management
+- **Calendar Integration**: Google Calendar-like interface for notes management

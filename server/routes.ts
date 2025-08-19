@@ -396,9 +396,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const { reason, staffNote, notifyCustomer, restock, refundToOriginal } = req.body;
       const { shop, token, apiVersion } = getShopifyCredentials(String(orden.shopId));
-      const gid = orden.idShopify.startsWith("gid://")
+      const gid = (orden.idShopify && orden.idShopify.startsWith("gid://"))
         ? orden.idShopify
-        : `gid://shopify/Order/${orden.idShopify}`;
+        : `gid://shopify/Order/${orden.idShopify || orden.id}`;
 
       const mutation = `mutation orderCancel($id: ID!, $reason: OrderCancelReason, $staffNote: String, $email: Boolean, $restock: Boolean, $refund: Boolean){
         orderCancel(id: $id, reason: $reason, staffNote: $staffNote, email: $email, restock: $restock, refund: $refund){

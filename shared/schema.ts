@@ -2,7 +2,7 @@
 // NOTA: Mantengo los mismos exports originales para no romper imports existentes.
 //       Además agrego alias en español (usuarios, marcas, etc.) por claridad.
 
-import { pgTable, serial, text, boolean, timestamp, integer, decimal, date } from "drizzle-orm/pg-core";
+import { pgTable, serial, text, boolean, timestamp, integer, decimal, date, bigint, json } from "drizzle-orm/pg-core";
 import { z } from "zod";
 
 // === USUARIOS ===
@@ -53,6 +53,31 @@ export const catalogProducts = pgTable("catalog_products", {
 export type CatalogProduct = typeof catalogProducts.$inferSelect;
 export type InsertCatalogProduct = typeof catalogProducts.$inferInsert;
 
+// === CATÁLOGO DE PRODUCTOS (Tabla Real) ===
+// Catálogo de productos interno con estructura real de la DB
+export const catalogoProductos = pgTable("catalogo_productos", {
+  skuInterno: text("sku_interno").primaryKey().unique(),     // SKU interno único
+  sku: text("sku"),                                          // SKU externo
+  nombreProducto: text("nombre_producto"),                   // nombre del producto
+  marca: text("marca"),                                      // marca
+  modelo: text("modelo"),                                    // modelo
+  categoria: text("categoria"),                              // categoría
+  marcaProducto: text("marca_producto"),                     // marca del producto
+  variante: text("variante"),                                // variante
+  codigoBarras: text("codigo_barras"),                       // código de barras
+  foto: text("foto"),                                        // URL de la foto
+  peso: decimal("peso"),                                     // peso
+  alto: decimal("alto"),                                     // altura
+  ancho: decimal("ancho"),                                   // ancho
+  largo: decimal("largo"),                                   // largo
+  condicion: text("condicion"),                              // condición
+  stock: integer("stock"),                                   // stock disponible
+  costo: decimal("costo"),                                   // costo
+  situacion: text("situacion"),                              // situación
+});
+export type CatalogoProducto = typeof catalogoProductos.$inferSelect;
+export type InsertCatalogoProducto = typeof catalogoProductos.$inferInsert;
+
 // === CANALES ===
 // Canales de venta (WW, CT, MGL, etc.)
 export const channels = pgTable("channels", {
@@ -82,16 +107,21 @@ export const carriers = pgTable("carriers", {
 export type Carrier = typeof carriers.$inferSelect;
 export type InsertCarrier = typeof carriers.$inferInsert;
 
-// === ÓRDENES MEJORADAS (Shopify Integration) ===
-// Registro de órdenes integradas con datos completos de Shopify
-// === ÓRDENES (Shopify Integration) ===
+// === ÓRDENES ===
+// Estructura completa basada en la base de datos real
 export const orders = pgTable("orders", {
-  id: serial("id").primaryKey(),
-
-  // Datos de cliente / envío
+  id: bigint("id", { mode: "bigint" }).primaryKey(),
+  shopId: integer("shop_id"),
+  channelId: integer("channel_id"),
+  name: text("name"),
+  orderNumber: text("order_number"),
+  idShopify: text("id_shopify"),
+  orderId: text("order_id"),
+  customerName: text("customer_name"),
   customerFirstName: text("customer_first_name"),
   customerLastName: text("customer_last_name"),
-
+  customerEmail: text("customer_email"),
+  contactPhone: text("contact_phone"),
   shipName: text("ship_name"),
   shipPhone: text("ship_phone"),
   shipAddress1: text("ship_address1"),
@@ -99,47 +129,25 @@ export const orders = pgTable("orders", {
   shipProvince: text("ship_province"),
   shipCountry: text("ship_country"),
   shipZip: text("ship_zip"),
-
-  // Compatibilidad / legacy
-  orderId: text("order_id").notNull().unique(),    // si lo usas como ID externo legible
-  channelId: integer("channel_id").notNull(),
-  customerName: text("customer_name"),
+  currency: text("currency"),
+  subtotalPrice: decimal("subtotal_price"),
   totalAmount: decimal("total_amount"),
-  isManaged: boolean("is_managed").notNull().default(false),
-  hasTicket: boolean("has_ticket").notNull().default(false),
-  status: text("status").notNull().default("pending"),
-
-  // Identificación Shopify
-  idShopify: text("id_shopify").notNull(),
-  shopId: integer("shop_id").notNull(),
-
-  // Datos generales de la orden
-  name: text("name"),
-  orderNumber: text("order_number"),
   financialStatus: text("financial_status"),
   fulfillmentStatus: text("fulfillment_status"),
-  currency: text("currency").default("MXN"),
-  subtotalPrice: decimal("subtotal_price"),
-  customerEmail: text("customer_email"),
-  contactPhone: text("contact_phone"),
-
-  // Notas & tags
-  orderNote: text("order_note"),
+  status: text("status"),
+  hasTicket: boolean("has_ticket"),
+  isManaged: boolean("is_managed"),
   tags: text("tags").array(),
-
-  // Fechas nativas de Shopify (timestamptz)
+  orderNote: text("order_note"),
+  noteAttributes: json("note_attributes"),
   shopifyCreatedAt: timestamp("shopify_created_at", { withTimezone: true }),
   shopifyUpdatedAt: timestamp("shopify_updated_at", { withTimezone: true }),
   shopifyProcessedAt: timestamp("shopify_processed_at", { withTimezone: true }),
   shopifyClosedAt: timestamp("shopify_closed_at", { withTimezone: true }),
   shopifyCancelledAt: timestamp("shopify_cancelled_at", { withTimezone: true }),
-
-  // Motivo de cancelación (Shopify)
-  cancelReason: text("cancel_reason"),
-
-  // Timestamps internos de tu app
-  createdAt: timestamp("created_at").defaultNow(),
+  createdAt: timestamp("created_at"),
   updatedAt: timestamp("updated_at"),
+  cancelReason: text("cancel_reason"),
 });
 
 export type Order = typeof orders.$inferSelect;
@@ -149,11 +157,11 @@ export type InsertOrder = typeof orders.$inferInsert;
 // Tickets vinculados a órdenes (soporte/gestión)
 export const tickets = pgTable("tickets", {
   id: serial("id").primaryKey(),
-  ticketNumber: text("ticket_number").notNull().unique(), // folio del ticket
-  orderId: integer("order_id").notNull(),                 // referencia a orders.id
-  status: text("status").notNull().default("open"),      // estado del ticket
-  notes: text("notes"),                                    // notas libres
-  createdAt: timestamp("created_at").defaultNow(),
+  orderId: integer("order_id"),                           // referencia a orders.id
+  ticketNumber: text("ticket_number"),                    // folio del ticket
+  status: text("status"),                                 // estado del ticket
+  notes: text("notes"),                                   // notas libres
+  createdAt: timestamp("created_at"),
   updatedAt: timestamp("updated_at"),
 });
 export type Ticket = typeof tickets.$inferSelect;
@@ -219,14 +227,14 @@ export type InsertExternalProduct = typeof externalProducts.$inferInsert;
 // Variantes de productos Shopify (SKU, precio, inventario)
 export const variants = pgTable("variants", {
   id: serial("id").primaryKey(),
-  idShopify: text("id_shopify").notNull(),        // ID de variante en Shopify
-  productId: integer("product_id").notNull(),     // referencia a products.id
+  productId: integer("product_id"),               // referencia a products.id
+  idShopify: text("id_shopify"),                  // ID de variante en Shopify
   sku: text("sku"),                               // SKU de la variante
   price: decimal("price"),                        // precio de venta
   compareAtPrice: decimal("compare_at_price"),    // precio de comparación
   barcode: text("barcode"),                       // código de barras
   inventoryQty: integer("inventory_qty"),         // cantidad en inventario
-  createdAt: timestamp("created_at").defaultNow(),
+  createdAt: timestamp("created_at"),
   updatedAt: timestamp("updated_at"),
 });
 export type Variant = typeof variants.$inferSelect;
@@ -236,16 +244,15 @@ export type InsertVariant = typeof variants.$inferInsert;
 // Líneas de orden (productos dentro de una orden)
 export const orderItems = pgTable("order_items", {
   id: serial("id").primaryKey(),
-  orderId: integer("order_id").notNull(),         // referencia a orders.id
-  // en schema de items
+  orderId: bigint("order_id", { mode: "bigint" }),        // referencia a orders.id
+  productId: integer("product_id"),                       // referencia a products.id (opcional)
+  variantId: integer("variant_id"),                       // referencia a variants.id (opcional)
   shopifyProductId: text("shopify_product_id"),
   shopifyVariantId: text("shopify_variant_id"),
-  productId: integer("product_id"),               // referencia a products.id (opcional)
-  variantId: integer("variant_id"),               // referencia a variants.id (opcional)
-  sku: text("sku"),                               // SKU del producto
-  quantity: integer("quantity").notNull(),        // cantidad
-  price: decimal("price"),                        // precio unitario
-  createdAt: timestamp("created_at").defaultNow(),
+  sku: text("sku"),                                       // SKU del producto
+  price: decimal("price"),                                // precio unitario
+  quantity: integer("quantity"),                          // cantidad
+  createdAt: timestamp("created_at"),
 });
 export type OrderItem = typeof orderItems.$inferSelect;
 export type InsertOrderItem = typeof orderItems.$inferInsert;
@@ -308,7 +315,7 @@ export const insertVariantSchema = z.object({
 });
 
 export const insertTicketSchema = z.object({
-  ticketNumber: z.string().min(1, "El número de ticket es obligatorio"),
+  ticketNumber: z.string().optional(),
   orderId: z.number().int().positive("El ID de la orden debe ser un número positivo"),
   status: z.string().default("open"),
   notes: z.string().optional(),

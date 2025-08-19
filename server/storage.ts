@@ -319,7 +319,7 @@ export class DatabaseStorage implements IStorage {
 
   /** Obtiene una orden por ID. */
   async getOrder(id: number): Promise<Orden | undefined> {
-    const [orden] = await baseDatos.select().from(tablaOrdenes).where(eq(tablaOrdenes.id, id));
+    const [orden] = await baseDatos.select().from(tablaOrdenes).where(eq(tablaOrdenes.id, BigInt(id)));
     return orden;
   }
 
@@ -334,7 +334,7 @@ export class DatabaseStorage implements IStorage {
     const [orden] = await baseDatos
       .update(tablaOrdenes)
       .set({ ...updates, updatedAt: new Date() })
-      .where(eq(tablaOrdenes.id, id))
+      .where(eq(tablaOrdenes.id, BigInt(id)))
       .returning();
     return orden;
   }
@@ -715,7 +715,7 @@ export class DatabaseStorage implements IStorage {
       })
       .from(tablaItemsOrden)
       .leftJoin(tablaProductos, eq(tablaProductos.id, tablaItemsOrden.productId))
-      .where(eq(tablaItemsOrden.orderId, orderId))
+      .where(eq(tablaItemsOrden.orderId, BigInt(orderId)))
       .orderBy(asc(tablaItemsOrden.id));
   }
 
