@@ -921,12 +921,11 @@ export class DatabaseStorage implements IStorage {
         conds.push(sql`o.channel_id = ${channelId}`);
       }
       
-      // Búsqueda textual usando SQL puro para evitar mezclar con eq()
+      // Búsqueda textual solo por name y SKU (case-insensitive)
       if (search) {
         conds.push(
           sql`(
             LOWER(COALESCE(o.name, '')) LIKE LOWER(${'%' + search + '%'}) OR 
-            LOWER(COALESCE(o.customer_name, '')) LIKE LOWER(${'%' + search + '%'}) OR 
             EXISTS (
               SELECT 1 FROM order_items oi2 
               WHERE oi2.order_id = o.id 

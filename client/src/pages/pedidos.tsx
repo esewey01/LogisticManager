@@ -11,6 +11,14 @@ import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import OrderDetailsModal from "@/components/modals/OrderDetailsModal";
 import CancelOrderModal from "@/components/modals/CancelOrderModal";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 
 import {
@@ -192,6 +200,9 @@ export default function Pedidos() {
     },
   });
 
+  // Estado para mostrar dialog de confirmación de normalización
+  const [showNormalizeDialog, setShowNormalizeDialog] = useState(false);
+
   // Mutación para normalizar fulfillment_status NULL
   const normalizeFulfillmentMutation = useMutation({
     mutationFn: async () => {
@@ -201,10 +212,11 @@ export default function Pedidos() {
     onSuccess: (data: any) => {
       toast({
         title: "Normalización completada",
-        description: `Se actualizaron ${data.updated} órdenes con fulfillment_status NULL`,
+        description: `Se normalizaron ${data.updated} órdenes con fulfillment_status NULL → FULFILLED`,
       });
       queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
       queryClient.invalidateQueries({ queryKey: ["/api/dashboard/metrics"] });
+      setShowNormalizeDialog(false);
     },
     onError: (error: any) => {
       toast({
@@ -212,6 +224,7 @@ export default function Pedidos() {
         description: error?.message || "No se pudieron normalizar las órdenes",
         variant: "destructive",
       });
+      setShowNormalizeDialog(false);
     },
   });
 
@@ -287,7 +300,7 @@ export default function Pedidos() {
               </Button>
 
               <Button 
-                onClick={() => normalizeFulfillmentMutation.mutate()}
+                onClick={() => setShowNormalizeDialog(true)}
                 disabled={normalizeFulfillmentMutation.isPending}
                 variant="outline"
                 data-testid="button-normalize-fulfillment"
@@ -531,6 +544,53 @@ export default function Pedidos() {
           )}
         </CardContent>
       </Card>
+
+      {/* Dialog de confirmación para normalización */}
+      <Dialog open={showNormalizeDialog} onOpenChange={setShowNormalizeDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Normalizar Estados de Fulfillment</DialogTitle>
+            <DialogDescription>
+              Esta acción cambiará todas las órdenes con fulfillment_status NULL a "FULFILLED" (Gestionada).
+              <br />
+              <br />
+              <strong>¿Qué hace?</strong>
+              <ul className="list-disc list-inside mt-2 space-y-1">
+                <li>Busca órdenes con fulfillment_status = NULL (vacío)</li>
+                <li>Las actualiza a fulfillment_status = "FULFILLED"</li>
+                <li>Esto las moverá del filtro "Sin Gestionar" a "Gestionadas"</li>
+              </ul>
+              <br />
+              ¿Deseas continuar?
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button 
+              variant="outline" 
+              onClick={() => setShowNormalizeDialog(false)}
+              disabled={normalizeFulfillmentMutation.isPending}
+            >
+              Cancelar
+            </Button>
+            <Button 
+              onClick={() => normalizeFulfillmentMutation.mutate()}
+              disabled={normalizeFulfillmentMutation.isPending}
+            >
+              {normalizeFulfillmentMutation.isPending ? (
+                <>
+                  <i className="fas fa-spinner fa-spin mr-2"></i>
+                  Procesando...
+                </>
+              ) : (
+                <>
+                  <i className="fas fa-check mr-2"></i>
+                  Normalizar
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {selectedOrder && (
         <OrderDetailsModal
