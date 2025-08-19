@@ -51,7 +51,18 @@ import {
 } from "@shared/schema";
 
 import { db as baseDatos } from "./db";
-import { eq, and, or, isNull, desc, asc, sql, count, gte, lte } from "drizzle-orm";
+import {
+  eq,
+  and,
+  or,
+  isNull,
+  desc,
+  asc,
+  sql,
+  count,
+  gte,
+  lte,
+} from "drizzle-orm";
 
 const createdAtEff = (tabla: typeof tablaOrdenes) =>
   sql`COALESCE(${tabla.shopifyCreatedAt}, ${tabla.createdAt})`;
@@ -73,8 +84,13 @@ export interface IStorage {
 
   // Catálogo
   getCatalogProducts(brandId?: number): Promise<ProductoCatalogo[]>;
-  createCatalogProduct(product: InsertarProductoCatalogo): Promise<ProductoCatalogo>;
-  updateCatalogProduct(id: number, updates: Partial<InsertarProductoCatalogo>): Promise<ProductoCatalogo>;
+  createCatalogProduct(
+    product: InsertarProductoCatalogo,
+  ): Promise<ProductoCatalogo>;
+  updateCatalogProduct(
+    id: number,
+    updates: Partial<InsertarProductoCatalogo>,
+  ): Promise<ProductoCatalogo>;
 
   // Canales
   getChannels(): Promise<Canal[]>;
@@ -87,20 +103,32 @@ export interface IStorage {
   createCarrier(carrier: InsertarPaqueteria): Promise<Paqueteria>;
 
   // Órdenes
-  getOrders(filters?: { channelId?: number; managed?: boolean; hasTicket?: boolean }): Promise<Orden[]>;
+  getOrders(filters?: {
+    channelId?: number;
+    managed?: boolean;
+    hasTicket?: boolean;
+  }): Promise<Orden[]>;
   getOrder(id: number): Promise<Orden | undefined>;
-  getOrderByShopifyId(shopifyId: string, shopId: number): Promise<Orden | undefined>;
+  getOrderByShopifyId(
+    shopifyId: string,
+    shopId: number,
+  ): Promise<Orden | undefined>;
   createOrder(order: InsertarOrden): Promise<Orden>;
   updateOrder(id: number, updates: Partial<InsertarOrden>): Promise<Orden>;
   getOrdersByCustomer(customerName: string): Promise<Orden[]>;
-  getOrdersByChannel(): Promise<{ channelCode: string; channelName: string; orders: number }[]>;
+  getOrdersByChannel(): Promise<
+    { channelCode: string; channelName: string; orders: number }[]
+  >;
 
   // Tickets
   getTickets(): Promise<Ticket[]>;
   getTicket(id: number): Promise<Ticket | undefined>;
   createTicket(ticket: InsertarTicket): Promise<Ticket>;
   updateTicket(id: number, updates: Partial<InsertarTicket>): Promise<Ticket>;
-  createBulkTickets(orderIds: (number | string)[], notes?: string): Promise<{ tickets: Ticket[]; updated: number }>;
+  createBulkTickets(
+    orderIds: (number | string)[],
+    notes?: string,
+  ): Promise<{ tickets: Ticket[]; updated: number }>;
   getNextTicketNumber(): Promise<string>;
   normalizeNullFulfillmentStatus(): Promise<{ updated: number }>;
 
@@ -118,14 +146,23 @@ export interface IStorage {
   createOrderItem(item: InsertarItemOrden): Promise<ItemOrden>;
   getProducts(shopId?: number): Promise<Producto[]>;
   getProduct(id: number): Promise<Producto | undefined>;
-  getProductByShopifyId(shopifyId: string, shopId: number): Promise<Producto | undefined>;
+  getProductByShopifyId(
+    shopifyId: string,
+    shopId: number,
+  ): Promise<Producto | undefined>;
   createProduct(product: InsertarProducto): Promise<Producto>;
-  updateProduct(id: number, updates: Partial<InsertarProducto>): Promise<Producto>;
+  updateProduct(
+    id: number,
+    updates: Partial<InsertarProducto>,
+  ): Promise<Producto>;
 
   getVariants(productId?: number): Promise<Variante[]>;
   getVariant(id: number): Promise<Variante | undefined>;
   createVariant(variant: InsertarVariante): Promise<Variante>;
-  updateVariant(id: number, updates: Partial<InsertarVariante>): Promise<Variante>;
+  updateVariant(
+    id: number,
+    updates: Partial<InsertarVariante>,
+  ): Promise<Variante>;
 
   // Métricas de dashboard
   getDashboardMetricsRange(from: Date, to: Date): Promise<DashboardMetrics>;
@@ -140,9 +177,19 @@ export interface IStorage {
 
   getOrderItems(orderId: number): Promise<any[]>;
 
-  getProductsPaginated(shopId: number, page: number, pageSize: number): Promise<{ rows: any[]; total: number; page: number; pageSize: number }>;
-  getCatalogProductsPaginated(page: number, pageSize: number): Promise<{ rows: any[]; total: number; page: number; pageSize: number }>;
-  getExternalProductsPaginated(page: number, pageSize: number): Promise<{ rows: any[]; total: number; page: number; pageSize: number }>;
+  getProductsPaginated(
+    shopId: number,
+    page: number,
+    pageSize: number,
+  ): Promise<{ rows: any[]; total: number; page: number; pageSize: number }>;
+  getCatalogProductsPaginated(
+    page: number,
+    pageSize: number,
+  ): Promise<{ rows: any[]; total: number; page: number; pageSize: number }>;
+  getExternalProductsPaginated(
+    page: number,
+    pageSize: number,
+  ): Promise<{ rows: any[]; total: number; page: number; pageSize: number }>;
 }
 
 /**
@@ -154,24 +201,36 @@ export class DatabaseStorage implements IStorage {
 
   /** Obtiene un usuario por su ID. */
   async getUser(id: number): Promise<Usuario | undefined> {
-    const [usuario] = await baseDatos.select().from(tablaUsuarios).where(eq(tablaUsuarios.id, id));
+    const [usuario] = await baseDatos
+      .select()
+      .from(tablaUsuarios)
+      .where(eq(tablaUsuarios.id, id));
     return usuario;
   }
 
   /** Busca un usuario por correo electrónico. */
   async getUserByEmail(email: string): Promise<Usuario | undefined> {
-    const [usuario] = await baseDatos.select().from(tablaUsuarios).where(eq(tablaUsuarios.email, email));
+    const [usuario] = await baseDatos
+      .select()
+      .from(tablaUsuarios)
+      .where(eq(tablaUsuarios.email, email));
     return usuario;
   }
 
   /** Crea un nuevo usuario. */
   async createUser(datos: InsertarUsuario): Promise<Usuario> {
-    const [usuario] = await baseDatos.insert(tablaUsuarios).values(datos).returning();
+    const [usuario] = await baseDatos
+      .insert(tablaUsuarios)
+      .values(datos)
+      .returning();
     return usuario;
   }
 
   /** Actualiza campos de un usuario existente. */
-  async updateUser(id: number, updates: Partial<InsertarUsuario>): Promise<Usuario> {
+  async updateUser(
+    id: number,
+    updates: Partial<InsertarUsuario>,
+  ): Promise<Usuario> {
     const [usuario] = await baseDatos
       .update(tablaUsuarios)
       .set({ ...updates, updatedAt: new Date() })
@@ -182,7 +241,10 @@ export class DatabaseStorage implements IStorage {
 
   /** Lista todos los usuarios ordenados por correo. */
   async getAllUsers(): Promise<Usuario[]> {
-    return await baseDatos.select().from(tablaUsuarios).orderBy(asc(tablaUsuarios.email));
+    return await baseDatos
+      .select()
+      .from(tablaUsuarios)
+      .orderBy(asc(tablaUsuarios.email));
   }
 
   // ==== MARCAS ====
@@ -198,18 +260,27 @@ export class DatabaseStorage implements IStorage {
 
   /** Obtiene una marca por ID. */
   async getBrand(id: number): Promise<Marca | undefined> {
-    const [marca] = await baseDatos.select().from(tablaMarcas).where(eq(tablaMarcas.id, id));
+    const [marca] = await baseDatos
+      .select()
+      .from(tablaMarcas)
+      .where(eq(tablaMarcas.id, id));
     return marca;
   }
 
   /** Crea una nueva marca. */
   async createBrand(datos: InsertarMarca): Promise<Marca> {
-    const [marcaNueva] = await baseDatos.insert(tablaMarcas).values(datos).returning();
+    const [marcaNueva] = await baseDatos
+      .insert(tablaMarcas)
+      .values(datos)
+      .returning();
     return marcaNueva;
   }
 
   /** Actualiza una marca. */
-  async updateBrand(id: number, updates: Partial<InsertarMarca>): Promise<Marca> {
+  async updateBrand(
+    id: number,
+    updates: Partial<InsertarMarca>,
+  ): Promise<Marca> {
     const [marca] = await baseDatos
       .update(tablaMarcas)
       .set(updates)
@@ -232,13 +303,21 @@ export class DatabaseStorage implements IStorage {
   }
 
   /** Crea un producto de catálogo. */
-  async createCatalogProduct(datos: InsertarProductoCatalogo): Promise<ProductoCatalogo> {
-    const [productoNuevo] = await baseDatos.insert(tablaProductosCatalogo).values(datos).returning();
+  async createCatalogProduct(
+    datos: InsertarProductoCatalogo,
+  ): Promise<ProductoCatalogo> {
+    const [productoNuevo] = await baseDatos
+      .insert(tablaProductosCatalogo)
+      .values(datos)
+      .returning();
     return productoNuevo;
   }
 
   /** Actualiza un producto de catálogo. */
-  async updateCatalogProduct(id: number, updates: Partial<InsertarProductoCatalogo>): Promise<ProductoCatalogo> {
+  async updateCatalogProduct(
+    id: number,
+    updates: Partial<InsertarProductoCatalogo>,
+  ): Promise<ProductoCatalogo> {
     const [producto] = await baseDatos
       .update(tablaProductosCatalogo)
       .set({ ...updates, updatedAt: new Date() })
@@ -260,13 +339,19 @@ export class DatabaseStorage implements IStorage {
 
   /** Obtiene un canal por ID. */
   async getChannel(id: number): Promise<Canal | undefined> {
-    const [canal] = await baseDatos.select().from(tablaCanales).where(eq(tablaCanales.id, id));
+    const [canal] = await baseDatos
+      .select()
+      .from(tablaCanales)
+      .where(eq(tablaCanales.id, id));
     return canal;
   }
 
   /** Crea un canal. */
   async createChannel(datos: InsertarCanal): Promise<Canal> {
-    const [canalNuevo] = await baseDatos.insert(tablaCanales).values(datos).returning();
+    const [canalNuevo] = await baseDatos
+      .insert(tablaCanales)
+      .values(datos)
+      .returning();
     return canalNuevo;
   }
 
@@ -283,57 +368,76 @@ export class DatabaseStorage implements IStorage {
 
   /** Obtiene una paquetería por ID. */
   async getCarrier(id: number): Promise<Paqueteria | undefined> {
-    const [paq] = await baseDatos.select().from(tablaPaqueterias).where(eq(tablaPaqueterias.id, id));
+    const [paq] = await baseDatos
+      .select()
+      .from(tablaPaqueterias)
+      .where(eq(tablaPaqueterias.id, id));
     return paq;
   }
 
   /** Crea una paquetería. */
   async createCarrier(datos: InsertarPaqueteria): Promise<Paqueteria> {
-    const [paqueteriaNueva] = await baseDatos.insert(tablaPaqueterias).values(datos).returning();
+    const [paqueteriaNueva] = await baseDatos
+      .insert(tablaPaqueterias)
+      .values(datos)
+      .returning();
     return paqueteriaNueva;
   }
 
   // ==== ÓRDENES ====
 
   /** Lista órdenes con filtros opcionales (canal, gestionada, con ticket). */
-  async getOrders(filtros?: { channelId?: number; managed?: boolean; hasTicket?: boolean }): Promise<Orden[]> {
+  async getOrders(filtros?: {
+    channelId?: number;
+    managed?: boolean;
+    hasTicket?: boolean;
+  }): Promise<Orden[]> {
     const condiciones: any[] = [];
 
-    if (filtros?.channelId !== undefined) condiciones.push(eq(tablaOrdenes.channelId, filtros.channelId));
-    if (filtros?.managed !== undefined) condiciones.push(eq(tablaOrdenes.isManaged, filtros.managed));
-    if (filtros?.hasTicket !== undefined) condiciones.push(eq(tablaOrdenes.hasTicket, filtros.hasTicket));
+    if (filtros?.channelId !== undefined)
+      condiciones.push(eq(tablaOrdenes.channelId, filtros.channelId));
+    if (filtros?.managed !== undefined)
+      condiciones.push(eq(tablaOrdenes.isManaged, filtros.managed));
+    if (filtros?.hasTicket !== undefined)
+      condiciones.push(eq(tablaOrdenes.hasTicket, filtros.hasTicket));
 
     if (condiciones.length > 0) {
       return await baseDatos
         .select()
         .from(tablaOrdenes)
         .where(and(...condiciones))
-        .orderBy(desc(createdAtEff(tablaOrdenes)))
-
+        .orderBy(desc(createdAtEff(tablaOrdenes)));
     }
 
     return await baseDatos
       .select()
       .from(tablaOrdenes)
-      .orderBy(desc(createdAtEff(tablaOrdenes)))
-
+      .orderBy(desc(createdAtEff(tablaOrdenes)));
   }
-
 
   /** Obtiene una orden por ID. */
   async getOrder(id: number): Promise<Orden | undefined> {
-    const [orden] = await baseDatos.select().from(tablaOrdenes).where(eq(tablaOrdenes.id, BigInt(id)));
+    const [orden] = await baseDatos
+      .select()
+      .from(tablaOrdenes)
+      .where(eq(tablaOrdenes.id, BigInt(id)));
     return orden;
   }
 
   /** Crea una orden. */
   async createOrder(datos: InsertarOrden): Promise<Orden> {
-    const [ordenNueva] = await baseDatos.insert(tablaOrdenes).values(datos).returning();
+    const [ordenNueva] = await baseDatos
+      .insert(tablaOrdenes)
+      .values(datos)
+      .returning();
     return ordenNueva;
   }
 
   /** Actualiza una orden. */
-  async updateOrder(id: number, updates: Partial<InsertarOrden>): Promise<Orden> {
+  async updateOrder(
+    id: number,
+    updates: Partial<InsertarOrden>,
+  ): Promise<Orden> {
     const [orden] = await baseDatos
       .update(tablaOrdenes)
       .set({ ...updates, updatedAt: new Date() })
@@ -351,8 +455,14 @@ export class DatabaseStorage implements IStorage {
       .orderBy(desc(tablaOrdenes.createdAt));
   }
 
-  async getOrdersByChannel(): Promise<{ channelCode: string; channelName: string; orders: number }[]> {
-    const result = await baseDatos.execute<{ channel_code: string; channel_name: string; orders: number }>(sql`
+  async getOrdersByChannel(): Promise<
+    { channelCode: string; channelName: string; orders: number }[]
+  > {
+    const result = await baseDatos.execute<{
+      channel_code: string;
+      channel_name: string;
+      orders: number;
+    }>(sql`
     SELECT 
       c.code as channel_code,
       c.name as channel_name,
@@ -364,19 +474,27 @@ export class DatabaseStorage implements IStorage {
     ORDER BY orders DESC
   `);
 
-    return result.rows.map(row => ({
+    return result.rows.map((row) => ({
       channelCode: row.channel_code,
       channelName: row.channel_name,
-      orders: row.orders
+      orders: row.orders,
     }));
   }
 
   /** Obtiene una orden por ID de Shopify y tienda. */
-  async getOrderByShopifyId(shopifyId: string, shopId: number): Promise<Orden | undefined> {
+  async getOrderByShopifyId(
+    shopifyId: string,
+    shopId: number,
+  ): Promise<Orden | undefined> {
     const [orden] = await baseDatos
       .select()
       .from(tablaOrdenes)
-      .where(and(eq(tablaOrdenes.idShopify, shopifyId), eq(tablaOrdenes.shopId, shopId)));
+      .where(
+        and(
+          eq(tablaOrdenes.idShopify, shopifyId),
+          eq(tablaOrdenes.shopId, shopId),
+        ),
+      );
     return orden;
   }
 
@@ -384,23 +502,35 @@ export class DatabaseStorage implements IStorage {
 
   /** Lista tickets ordenados por fecha de creación descendente. */
   async getTickets(): Promise<Ticket[]> {
-    return await baseDatos.select().from(tablaTickets).orderBy(desc(tablaTickets.createdAt));
+    return await baseDatos
+      .select()
+      .from(tablaTickets)
+      .orderBy(desc(tablaTickets.createdAt));
   }
 
   /** Obtiene un ticket por ID. */
   async getTicket(id: number): Promise<Ticket | undefined> {
-    const [ticket] = await baseDatos.select().from(tablaTickets).where(eq(tablaTickets.id, id));
+    const [ticket] = await baseDatos
+      .select()
+      .from(tablaTickets)
+      .where(eq(tablaTickets.id, id));
     return ticket;
   }
 
   /** Crea un ticket. */
   async createTicket(datos: InsertarTicket): Promise<Ticket> {
-    const [ticketNuevo] = await baseDatos.insert(tablaTickets).values(datos).returning();
+    const [ticketNuevo] = await baseDatos
+      .insert(tablaTickets)
+      .values(datos)
+      .returning();
     return ticketNuevo;
   }
 
   /** Actualiza un ticket. */
-  async updateTicket(id: number, updates: Partial<InsertarTicket>): Promise<Ticket> {
+  async updateTicket(
+    id: number,
+    updates: Partial<InsertarTicket>,
+  ): Promise<Ticket> {
     const [ticket] = await baseDatos
       .update(tablaTickets)
       .set({ ...updates, updatedAt: new Date() })
@@ -427,14 +557,18 @@ export class DatabaseStorage implements IStorage {
   }
 
   /** Crea tickets masivos para múltiples órdenes. */
-  async createBulkTickets(orderIds: (number | string)[], notes?: string): Promise<{ tickets: Ticket[]; updated: number }> {
+  async createBulkTickets(
+    orderIds: (number | string)[],
+    notes?: string,
+  ): Promise<{ tickets: Ticket[]; updated: number }> {
     const tickets: Ticket[] = [];
     let updated = 0;
 
     // Procesar cada orden
     for (const orderId of orderIds) {
-      const numeroOrdenNumerica = typeof orderId === 'string' ? parseInt(orderId) : orderId;
-      
+      const numeroOrdenNumerica =
+        typeof orderId === "string" ? parseInt(orderId) : orderId;
+
       // Verificar que la orden existe
       const orden = await this.getOrder(numeroOrdenNumerica);
       if (!orden) {
@@ -450,7 +584,9 @@ export class DatabaseStorage implements IStorage {
         ticketNumber: numeroTicket,
         orderId: numeroOrdenNumerica,
         status: "open",
-        notes: notes || `Ticket creado masivamente para orden ${orden.name || orderId}`,
+        notes:
+          notes ||
+          `Ticket creado masivamente para orden ${orden.name || orderId}`,
       });
 
       tickets.push(ticketNuevo);
@@ -469,19 +605,21 @@ export class DatabaseStorage implements IStorage {
 
   /** Normaliza órdenes con fulfillment_status NULL marcándolas como fulfilled. */
   async normalizeNullFulfillmentStatus(): Promise<{ updated: number }> {
-    console.log('🔄 Normalizando fulfillment_status NULL...');
-    
+    console.log("🔄 Normalizando fulfillment_status NULL...");
+
     const resultado = await baseDatos
       .update(tablaOrdenes)
-      .set({ 
-        fulfillmentStatus: 'FULFILLED',
-        updatedAt: new Date()
+      .set({
+        fulfillmentStatus: "fulfilled",
+        updatedAt: new Date(),
       })
       .where(isNull(tablaOrdenes.fulfillmentStatus))
       .returning({ id: tablaOrdenes.id });
 
     const updated = resultado.length;
-    console.log(`✅ ${updated} órdenes normalizadas con fulfillment_status FULFILLED`);
+    console.log(
+      `✅ ${updated} órdenes normalizadas con fulfillment_status FULFILLED`,
+    );
 
     return { updated };
   }
@@ -490,12 +628,18 @@ export class DatabaseStorage implements IStorage {
 
   /** Devuelve reglas de envío activas. */
   async getShippingRules(): Promise<ReglaEnvio[]> {
-    return await baseDatos.select().from(tablaReglasEnvio).where(eq(tablaReglasEnvio.isActive, true));
+    return await baseDatos
+      .select()
+      .from(tablaReglasEnvio)
+      .where(eq(tablaReglasEnvio.isActive, true));
   }
 
   /** Crea una regla de envío. */
   async createShippingRule(regla: InsertarReglaEnvio): Promise<ReglaEnvio> {
-    const [nuevaRegla] = await baseDatos.insert(tablaReglasEnvio).values(regla).returning();
+    const [nuevaRegla] = await baseDatos
+      .insert(tablaReglasEnvio)
+      .values(regla)
+      .returning();
     return nuevaRegla;
   }
 
@@ -515,13 +659,18 @@ export class DatabaseStorage implements IStorage {
     return await baseDatos
       .select()
       .from(tablaNotas)
-      .where(and(gte(tablaNotas.createdAt, from), lte(tablaNotas.createdAt, to)))
+      .where(
+        and(gte(tablaNotas.createdAt, from), lte(tablaNotas.createdAt, to)),
+      )
       .orderBy(asc(tablaNotas.createdAt));
   }
 
   /** Crea una nota. */
   async createNote(nota: InsertarNota): Promise<Nota> {
-    const [nuevaNota] = await baseDatos.insert(tablaNotas).values(nota).returning();
+    const [nuevaNota] = await baseDatos
+      .insert(tablaNotas)
+      .values(nota)
+      .returning();
     return nuevaNota;
   }
 
@@ -544,7 +693,10 @@ export class DatabaseStorage implements IStorage {
 
   /** Crea un item de orden. */
   async createOrderItem(datos: InsertarItemOrden): Promise<ItemOrden> {
-    const [item] = await baseDatos.insert(tablaItemsOrden).values(datos).returning();
+    const [item] = await baseDatos
+      .insert(tablaItemsOrden)
+      .values(datos)
+      .returning();
     return item;
   }
 
@@ -557,32 +709,52 @@ export class DatabaseStorage implements IStorage {
         .where(eq(tablaProductos.shopId, shopId))
         .orderBy(asc(tablaProductos.title));
     }
-    return await baseDatos.select().from(tablaProductos).orderBy(asc(tablaProductos.title));
+    return await baseDatos
+      .select()
+      .from(tablaProductos)
+      .orderBy(asc(tablaProductos.title));
   }
 
   /** Obtiene un producto por ID. */
   async getProduct(id: number): Promise<Producto | undefined> {
-    const [producto] = await baseDatos.select().from(tablaProductos).where(eq(tablaProductos.id, id));
+    const [producto] = await baseDatos
+      .select()
+      .from(tablaProductos)
+      .where(eq(tablaProductos.id, id));
     return producto;
   }
 
   /** Obtiene un producto por ID de Shopify y tienda. */
-  async getProductByShopifyId(shopifyId: string, shopId: number): Promise<Producto | undefined> {
+  async getProductByShopifyId(
+    shopifyId: string,
+    shopId: number,
+  ): Promise<Producto | undefined> {
     const [producto] = await baseDatos
       .select()
       .from(tablaProductos)
-      .where(and(eq(tablaProductos.idShopify, shopifyId), eq(tablaProductos.shopId, shopId)));
+      .where(
+        and(
+          eq(tablaProductos.idShopify, shopifyId),
+          eq(tablaProductos.shopId, shopId),
+        ),
+      );
     return producto;
   }
 
   /** Crea un producto. */
   async createProduct(datos: InsertarProducto): Promise<Producto> {
-    const [producto] = await baseDatos.insert(tablaProductos).values(datos).returning();
+    const [producto] = await baseDatos
+      .insert(tablaProductos)
+      .values(datos)
+      .returning();
     return producto;
   }
 
   /** Actualiza un producto. */
-  async updateProduct(id: number, updates: Partial<InsertarProducto>): Promise<Producto> {
+  async updateProduct(
+    id: number,
+    updates: Partial<InsertarProducto>,
+  ): Promise<Producto> {
     const [producto] = await baseDatos
       .update(tablaProductos)
       .set({ ...updates, updatedAt: new Date() })
@@ -600,23 +772,35 @@ export class DatabaseStorage implements IStorage {
         .where(eq(tablaVariantes.productId, productId))
         .orderBy(asc(tablaVariantes.sku));
     }
-    return await baseDatos.select().from(tablaVariantes).orderBy(asc(tablaVariantes.sku));
+    return await baseDatos
+      .select()
+      .from(tablaVariantes)
+      .orderBy(asc(tablaVariantes.sku));
   }
 
   /** Obtiene una variante por ID. */
   async getVariant(id: number): Promise<Variante | undefined> {
-    const [variante] = await baseDatos.select().from(tablaVariantes).where(eq(tablaVariantes.id, id));
+    const [variante] = await baseDatos
+      .select()
+      .from(tablaVariantes)
+      .where(eq(tablaVariantes.id, id));
     return variante;
   }
 
   /** Crea una variante. */
   async createVariant(datos: InsertarVariante): Promise<Variante> {
-    const [variante] = await baseDatos.insert(tablaVariantes).values(datos).returning();
+    const [variante] = await baseDatos
+      .insert(tablaVariantes)
+      .values(datos)
+      .returning();
     return variante;
   }
 
   /** Actualiza una variante. */
-  async updateVariant(id: number, updates: Partial<InsertarVariante>): Promise<Variante> {
+  async updateVariant(
+    id: number,
+    updates: Partial<InsertarVariante>,
+  ): Promise<Variante> {
     const [variante] = await baseDatos
       .update(tablaVariantes)
       .set({ ...updates, updatedAt: new Date() })
@@ -630,7 +814,10 @@ export class DatabaseStorage implements IStorage {
   /**
    * Métricas de dashboard entre dos fechas.
    */
-  async getDashboardMetricsRange(from: Date, to: Date): Promise<{
+  async getDashboardMetricsRange(
+    from: Date,
+    to: Date,
+  ): Promise<{
     totalOrders: number;
     totalSales: number;
     unmanaged: number;
@@ -638,7 +825,10 @@ export class DatabaseStorage implements IStorage {
     byChannel: { channelId: number; channelName: string; count: number }[];
     byShop: { shopId: number; shopName: string | null; count: number }[];
   }> {
-    const range = and(gte(tablaOrdenes.createdAt, from), lte(tablaOrdenes.createdAt, to));
+    const range = and(
+      gte(tablaOrdenes.createdAt, from),
+      lte(tablaOrdenes.createdAt, to),
+    );
 
     const totalOrdersRes = await baseDatos
       .select({ count: count() })
@@ -646,7 +836,9 @@ export class DatabaseStorage implements IStorage {
       .where(range);
 
     const totalSalesRes = await baseDatos
-      .select({ sum: sql<number>`COALESCE(SUM(${tablaOrdenes.totalAmount}),0)` })
+      .select({
+        sum: sql<number>`COALESCE(SUM(${tablaOrdenes.totalAmount}),0)`,
+      })
       .from(tablaOrdenes)
       .where(range);
 
@@ -708,79 +900,109 @@ export class DatabaseStorage implements IStorage {
   }): Promise<{ rows: any[]; total: number; page: number; pageSize: number }> {
     const { statusFilter, channelId, page, pageSize, search } = params;
 
-    const conds: any[] = [];
-    if (statusFilter === "unmanaged") {
-      conds.push(
-        or(isNull(tablaOrdenes.fulfillmentStatus), eq(tablaOrdenes.fulfillmentStatus, "UNFULFILLED")),
-      );
-    } else if (statusFilter === "managed") {
-      conds.push(eq(tablaOrdenes.fulfillmentStatus, "FULFILLED"));
+    console.log(`🔍 getOrdersPaginated - filtros:`, { statusFilter, channelId, page, pageSize, search });
+
+    try {
+      const conds: any[] = [];
+      
+      // Filtro por estado de gestión usando case-insensitive
+      if (statusFilter === "unmanaged") {
+        conds.push(
+          sql`(
+            ${tablaOrdenes.fulfillmentStatus} IS NULL OR 
+            LOWER(${tablaOrdenes.fulfillmentStatus}) = 'unfulfilled'
+          )`
+        );
+      } else if (statusFilter === "managed") {
+        conds.push(
+          sql`LOWER(${tablaOrdenes.fulfillmentStatus}) = 'fulfilled'`
+        );
+      }
+      
+      // Filtro por canal
+      if (channelId !== undefined) {
+        conds.push(sql`${tablaOrdenes.channelId} = ${channelId}`);
+      }
+      
+      // Búsqueda textual usando SQL puro para evitar mezclar con eq()
+      if (search) {
+        conds.push(
+          sql`(
+            LOWER(${tablaOrdenes.name}) LIKE LOWER(${'%' + search + '%'}) OR 
+            LOWER(${tablaOrdenes.customerName}) LIKE LOWER(${'%' + search + '%'}) OR 
+            EXISTS (
+              SELECT 1 FROM ${tablaItemsOrden} oi 
+              WHERE oi.order_id = ${tablaOrdenes.id} 
+              AND LOWER(oi.sku) LIKE LOWER(${'%' + search + '%'})
+            )
+          )`
+        );
+      }
+
+      // Combinar condiciones
+      const whereClause = conds.length > 0 ? sql`${conds.reduce((acc, cond, i) => 
+        i === 0 ? cond : sql`${acc} AND ${cond}`
+      )}` : undefined;
+
+      const offset = Math.max(0, (page - 1) * pageSize);
+
+      // Query principal con JOIN correcto
+      const baseQuery = sql`
+        SELECT 
+          o.id,
+          o.name,
+          o.customer_name,
+          o.channel_id,
+          o.total_amount,
+          o.fulfillment_status,
+          o.shopify_created_at as created_at,
+          COUNT(oi.id) as items_count,
+          ARRAY_AGG(oi.sku) FILTER (WHERE oi.sku IS NOT NULL) as skus,
+          CASE
+            WHEN o.fulfillment_status IS NULL OR LOWER(o.fulfillment_status) = 'unfulfilled' THEN 'SIN_GESTIONAR'
+            WHEN LOWER(o.fulfillment_status) = 'fulfilled' THEN 'GESTIONADA'
+            WHEN LOWER(o.fulfillment_status) = 'restocked' THEN 'DEVUELTO'
+            ELSE 'ERROR'
+          END as ui_status
+        FROM ${tablaOrdenes} o
+        LEFT JOIN ${tablaItemsOrden} oi ON oi.order_id = o.id
+        ${whereClause ? sql`WHERE ${whereClause}` : sql``}
+        GROUP BY o.id, o.name, o.customer_name, o.channel_id, o.total_amount, o.fulfillment_status, o.shopify_created_at
+        ORDER BY o.shopify_created_at DESC
+        LIMIT ${pageSize} OFFSET ${offset}
+      `;
+
+      // Query para contar total
+      const countQuery = sql`
+        SELECT COUNT(DISTINCT o.id) as count
+        FROM ${tablaOrdenes} o
+        LEFT JOIN ${tablaItemsOrden} oi ON oi.order_id = o.id
+        ${whereClause ? sql`WHERE ${whereClause}` : sql``}
+      `;
+
+      console.log(`📊 Ejecutando queries...`);
+      
+      const [rows, totalRes] = await Promise.all([
+        baseDatos.execute(baseQuery),
+        baseDatos.execute(countQuery)
+      ]);
+
+      const total = Number(totalRes.rows[0]?.count ?? 0);
+      
+      console.log(`✅ Resultados: ${rows.rows.length} filas, total: ${total}`);
+      
+      return { 
+        rows: rows.rows as any[], 
+        page, 
+        pageSize, 
+        total 
+      };
+
+    } catch (error: any) {
+      console.error(`❌ Error en getOrdersPaginated:`, error);
+      throw new Error(`Error al obtener órdenes paginadas: ${error.message}`);
     }
-    if (channelId !== undefined) {
-      conds.push(eq(tablaOrdenes.channelId, channelId));
-    }
-    if (search) {
-      const like = `%${search.toLowerCase()}%`;
-      conds.push(
-        or(
-          sql`LOWER(${tablaOrdenes.name}) LIKE ${like}`,
-          sql`LOWER(${tablaOrdenes.customerName}) LIKE ${like}`,
-          sql`LOWER(${tablaItemsOrden.sku}) LIKE ${like}`,
-        ),
-      );
-    }
-
-    const whereClause = conds.length ? and(...conds) : undefined;
-    const offset = Math.max(0, (page - 1) * pageSize);
-
-    // SELECT base
-    const baseSelect = baseDatos
-      .select({
-        id: tablaOrdenes.id,
-        name: tablaOrdenes.name,
-        customerName: tablaOrdenes.customerName,
-        channelId: tablaOrdenes.channelId,
-        totalAmount: tablaOrdenes.totalAmount,
-        fulfillmentStatus: tablaOrdenes.fulfillmentStatus,
-        createdAt: tablaOrdenes.shopifyCreatedAt,
-        itemsCount: sql<number>`COUNT(${tablaItemsOrden.id})`.as("items_count"),
-        skus: sql<string[]>`ARRAY_AGG(${tablaItemsOrden.sku})`.as("skus"),
-        uiStatus: sql`
-        CASE
-          WHEN ${tablaOrdenes.fulfillmentStatus} IS NULL OR ${tablaOrdenes.fulfillmentStatus} = 'UNFULFILLED' THEN 'SIN_GESTIONAR'
-          WHEN ${tablaOrdenes.fulfillmentStatus} = 'FULFILLED' THEN 'GESTIONADA'
-          ELSE 'ERROR'
-        END
-      `.as('ui_status'),
-      })
-      .from(tablaOrdenes)
-      .leftJoin(tablaItemsOrden, eq(tablaItemsOrden.orderId, tablaOrdenes.id));
-
-    const dataQ = whereClause ? baseSelect.where(whereClause) : baseSelect;
-    const rows = await dataQ
-      .groupBy(
-        tablaOrdenes.id,
-        tablaOrdenes.name,
-        tablaOrdenes.customerName,
-        tablaOrdenes.channelId,
-        tablaOrdenes.totalAmount,
-        tablaOrdenes.fulfillmentStatus,
-        tablaOrdenes.shopifyCreatedAt,
-      )
-      .orderBy(desc(tablaOrdenes.shopifyCreatedAt))
-      .limit(pageSize)
-      .offset(offset);
-
-    const countQ = baseDatos
-      .select({ count: sql<number>`COUNT(DISTINCT ${tablaOrdenes.id})` })
-      .from(tablaOrdenes)
-      .leftJoin(tablaItemsOrden, eq(tablaItemsOrden.orderId, tablaOrdenes.id));
-    const countWhere = whereClause ? countQ.where(whereClause) : countQ;
-    const totalRes = await countWhere;
-
-    return { rows, page, pageSize, total: Number(totalRes[0]?.count ?? 0) };
   }
-
 
   // Items de una orden
   async getOrderItems(orderId: number) {
@@ -794,7 +1016,10 @@ export class DatabaseStorage implements IStorage {
         vendor: tablaProductos.vendor,
       })
       .from(tablaItemsOrden)
-      .leftJoin(tablaProductos, eq(tablaProductos.id, tablaItemsOrden.productId))
+      .leftJoin(
+        tablaProductos,
+        eq(tablaProductos.id, tablaItemsOrden.productId),
+      )
       .where(eq(tablaItemsOrden.orderId, BigInt(orderId)))
       .orderBy(asc(tablaItemsOrden.id));
   }

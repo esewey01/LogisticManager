@@ -7,23 +7,25 @@
  * - UNFULFILLED o NULL → "Sin Gestionar"
  * - RESTOCKED → "Devuelto"
  * - Otros → "Error"
- * 
+ *
  * Case-insensitive: acepta fulfilled, FULFILLED, Fulfilled, etc.
  */
-export function mapearEstadoGestion(fulfillmentStatus: string | null | undefined): string {
+export function mapearEstadoGestion(
+  fulfillmentStatus: string | null | undefined,
+): string {
   // NULL, undefined o string vacío
   if (!fulfillmentStatus || fulfillmentStatus.trim() === "") {
     return "Sin Gestionar";
   }
-  
+
   const status = fulfillmentStatus.trim().toUpperCase();
-  
+
   switch (status) {
-    case "FULFILLED":
+    case "fulfilled":
       return "Gestionado";
-    case "UNFULFILLED":
+    case "unfulfilled":
       return "Sin Gestionar";
-    case "RESTOCKED":
+    case "restocked":
       return "Devuelto";
     default:
       return "Error";
@@ -33,17 +35,21 @@ export function mapearEstadoGestion(fulfillmentStatus: string | null | undefined
 /**
  * Determina si una orden está gestionada basándose en su fulfillment_status
  */
-export function esOrdenGestionada(fulfillmentStatus: string | null | undefined): boolean {
+export function esOrdenGestionada(
+  fulfillmentStatus: string | null | undefined,
+): boolean {
   if (!fulfillmentStatus) return false;
-  return fulfillmentStatus.trim().toUpperCase() === "FULFILLED";
+  return fulfillmentStatus.trim().toUpperCase() === "fulfilled";
 }
 
 /**
  * Obtiene el color de estado para la UI basado en fulfillment_status
  */
-export function obtenerColorEstado(fulfillmentStatus: string | null | undefined): string {
+export function obtenerColorEstado(
+  fulfillmentStatus: string | null | undefined,
+): string {
   const estado = mapearEstadoGestion(fulfillmentStatus);
-  
+
   switch (estado) {
     case "Gestionado":
       return "green";
@@ -61,9 +67,11 @@ export function obtenerColorEstado(fulfillmentStatus: string | null | undefined)
 /**
  * Obtiene el badge variant para shadcn/ui basado en fulfillment_status
  */
-export function obtenerVarianteBadge(fulfillmentStatus: string | null | undefined): "default" | "secondary" | "destructive" | "outline" {
+export function obtenerVarianteBadge(
+  fulfillmentStatus: string | null | undefined,
+): "default" | "secondary" | "destructive" | "outline" {
   const estado = mapearEstadoGestion(fulfillmentStatus);
-  
+
   switch (estado) {
     case "Gestionado":
       return "default"; // Verde
