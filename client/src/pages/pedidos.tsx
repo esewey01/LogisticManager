@@ -56,7 +56,7 @@ export default function Pedidos() {
   const [selectedOrder, setSelectedOrder] = useState<OrderRow | null>(null);
   const [cancelOrderId, setCancelOrderId] = useState<number | string | null>(null);
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(15);
+  const [pageSize, setPageSize] = useState(50);
   const queryClient = useQueryClient();
   const [sortField, setSortField] = useState<keyof OrderRow | null>(null);
   const [sortOrder, setSortOrder] = useState<"asc" | "desc" | null>(null);
@@ -279,12 +279,12 @@ export default function Pedidos() {
                       />
                     </TableCell>
                     <TableCell className="font-medium">
-                      {order.name ?? String(order.id)}  {/* ✅ Nombre del pedido o ID si no existe */}
+                      {order.name ?? String(order.id)} 
                     </TableCell>
                     <TableCell>
                       <div className="flex flex-wrap gap-1">
                         {order.skus.slice(0, 4).map((sku) => (
-                          <Badge key={sku} variant="secondary">
+                          <Badge key={sku} variant="outline">
                             {sku}
                           </Badge>
                         ))}
@@ -357,28 +357,9 @@ export default function Pedidos() {
                           variant="destructive"
                           onClick={() => setCancelOrderId(order.id)}
                         >
-                          <i className="fas fa-ban mr-1"></i>
-                          Cancelar
+                          <i className="fas fa-trash mr-1"></i>
+                          
                         </Button>
-                        <Button
-                          size="sm"
-                          variant={order.status === 'DELETED' ? 'outline' : 'destructive'}
-                          onClick={() =>
-                            deleteOrderMutation.mutate({ orderId: order.id, deleted: order.status !== 'DELETED' })
-                          }
-                          disabled={deleteOrderMutation.isPending}
-                        >
-                          {order.status === 'DELETED' ? (
-                            <>
-                              <i className="fas fa-undo mr-1"></i>
-                            </>
-                          ) : (
-                            <>
-                              <i className="fas fa-trash mr-1"></i>
-                            </>
-                          )}
-                        </Button>
-
                       </div>
                     </TableCell>
                   </TableRow>
@@ -409,9 +390,9 @@ export default function Pedidos() {
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="15">15</SelectItem>
-                      <SelectItem value="30">30</SelectItem>
                       <SelectItem value="50">50</SelectItem>
+                      <SelectItem value="100">100</SelectItem>
+                      <SelectItem value="150">150</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
