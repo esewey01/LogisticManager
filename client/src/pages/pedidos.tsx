@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { apiRequest } from "@/lib/queryClient";
 import OrderDetailsModal from "@/components/modals/OrderDetailsModal";
+import CancelOrderModal from "@/components/modals/CancelOrderModal";
 
 
 import {
@@ -30,6 +31,7 @@ type OrderRow = {
   createdAt: string
   uiStatus: "SIN_GESTIONAR" | "GESTIONADA" | "ERROR"
   itemsCount: number
+  skus: string[]
 };
 
 type OrdersResp = {
@@ -52,6 +54,7 @@ export default function Pedidos() {
   const [channelFilter, setChannelFilter] = useState<string>("all");
   const [selectedOrders, setSelectedOrders] = useState<Array<number | string>>([]);
   const [selectedOrder, setSelectedOrder] = useState<OrderRow | null>(null);
+  const [cancelOrderId, setCancelOrderId] = useState<number | string | null>(null);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(15);
   const queryClient = useQueryClient();
@@ -110,17 +113,7 @@ export default function Pedidos() {
     },
   });
 
-  // filtrar sobre el array ya “normalizado”
-  const filteredOrders = orders.filter((order) => {
-    const matchesSearch =
-      (order.customerName ?? "").toLowerCase().includes(search.toLowerCase()) ||
-      (order.name ?? "").toLowerCase().includes(search.toLowerCase());
-
-    const matchesChannel =
-      channelFilter === "all" || String(order.channelId) === String(channelFilter);
-
-    return matchesSearch && matchesChannel;
-  });
+  const filteredOrders = orders; // el backend ya aplica filtros y búsqueda
 
   const getChannelInfo = (channelId: number | string) => {
     const channel = channels.find((c) => String(c.id) === String(channelId));
@@ -161,6 +154,7 @@ export default function Pedidos() {
 
 
   return (
+    <>
     <div>
       {/* Page Header */}
       <div className="mb-8">
@@ -262,7 +256,7 @@ export default function Pedidos() {
                     )}
                   </Button>
                 </TableHead>
-                <TableHead>Cliente</TableHead>
+                <TableHead>SKU(s)</TableHead>
                 <TableHead>Canal</TableHead>
                 <TableHead>Productos</TableHead>
                 <TableHead>Monto</TableHead>
@@ -274,7 +268,6 @@ export default function Pedidos() {
             <TableBody>
               {filteredOrders.map((order: any) => {
                 const channel = getChannelInfo(order.channelId);
-                const products = Array.isArray(order.products) ? order.products : [];
 
                 return (
 
@@ -288,7 +281,18 @@ export default function Pedidos() {
                     <TableCell className="font-medium">
                       {order.name ?? String(order.id)}  {/* ✅ Nombre del pedido o ID si no existe */}
                     </TableCell>
-                    <TableCell>{order.customerName}</TableCell>
+                    <TableCell>
+                      <div className="flex flex-wrap gap-1">
+                        {order.skus.slice(0, 4).map((sku) => (
+                          <Badge key={sku} variant="secondary">
+                            {sku}
+                          </Badge>
+                        ))}
+                        {order.skus.length > 4 && (
+                          <Badge variant="secondary">+{order.skus.length - 4} más</Badge>
+                        )}
+                      </div>
+                    </TableCell>
                     <TableCell>
                       <Badge
                         style={{ backgroundColor: `${channel.color}20`, color: channel.color }}
@@ -350,19 +354,27 @@ export default function Pedidos() {
                         )}
                         <Button
                           size="sm"
+                          variant="destructive"
+                          onClick={() => setCancelOrderId(order.id)}
+                        >
+                          <i className="fas fa-ban mr-1"></i>
+                          Cancelar
+                        </Button>
+                        <Button
+                          size="sm"
                           variant={order.status === 'DELETED' ? 'outline' : 'destructive'}
-                          onClick={() => deleteOrderMutation.mutate({ orderId: order.id, deleted: order.status !== 'DELETED' })}
+                          onClick={() =>
+                            deleteOrderMutation.mutate({ orderId: order.id, deleted: order.status !== 'DELETED' })
+                          }
                           disabled={deleteOrderMutation.isPending}
                         >
                           {order.status === 'DELETED' ? (
                             <>
                               <i className="fas fa-undo mr-1"></i>
-                              {/* Restaurar */}
                             </>
                           ) : (
                             <>
                               <i className="fas fa-trash mr-1"></i>
-                              {/* Borrar */}
                             </>
                           )}
                         </Button>
@@ -449,5 +461,16 @@ export default function Pedidos() {
         />
       )}
     </div>
+    {cancelOrderId && (
+      <CancelOrderModal
+        orderId={cancelOrderId}
+        onClose={() => setCancelOrderId(null)}
+        onCancelled={() => {
+          setCancelOrderId(null);
+          queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
+        }}
+      />
+    )}
+    </>
   );
 }

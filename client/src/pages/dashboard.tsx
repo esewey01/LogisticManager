@@ -1,77 +1,67 @@
+import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import MetricCard from "@/components/MetricCard";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
-import { useState } from "react";
 import { apiRequest } from "@/lib/queryClient";
 import OrdersChart from "@/components/charts/OrdersChart";
+import type { DashboardMetrics, NoteDTO } from "@shared/schema";
 
 export default function Dashboard() {
   const [newNote, setNewNote] = useState("");
   const queryClient = useQueryClient();
 
-  // Consulta de métricas generales del dashboard (refresca cada 30s)
-  const { data: metrics, isLoading: metricsLoading } = useQuery({
+  const { data: metrics, isLoading: metricsLoading } = useQuery<DashboardMetrics>({
     queryKey: ["/api/dashboard/metrics"],
+    queryFn: async () => {
+      const res = await apiRequest("GET", "/api/dashboard/metrics");
+      return res.json();
+    },
     refetchInterval: 30000,
   });
 
-  // Consulta de estadísticas por canal
-  const { data: channelStats } = useQuery({
-    queryKey: ["/api/dashboard/channel-stats"],
-    queryFn: async () => {
-      const response = await apiRequest("GET", "/api/dashboard/channel-stats");
-      return response;
-    }
-  });
-
-  // Consulta de lista de notas rápidas
-  // En dashboard.tsx, modifica la consulta de notas:
-  const { data: notes = [] } = useQuery({
+  const { data: notesResp } = useQuery<{ notes: NoteDTO[] }>({
     queryKey: ["/api/notes"],
     queryFn: async () => {
       const today = new Date();
       const thirtyDaysAgo = new Date();
       thirtyDaysAgo.setDate(today.getDate() - 30);
-
-      const response = await apiRequest("GET", `/api/notes?from=${thirtyDaysAgo.toISOString()}&to=${today.toISOString()}`);
-      return response;
-    }
+      const res = await apiRequest(
+        "GET",
+        `/api/notes?from=${thirtyDaysAgo.toISOString()}&to=${today.toISOString()}`,
+      );
+      return res.json();
+    },
   });
+  const notes = notesResp?.notes ?? [];
 
-  // Mutación para agregar una nueva nota
   const addNoteMutation = useMutation({
-    mutationFn: async (content: string) => {
-      await apiRequest("POST", "/api/notes", { content });
+    mutationFn: async (text: string) => {
+      await apiRequest("POST", "/api/notes", { text });
     },
     onSuccess: () => {
-      // Refresca la lista de notas después de agregar
       queryClient.invalidateQueries({ queryKey: ["/api/notes"] });
       setNewNote("");
     },
   });
 
-  // Mutación para eliminar una nota existente
   const deleteNoteMutation = useMutation({
-    mutationFn: async (noteId: string) => {
-      await apiRequest("DELETE", `/api/notes/${noteId}`);
+    mutationFn: async (id: number) => {
+      await apiRequest("DELETE", `/api/notes/${id}`);
     },
     onSuccess: () => {
-      // Refresca la lista de notas después de eliminar
       queryClient.invalidateQueries({ queryKey: ["/api/notes"] });
     },
   });
 
-  // Acción para agregar una nota si no está vacía
   const handleAddNote = () => {
     if (newNote.trim()) {
       addNoteMutation.mutate(newNote.trim());
     }
   };
 
-  // Pantalla de carga mientras se obtienen métricas
   if (metricsLoading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -80,119 +70,54 @@ export default function Dashboard() {
     );
   }
 
-
   return (
     <div>
-      {/* Encabezado de la página */}
       <div className="mb-8">
         <h1 className="text-2xl font-semibold text-gray-900 mb-2">Dashboard</h1>
         <p className="text-gray-600">Resumen general del sistema de gestión logística</p>
       </div>
 
-      {/* Tarjetas de resumen general */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-        <Card>
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-gray-600">Total Órdenes</p>
-                <p className="text-3xl font-bold text-gray-900">{metrics?.totalOrders || 0}</p>
-                <p className="text-sm text-success">Sistema en línea</p>
-              </div>
-              <div className="w-12 h-12 bg-primary bg-opacity-10 rounded-lg flex items-center justify-center">
-                <i className="fas fa-shopping-bag text-primary text-xl"></i>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-gray-600">Sin Gestionar</p>
-                <p className="text-3xl font-bold text-error">{metrics?.unmanaged || 0}</p>
-                <p className="text-sm text-gray-500">Requieren atención</p>
-              </div>
-              <div className="w-12 h-12 bg-error bg-opacity-10 rounded-lg flex items-center justify-center">
-                <i className="fas fa-exclamation-triangle text-error text-xl"></i>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-gray-600">Ventas Totales</p>
-                <p className="text-3xl font-bold text-gray-900">
-                  ${Number(metrics?.totalSales || 0).toLocaleString()}
-                </p>
-                <p className="text-sm text-success">Operativo</p>
-              </div>
-              <div className="w-12 h-12 bg-success bg-opacity-10 rounded-lg flex items-center justify-center">
-                <i className="fas fa-dollar-sign text-success text-xl"></i>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-gray-600">En PREVIO</p>
-                <p className="text-3xl font-bold text-warning">{metrics?.delayed || 0}</p>
-                <p className="text-sm text-gray-500">Órdenes retrasadas</p>
-              </div>
-              <div className="w-12 h-12 bg-warning bg-opacity-10 rounded-lg flex items-center justify-center">
-                <i className="fas fa-clock text-warning text-xl"></i>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Tarjetas de resumen por canal */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-        {channelStats?.map((channel) => (
-          <Card key={channel.channelCode}>
-            <CardContent className="p-6">
-              <div className="flex items-center space-x-4">
-                <div
-                  className="w-12 h-12 rounded-lg flex items-center justify-center"
-                  style={{ backgroundColor: `${getChannelColor(channel.channelCode)}20` }}
-                >
-                  <i
-                    className={`${getChannelIcon(channel.channelCode)} text-xl`}
-                    style={{ color: getChannelColor(channel.channelCode) }}
-                  ></i>
-                </div>
-                <div>
-                  <h3 className="font-semibold text-gray-900">{channel.channelName}</h3>
-                  <p className="text-sm text-gray-600">Canal {channel.channelCode}</p>
-                  <div className="flex items-center space-x-4 mt-2">
-                    <span className="text-lg font-bold text-gray-900">{channel.orders}</span>
-                    <span className="text-sm text-gray-500">órdenes</span>
-                  </div>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        ))}
+        <MetricCard title="Total de órdenes" value={metrics?.totalOrders ?? 0} />
+        <MetricCard title="Gestionadas / Sin gestionar" value="">
+          <div className="flex space-x-2 mt-1">
+            <Badge variant="default">Gestionadas: {metrics?.managed ?? 0}</Badge>
+            <Badge variant="destructive">Sin gestionar: {metrics?.unmanaged ?? 0}</Badge>
+          </div>
+        </MetricCard>
+        <MetricCard
+          title="Ventas totales"
+          value={`$${(metrics?.totalSales ?? 0).toFixed(2)}`}
+        />
       </div>
 
-      {/* Contenedor principal con gráfico y notas */}
+      {metrics?.byChannel?.length ? (
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+          {metrics.byChannel.map((c) => (
+            <MetricCard key={c.channelId} title={c.channelName} value={c.count} />
+          ))}
+        </div>
+      ) : (
+        <div className="mb-8 text-sm text-gray-500">No hay datos por canal.</div>
+      )}
+
+      {metrics?.byShop?.length ? (
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+          {metrics.byShop.map((s) => (
+            <MetricCard
+              key={s.shopId}
+              title={s.shopName ?? `Tienda ${s.shopId}`}
+              value={s.count}
+            />
+          ))}
+        </div>
+      ) : null}
+
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Gráfico de órdenes */}
         <div className="lg:col-span-2">
           <OrdersChart />
         </div>
-
-        {/* Columna lateral derecha */}
         <div className="space-y-6">
-          {/* Bloque de Notas Rápidas */}
           <Card>
             <CardHeader>
               <div className="flex items-center justify-between">
@@ -209,8 +134,7 @@ export default function Dashboard() {
               </div>
             </CardHeader>
             <CardContent className="space-y-4">
-              {/* Formulario para escribir una nueva nota */}
-              <div className="space-y-2">``
+              <div className="space-y-2">
                 <Textarea
                   placeholder="Escribe una nota rápida..."
                   value={newNote}
@@ -218,18 +142,16 @@ export default function Dashboard() {
                   className="min-h-[80px]"
                 />
               </div>
-
-              {/* Lista de notas existentes */}
               <div className="space-y-3">
                 {notes.length === 0 ? (
                   <p className="text-sm text-gray-500 text-center py-4">
                     No hay notas. Agrega una nueva nota arriba.
                   </p>
                 ) : (
-                  notes.map((note: any) => (
+                  notes.map((note) => (
                     <div key={note.id} className="p-3 bg-gray-50 rounded-lg">
                       <div className="flex items-start justify-between">
-                        <p className="text-sm text-gray-700 flex-1">{note.content}</p>
+                        <p className="text-sm text-gray-700 flex-1">{note.text}</p>
                         <Button
                           size="sm"
                           variant="ghost"
@@ -253,24 +175,4 @@ export default function Dashboard() {
       </div>
     </div>
   );
-}
-
-// Devuelve el color asignado a cada canal
-function getChannelColor(code: string): string {
-  switch (code) {
-    case "WW": return "#4CAF50";
-    case "CT": return "#FF9800";
-    case "MGL": return "#2196F3";
-    default: return "#6B7280";
-  }
-}
-
-// Devuelve el ícono asignado a cada canal
-function getChannelIcon(code: string): string {
-  switch (code) {
-    case "WW": return "fas fa-globe";
-    case "CT": return "fas fa-store";
-    case "MGL": return "fas fa-shopping-cart";
-    default: return "fas fa-circle";
-  }
 }

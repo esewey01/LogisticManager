@@ -314,9 +314,25 @@ export const insertTicketSchema = z.object({
 });
 
 export const insertNoteSchema = z.object({
-  date: z.string().min(1),
-  content: z.string().min(1, "El contenido es obligatorio"),
+  text: z.string().min(1, "El contenido es obligatorio"),
+  date: z.string().optional(),
 });
+
+export interface NoteDTO {
+  id: number;
+  text: string;
+  createdAt: string;
+  author?: string | null;
+}
+
+export interface DashboardMetrics {
+  totalOrders: number;
+  totalSales: number;
+  unmanaged: number;
+  managed: number;
+  byChannel: Array<{ channelId: number; channelName: string; count: number }>;
+  byShop: Array<{ shopId: number; shopName?: string | null; count: number }>;
+}
 
 // === Alias en español (opcionales) ===
 // Permiten importar en español sin romper los nombres originales.

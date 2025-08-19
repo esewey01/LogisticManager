@@ -330,11 +330,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const channelId = req.query.channelId && req.query.channelId !== "all" ? Number(req.query.channelId) : undefined;
       const page = req.query.page ? Number(req.query.page) : 1;
       const pageSize = req.query.pageSize ? Number(req.query.pageSize) : 15;
+      const search = req.query.search as string | undefined;
       const data = await almacenamiento.getOrdersPaginated({
         statusFilter: statusFilter as any,
         channelId,
         page,
         pageSize,
+        search,
       });
       res.json(data);
     } catch {
@@ -368,6 +370,58 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json(orden);
     } catch {
       res.status(500).json({ message: "No se pudo obtener la orden" });
+    }
+  });
+
+  app.post("/api/orders/:id/cancel", requiereAutenticacion, async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      if (Number.isNaN(id))
+        return res.status(400).json({ message: "ID de orden inválido" });
+
+      const orden = await almacenamiento.getOrder(id);
+      if (!orden) return res.status(404).json({ ok: false, errors: "Orden no encontrada" });
+
+      const { reason, staffNote, notifyCustomer, restock, refundToOriginal } = req.body;
+      const { shop, token, apiVersion } = getShopifyCredentials(String(orden.shopId));
+      const gid = orden.idShopify.startsWith("gid://")
+        ? orden.idShopify
+        : `gid://shopify/Order/${orden.idShopify}`;
+
+      const mutation = `mutation orderCancel($id: ID!, $reason: OrderCancelReason, $staffNote: String, $email: Boolean, $restock: Boolean, $refund: Boolean){
+        orderCancel(id: $id, reason: $reason, staffNote: $staffNote, email: $email, restock: $restock, refund: $refund){
+          job { id }
+          userErrors { field message }
+        }
+      }`;
+
+      const variables = {
+        id: gid,
+        reason,
+        staffNote,
+        email: !!notifyCustomer,
+        restock: !!restock,
+        refund: !!refundToOriginal,
+      };
+
+      const r = await fetch(`https://${shop}/admin/api/${apiVersion}/graphql.json`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Shopify-Access-Token": token,
+        },
+        body: JSON.stringify({ query: mutation, variables }),
+      });
+
+      const data = await r.json();
+      const userErrors = data?.data?.orderCancel?.userErrors || data?.errors;
+      if (!r.ok || (userErrors && userErrors.length)) {
+        return res.status(400).json({ ok: false, errors: userErrors });
+      }
+      return res.json({ ok: true, job: data?.data?.orderCancel?.job });
+    } catch (e: any) {
+      console.error("cancel order", e?.message);
+      res.status(500).json({ ok: false, errors: e?.message });
     }
   });
 
@@ -457,17 +511,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const fromDate = from ? new Date(String(from)) : new Date();
       const toDate = to ? new Date(String(to)) : new Date();
       const notas = await almacenamiento.getNotesRange(fromDate, toDate);
-      res.json(notas);
+      const mapped = notas?.map((n) => ({
+        id: n.id,
+        text: n.content,
+        createdAt: n.createdAt,
+        author: (n as any).user ?? null,
+      })) ?? [];
+      res.json({ notes: mapped });
     } catch {
-      res.status(500).json({ message: "No se pudieron obtener notas" });
+      res.status(500).json({ notes: [] });
     }
   });
 
   app.post("/api/notes", requiereAutenticacion, async (req: any, res) => {
     try {
-      const datosNota = insertNoteSchema.parse(req.body);
-      const nota = await almacenamiento.createNote(datosNota);
-      res.status(201).json(nota);
+      const { text, date } = insertNoteSchema.parse(req.body);
+      const nota = await almacenamiento.createNote({
+        content: text,
+        date: date ?? new Date().toISOString().slice(0, 10),
+      });
+      res.status(201).json({ id: nota.id, text: nota.content, createdAt: nota.createdAt, author: null });
     } catch {
       res.status(400).json({ message: "Datos de nota inválidos" });
     }
