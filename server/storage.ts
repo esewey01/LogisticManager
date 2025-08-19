@@ -421,15 +421,22 @@ export class DatabaseStorage implements IStorage {
 
   // ==== NOTAS ====
 
-  /** Lista notas; si se pasa userId, filtra por usuario. */
-  async getNotesRange(from: Date, to: Date): Promise<Nota[]> {
-    const fromStr = from.toISOString().slice(0, 10);
-    const toStr = to.toISOString().slice(0, 10);
+  /** Lista notas por usuario. */
+  async getUserNotes(userId: number): Promise<Nota[]> {
     return await baseDatos
       .select()
       .from(tablaNotas)
-      .where(and(gte(tablaNotas.date, fromStr), lte(tablaNotas.date, toStr)))
-      .orderBy(asc(tablaNotas.date));
+      .where(eq(tablaNotas.userId, userId))
+      .orderBy(desc(tablaNotas.createdAt));
+  }
+
+  /** Lista notas; si se pasa userId, filtra por usuario. */
+  async getNotesRange(from: Date, to: Date): Promise<Nota[]> {
+    return await baseDatos
+      .select()
+      .from(tablaNotas)
+      .where(and(gte(tablaNotas.createdAt, from), lte(tablaNotas.createdAt, to)))
+      .orderBy(asc(tablaNotas.createdAt));
   }
 
   /** Crea una nota. */
@@ -442,7 +449,7 @@ export class DatabaseStorage implements IStorage {
   async updateNote(id: number, updates: Partial<InsertarNota>): Promise<Nota> {
     const [nota] = await baseDatos
       .update(tablaNotas)
-      .set(updates)
+      .set({ ...updates, updatedAt: new Date() })
       .where(eq(tablaNotas.id, id))
       .returning();
     return nota;
