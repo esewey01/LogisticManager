@@ -908,32 +908,29 @@ export class DatabaseStorage implements IStorage {
       // Filtro por estado de gestión usando case-insensitive
       if (statusFilter === "unmanaged") {
         conds.push(
-          sql`(
-            ${tablaOrdenes.fulfillmentStatus} IS NULL OR 
-            LOWER(${tablaOrdenes.fulfillmentStatus}) = 'unfulfilled'
-          )`
+          sql`LOWER(COALESCE(o.fulfillment_status, '')) IN ('', 'unfulfilled')`
         );
       } else if (statusFilter === "managed") {
         conds.push(
-          sql`LOWER(${tablaOrdenes.fulfillmentStatus}) = 'fulfilled'`
+          sql`LOWER(COALESCE(o.fulfillment_status, '')) = 'fulfilled'`
         );
       }
       
       // Filtro por canal
       if (channelId !== undefined) {
-        conds.push(sql`${tablaOrdenes.channelId} = ${channelId}`);
+        conds.push(sql`o.channel_id = ${channelId}`);
       }
       
       // Búsqueda textual usando SQL puro para evitar mezclar con eq()
       if (search) {
         conds.push(
           sql`(
-            LOWER(${tablaOrdenes.name}) LIKE LOWER(${'%' + search + '%'}) OR 
-            LOWER(${tablaOrdenes.customerName}) LIKE LOWER(${'%' + search + '%'}) OR 
+            LOWER(COALESCE(o.name, '')) LIKE LOWER(${'%' + search + '%'}) OR 
+            LOWER(COALESCE(o.customer_name, '')) LIKE LOWER(${'%' + search + '%'}) OR 
             EXISTS (
-              SELECT 1 FROM ${tablaItemsOrden} oi 
-              WHERE oi.order_id = ${tablaOrdenes.id} 
-              AND LOWER(oi.sku) LIKE LOWER(${'%' + search + '%'})
+              SELECT 1 FROM order_items oi2 
+              WHERE oi2.order_id = o.id 
+              AND LOWER(COALESCE(oi2.sku, '')) LIKE LOWER(${'%' + search + '%'})
             )
           )`
         );
@@ -946,37 +943,43 @@ export class DatabaseStorage implements IStorage {
 
       const offset = Math.max(0, (page - 1) * pageSize);
 
-      // Query principal con JOIN correcto
+      // Query principal con shape exacto para UI
       const baseQuery = sql`
         SELECT 
-          o.id,
-          o.name,
-          o.customer_name,
-          o.channel_id,
-          o.total_amount,
-          o.fulfillment_status,
-          o.shopify_created_at as created_at,
-          COUNT(oi.id) as items_count,
-          ARRAY_AGG(oi.sku) FILTER (WHERE oi.sku IS NOT NULL) as skus,
+          o.id::text as id,
+          COALESCE(o.name, '') as name,
+          COALESCE(o.customer_name, '') as "customerName",
+          COALESCE(o.channel_id, 0) as "channelId",
+          COALESCE(c.name, 'N/A') as "channelName",
+          COALESCE(o.total_amount, '0') as "totalAmount",
+          COALESCE(o.fulfillment_status, '') as "fulfillmentStatus",
+          COALESCE(o.shopify_created_at, o.created_at, NOW()) as "createdAt",
+          COALESCE(COUNT(oi.id), 0) as "itemsCount",
+          COALESCE(ARRAY_AGG(oi.sku) FILTER (WHERE oi.sku IS NOT NULL), ARRAY[]::text[]) as skus,
           CASE
-            WHEN o.fulfillment_status IS NULL OR LOWER(o.fulfillment_status) = 'unfulfilled' THEN 'SIN_GESTIONAR'
-            WHEN LOWER(o.fulfillment_status) = 'fulfilled' THEN 'GESTIONADA'
-            WHEN LOWER(o.fulfillment_status) = 'restocked' THEN 'DEVUELTO'
+            WHEN LOWER(COALESCE(o.fulfillment_status, '')) IN ('', 'unfulfilled') THEN 'SIN_GESTIONAR'
+            WHEN LOWER(COALESCE(o.fulfillment_status, '')) = 'fulfilled' THEN 'GESTIONADA'
+            WHEN LOWER(COALESCE(o.fulfillment_status, '')) = 'restocked' THEN 'DEVUELTO'
             ELSE 'ERROR'
-          END as ui_status
-        FROM ${tablaOrdenes} o
-        LEFT JOIN ${tablaItemsOrden} oi ON oi.order_id = o.id
+          END as "uiStatus",
+          COALESCE(o.has_ticket, false) as "hasTicket",
+          COALESCE(o.is_managed, false) as "isManaged"
+        FROM orders o
+        LEFT JOIN order_items oi ON oi.order_id = o.id
+        LEFT JOIN channels c ON c.id = o.channel_id
         ${whereClause ? sql`WHERE ${whereClause}` : sql``}
-        GROUP BY o.id, o.name, o.customer_name, o.channel_id, o.total_amount, o.fulfillment_status, o.shopify_created_at
-        ORDER BY o.shopify_created_at DESC
+        GROUP BY o.id, o.name, o.customer_name, o.channel_id, c.name, o.total_amount, 
+                 o.fulfillment_status, o.shopify_created_at, o.created_at, o.has_ticket, o.is_managed
+        ORDER BY COALESCE(o.shopify_created_at, o.created_at) DESC
         LIMIT ${pageSize} OFFSET ${offset}
       `;
 
       // Query para contar total
       const countQuery = sql`
         SELECT COUNT(DISTINCT o.id) as count
-        FROM ${tablaOrdenes} o
-        LEFT JOIN ${tablaItemsOrden} oi ON oi.order_id = o.id
+        FROM orders o
+        LEFT JOIN order_items oi ON oi.order_id = o.id
+        LEFT JOIN channels c ON c.id = o.channel_id
         ${whereClause ? sql`WHERE ${whereClause}` : sql``}
       `;
 
