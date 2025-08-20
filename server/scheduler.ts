@@ -88,6 +88,7 @@ export function startSchedulers() {
   // Programación periódica
   for (const s of stores) {
     setInterval(() => runOrderIncremental(s), orderMs);
-    setInterval(() => runProductSync(s), prodMs);
+    // Sincronización de productos deshabilitada según requerimiento del usuario
+    // setInterval(() => runProductSync(s), prodMs);
   }
 }

@@ -10,6 +10,7 @@ import Login from "@/pages/login";
 import Dashboard from "@/pages/dashboard";
 import Pedidos from "@/pages/pedidos";
 import Tickets from "@/pages/tickets";
+import Catalogo from "@/pages/catalogo";
 import Paqueteria from "@/pages/paqueteria";
 import AdminUsuarios from "@/pages/admin/usuarios";
 import Config from "@/pages/config";
@@ -42,6 +43,7 @@ function Router() {
         <Route path="/" component={Dashboard} />
         <Route path="/pedidos" component={Pedidos} />
         <Route path="/tickets" component={Tickets} />
+        <Route path="/catalogo" component={Catalogo} />
         <Route path="/paqueteria" component={Paqueteria} />
         <Route path="/admin/usuarios" component={AdminUsuarios} />
         <Route path="/productos" component={ProductsView} />

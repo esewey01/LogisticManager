@@ -37,6 +37,12 @@ export default function Sidebar({ collapsed }: SidebarProps) {
       badge: null,
     },
     {
+      path: "/catalogo",
+      icon: "fas fa-cube",
+      label: "Catálogo",
+      badge: null,
+    },
+    {
       path: "/paqueteria",
       icon: "fas fa-truck",
       label: "Paquetería",

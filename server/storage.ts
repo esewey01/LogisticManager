@@ -425,13 +425,53 @@ export class DatabaseStorage implements IStorage {
       .orderBy(desc(createdAtEff(tablaOrdenes)));
   }
 
-  /** Obtiene una orden por ID. */
-  async getOrder(id: number): Promise<Orden | undefined> {
-    const [orden] = await baseDatos
-      .select()
-      .from(tablaOrdenes)
-      .where(eq(tablaOrdenes.id, BigInt(id)));
-    return orden;
+  /** Obtiene una orden por ID con detalles completos. */
+  async getOrder(id: number): Promise<any | undefined> {
+    try {
+      console.log(`[Storage] getOrder called with ID: ${id}`);
+      
+      // Usar la sintaxis estándar de Drizzle primero
+      const [orden] = await baseDatos
+        .select()
+        .from(tablaOrdenes)
+        .where(eq(tablaOrdenes.id, BigInt(id)));
+      
+      console.log(`[Storage] Raw order found:`, !!orden);
+      
+      if (!orden) return undefined;
+      
+      // Formatear la respuesta
+      const result = {
+        id: String(orden.id),
+        orderId: orden.orderId,
+        name: orden.name || '',
+        customerName: orden.customerName || '',
+        customerEmail: orden.customerEmail || '',
+        totalAmount: String(orden.totalAmount || 0),
+        subtotalPrice: String(orden.subtotalPrice || 0),
+        fulfillmentStatus: orden.fulfillmentStatus || '',
+        financialStatus: orden.financialStatus || '',
+        createdAt: orden.shopifyCreatedAt || orden.createdAt,
+        shopifyCreatedAt: orden.shopifyCreatedAt || orden.createdAt,
+        shopId: orden.shopId || 0,
+        shipName: orden.shipName || '',
+        shipPhone: orden.shipPhone || '',
+        shipAddress1: orden.shipAddress1 || '',
+        shipCity: orden.shipCity || '',
+        shipProvince: orden.shipProvince || '',
+        shipCountry: orden.shipCountry || '',
+        shipZip: orden.shipZip || '',
+        currency: orden.currency || 'MXN',
+        tags: [],
+        orderNote: orden.note || ''
+      };
+      
+      console.log(`[Storage] Formatted order result:`, result);
+      return result;
+    } catch (error) {
+      console.error("[Storage] Error getting order:", error);
+      return undefined;
+    }
   }
 
   /** Crea una orden. */
@@ -866,16 +906,20 @@ export class DatabaseStorage implements IStorage {
         range
       ));
 
+    // Usar shop_id como equivalente a channel para datos reales
     const byChannelRes = await baseDatos
       .select({
-        channelId: tablaOrdenes.channelId,
-        channelName: tablaCanales.name,
+        channelId: tablaOrdenes.shopId,
+        channelName: sql<string>`CASE 
+          WHEN ${tablaOrdenes.shopId} = 1 THEN 'Tienda 1'
+          WHEN ${tablaOrdenes.shopId} = 2 THEN 'Tienda 2'
+          ELSE 'Tienda ' || ${tablaOrdenes.shopId}::text
+        END`,
         count: sql<number>`COUNT(*)`,
       })
       .from(tablaOrdenes)
-      .leftJoin(tablaCanales, eq(tablaCanales.id, tablaOrdenes.channelId))
       .where(range)
-      .groupBy(tablaOrdenes.channelId, tablaCanales.name);
+      .groupBy(tablaOrdenes.shopId);
 
     const byShopRes = await baseDatos
       .select({
@@ -904,6 +948,241 @@ export class DatabaseStorage implements IStorage {
     };
   }
 
+  /** Obtiene órdenes del día actual. */
+  async getTodayOrders(): Promise<{ count: number; totalAmount: number }> {
+    try {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const tomorrow = new Date(today);
+      tomorrow.setDate(tomorrow.getDate() + 1);
+
+      const result = await baseDatos.execute(sql`
+        SELECT 
+          COUNT(*) as count,
+          COALESCE(SUM(CAST(total_amount AS NUMERIC)), 0) as total_amount
+        FROM orders 
+        WHERE shopify_created_at >= ${today.toISOString()} 
+          AND shopify_created_at < ${tomorrow.toISOString()}
+      `);
+
+      const stats = result.rows[0] as any;
+      return {
+        count: Number(stats.count) || 0,
+        totalAmount: Number(stats.total_amount) || 0,
+      };
+    } catch (error) {
+      console.error("Error getting today orders:", error);
+      return { count: 0, totalAmount: 0 };
+    }
+  }
+
+  /** Obtiene datos de órdenes por día de la semana para gráfico. */
+  async getOrdersByWeekday(weekOffset: number = 0): Promise<Array<{ day: string; count: number }>> {
+    try {
+      const startDate = new Date();
+      startDate.setDate(startDate.getDate() - (7 * weekOffset) - 6); // 7 días atrás desde hoy
+      startDate.setHours(0, 0, 0, 0);
+      
+      const endDate = new Date(startDate);
+      endDate.setDate(endDate.getDate() + 6);
+      endDate.setHours(23, 59, 59, 999);
+
+      const result = await baseDatos.execute(sql`
+        SELECT 
+          EXTRACT(DOW FROM shopify_created_at) as dow,
+          COUNT(*) as count
+        FROM orders 
+        WHERE shopify_created_at >= ${startDate.toISOString()}
+          AND shopify_created_at <= ${endDate.toISOString()}
+        GROUP BY EXTRACT(DOW FROM shopify_created_at)
+        ORDER BY dow
+      `);
+
+      const dayNames = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
+      const data = dayNames.map((day, index) => {
+        const found = result.rows.find((row: any) => Number(row.dow) === index);
+        return {
+          day,
+          count: found ? Number(found.count) : 0
+        };
+      });
+
+      return data;
+    } catch (error) {
+      console.error("Error getting orders by weekday:", error);
+      return [];
+    }
+  }
+
+  /** Obtiene ventas por mes para gráfico. */
+  async getSalesByMonth(): Promise<Array<{ month: string; sales: number }>> {
+    try {
+      const result = await baseDatos.execute(sql`
+        SELECT 
+          TO_CHAR(shopify_created_at, 'YYYY-MM') as month,
+          COALESCE(SUM(CAST(total_amount AS NUMERIC)), 0) as sales
+        FROM orders 
+        WHERE shopify_created_at >= CURRENT_DATE - INTERVAL '12 months'
+        GROUP BY TO_CHAR(shopify_created_at, 'YYYY-MM')
+        ORDER BY month
+      `);
+
+      return result.rows.map((row: any) => ({
+        month: row.month || '',
+        sales: Number(row.sales) || 0
+      }));
+    } catch (error) {
+      console.error("Error getting sales by month:", error);
+      return [];
+    }
+  }
+
+  // ==== CATÁLOGO DE PRODUCTOS ====
+
+  /** Obtiene productos paginados con filtros. */
+  async getProductsPaginated(params: {
+    page: number;
+    pageSize: number;
+    search?: string;
+    categoria?: string;
+    activo?: boolean;
+  }): Promise<{ rows: any[]; total: number; page: number; pageSize: number }> {
+    const { page, pageSize, search, categoria, activo } = params;
+
+    try {
+      const conds: any[] = [];
+      
+      if (search) {
+        const searchPattern = `%${search.toLowerCase()}%`;
+        conds.push(
+          sql`(
+            LOWER(COALESCE(nombre, '')) LIKE ${searchPattern} OR
+            LOWER(COALESCE(sku, '')) LIKE ${searchPattern} OR
+            LOWER(COALESCE(descripcion, '')) LIKE ${searchPattern}
+          )`
+        );
+      }
+
+      if (categoria) {
+        conds.push(eq(tablaProductos.categoria, categoria));
+      }
+
+      if (activo !== undefined) {
+        conds.push(eq(tablaProductos.activo, activo));
+      }
+
+      const whereClause = conds.length > 0 ? and(...conds) : undefined;
+      const offset = Math.max(0, (page - 1) * pageSize);
+
+      // Obtener productos
+      const productos = await baseDatos
+        .select()
+        .from(tablaProductos)
+        .where(whereClause)
+        .orderBy(desc(tablaProductos.updatedAt))
+        .limit(pageSize)
+        .offset(offset);
+
+      // Contar total
+      const totalResult = await baseDatos
+        .select({ count: count() })
+        .from(tablaProductos)
+        .where(whereClause);
+
+      const total = Number(totalResult[0]?.count ?? 0);
+
+      return {
+        rows: productos.map(p => ({
+          ...p,
+          id: Number(p.id),
+          precio: p.precio ? Number(p.precio) : null,
+          inventario: p.inventario || 0,
+          fechaCreacion: p.createdAt,
+          fechaActualizacion: p.updatedAt
+        })),
+        total,
+        page,
+        pageSize
+      };
+    } catch (error) {
+      console.error("Error getting products paginated:", error);
+      return { rows: [], total: 0, page, pageSize };
+    }
+  }
+
+  /** Obtiene las categorías únicas de productos. */
+  async getProductCategories(): Promise<string[]> {
+    try {
+      const result = await baseDatos
+        .selectDistinct({ categoria: tablaProductos.categoria })
+        .from(tablaProductos)
+        .where(isNotNull(tablaProductos.categoria));
+
+      return result
+        .map(r => r.categoria)
+        .filter(Boolean)
+        .sort() as string[];
+    } catch (error) {
+      console.error("Error getting product categories:", error);
+      return [];
+    }
+  }
+
+  /** Crea un nuevo producto en el catálogo. */
+  async createProduct(datos: any): Promise<any> {
+    const [producto] = await baseDatos
+      .insert(tablaProductos)
+      .values({
+        nombre: datos.nombre,
+        sku: datos.sku,
+        descripcion: datos.descripcion,
+        precio: datos.precio ? String(datos.precio) : null,
+        categoria: datos.categoria,
+        marca: datos.marca,
+        activo: datos.activo ?? true,
+        inventario: datos.inventario ?? 0,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .returning();
+
+    return {
+      ...producto,
+      id: Number(producto.id),
+      precio: producto.precio ? Number(producto.precio) : null,
+      fechaCreacion: producto.createdAt,
+      fechaActualizacion: producto.updatedAt
+    };
+  }
+
+  /** Actualiza un producto del catálogo. */
+  async updateProduct(id: number, datos: any): Promise<any> {
+    const [producto] = await baseDatos
+      .update(tablaProductos)
+      .set({
+        ...datos,
+        precio: datos.precio ? String(datos.precio) : undefined,
+        updatedAt: new Date(),
+      })
+      .where(eq(tablaProductos.id, id))
+      .returning();
+
+    return {
+      ...producto,
+      id: Number(producto.id),
+      precio: producto.precio ? Number(producto.precio) : null,
+      fechaCreacion: producto.createdAt,
+      fechaActualizacion: producto.updatedAt
+    };
+  }
+
+  /** Elimina un producto del catálogo. */
+  async deleteProduct(id: number): Promise<void> {
+    await baseDatos
+      .delete(tablaProductos)
+      .where(eq(tablaProductos.id, id));
+  }
+
   // ==== ÓRDENES PAGINADAS ====
   async getOrdersPaginated(params: {
     statusFilter: "unmanaged" | "managed" | "all";
@@ -911,8 +1190,9 @@ export class DatabaseStorage implements IStorage {
     page: number;
     pageSize: number;
     search?: string;
+    searchType?: "all" | "sku" | "customer" | "product";
   }): Promise<{ rows: any[]; total: number; page: number; pageSize: number }> {
-    const { statusFilter, channelId, page, pageSize, search } = params;
+    const { statusFilter, channelId, page, pageSize, search, searchType = "all" } = params;
 
     console.log(`🔍 getOrdersPaginated - filtros:`, { statusFilter, channelId, page, pageSize, search });
 
@@ -935,18 +1215,54 @@ export class DatabaseStorage implements IStorage {
       //   conds.push(sql`o.channel_id = ${channelId}`);
       // }
       
-      // Búsqueda textual solo por order_id y SKU (case-insensitive) basado en esquema real
+      // Búsqueda textual mejorada con soporte para tipos específicos
       if (search) {
-        conds.push(
-          sql`(
-            LOWER(COALESCE(o.order_id, '')) LIKE LOWER(${'%' + search + '%'}) OR 
-            EXISTS (
+        const searchPattern = `%${search.toLowerCase()}%`;
+        
+        if (searchType === "sku") {
+          conds.push(
+            sql`EXISTS (
               SELECT 1 FROM order_items oi2 
               WHERE oi2.order_id = o.id 
-              AND LOWER(COALESCE(oi2.sku, '')) LIKE LOWER(${'%' + search + '%'})
-            )
-          )`
-        );
+              AND LOWER(COALESCE(oi2.sku, '')) LIKE ${searchPattern}
+            )`
+          );
+        } else if (searchType === "customer") {
+          conds.push(
+            sql`(
+              LOWER(COALESCE(o.customer_name, '')) LIKE ${searchPattern} OR 
+              LOWER(COALESCE(o.customer_email, '')) LIKE ${searchPattern}
+            )`
+          );
+        } else if (searchType === "product") {
+          conds.push(
+            sql`EXISTS (
+              SELECT 1 FROM order_items oi2 
+              WHERE oi2.order_id = o.id 
+              AND (
+                LOWER(COALESCE(oi2.title, '')) LIKE ${searchPattern} OR
+                LOWER(COALESCE(oi2.variant_title, '')) LIKE ${searchPattern}
+              )
+            )`
+          );
+        } else { // "all" or default
+          conds.push(
+            sql`(
+              LOWER(COALESCE(o.order_id, '')) LIKE ${searchPattern} OR 
+              LOWER(COALESCE(o.customer_name, '')) LIKE ${searchPattern} OR 
+              LOWER(COALESCE(o.customer_email, '')) LIKE ${searchPattern} OR
+              EXISTS (
+                SELECT 1 FROM order_items oi2 
+                WHERE oi2.order_id = o.id 
+                AND (
+                  LOWER(COALESCE(oi2.sku, '')) LIKE ${searchPattern} OR
+                  LOWER(COALESCE(oi2.title, '')) LIKE ${searchPattern} OR
+                  LOWER(COALESCE(oi2.variant_title, '')) LIKE ${searchPattern}
+                )
+              )
+            )`
+          );
+        }
       }
 
       // Combinar condiciones
@@ -960,10 +1276,14 @@ export class DatabaseStorage implements IStorage {
       const baseQuery = sql`
         SELECT 
           o.id::text as id,
-          COALESCE(o.order_id, o.name, '') as name,
+          COALESCE(o.name, o.order_id, '') as name,
           COALESCE(o.customer_name, '') as "customerName",
-          0 as "channelId",
-          'N/A' as "channelName", 
+          o.shop_id as "channelId",
+          CASE 
+            WHEN o.shop_id = 1 THEN 'Tienda 1'
+            WHEN o.shop_id = 2 THEN 'Tienda 2'
+            ELSE 'Tienda ' || o.shop_id::text
+          END as "channelName", 
           COALESCE(o.total_amount, '0') as "totalAmount",
           COALESCE(o.fulfillment_status, '') as "fulfillmentStatus",
           COALESCE(o.shopify_created_at, o.created_at, NOW()) as "createdAt",
@@ -984,7 +1304,7 @@ export class DatabaseStorage implements IStorage {
         LEFT JOIN order_items oi ON oi.order_id = o.id
         ${whereClause ? sql`WHERE ${whereClause}` : sql``}
         GROUP BY o.id, o.order_id, o.name, o.customer_name, o.total_amount, 
-                 o.fulfillment_status, o.shopify_created_at, o.created_at
+                 o.fulfillment_status, o.shopify_created_at, o.created_at, o.shop_id
         ORDER BY COALESCE(o.shopify_created_at, o.created_at) DESC
         LIMIT ${pageSize} OFFSET ${offset}
       `;
@@ -1022,22 +1342,37 @@ export class DatabaseStorage implements IStorage {
 
   // Items de una orden
   async getOrderItems(orderId: number) {
-    return await baseDatos
-      .select({
-        id: tablaItemsOrden.id,
-        sku: tablaItemsOrden.sku,
-        quantity: tablaItemsOrden.quantity,
-        price: tablaItemsOrden.price,
-        title: tablaProductos.title,
-        vendor: tablaProductos.vendor,
-      })
-      .from(tablaItemsOrden)
-      .leftJoin(
-        tablaProductos,
-        eq(tablaProductos.idShopify, tablaItemsOrden.shopifyProductId),
-      )
-      .where(eq(tablaItemsOrden.orderId, BigInt(orderId)))
-      .orderBy(asc(tablaItemsOrden.id));
+    try {
+      const items = await baseDatos
+        .select({
+          id: tablaItemsOrden.id,
+          sku: tablaItemsOrden.sku,
+          quantity: tablaItemsOrden.quantity,
+          price: tablaItemsOrden.price,
+          title: tablaProductos.title,
+          vendor: tablaProductos.vendor,
+          productName: tablaProductos.title, // Alias para el modal
+          skuInterno: tablaItemsOrden.sku,   // SKU interno 
+          skuExterno: tablaItemsOrden.sku,   // SKU externo (mismo por ahora)
+        })
+        .from(tablaItemsOrden)
+        .leftJoin(
+          tablaProductos,
+          eq(tablaProductos.idShopify, tablaItemsOrden.shopifyProductId),
+        )
+        .where(eq(tablaItemsOrden.orderId, BigInt(orderId)))
+        .orderBy(asc(tablaItemsOrden.id));
+      
+      // Remover duplicados por ID si existen
+      const uniqueItems = items.filter((item, index, self) => 
+        index === self.findIndex(t => t.id === item.id)
+      );
+      
+      return uniqueItems;
+    } catch (error) {
+      console.error("Error getting order items:", error);
+      return [];
+    }
   }
 
   // Productos paginados por tienda
@@ -1084,6 +1419,8 @@ export class DatabaseStorage implements IStorage {
       .from(tablaProductosExternos);
     return { rows, total: Number(totalRes[0]?.count ?? 0), page, pageSize };
   }
+
+
 }
 
 // Instancia lista para usar (compatibilidad y alias en español)

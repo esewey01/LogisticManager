@@ -1,13 +1,10 @@
 import React from 'react';
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import MetricCard from "@/components/MetricCard";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { Badge } from "@/components/ui/badge";
 import { apiRequest } from "@/lib/queryClient";
-import OrdersChart from "@/components/charts/OrdersChart";
 import Calendar from "@/components/Calendar";
 import type { DashboardMetrics, NoteDTO } from "@shared/schema";
 import {
@@ -27,6 +24,34 @@ export default function Dashboard() {
     queryKey: ["/api/dashboard/metrics"],
     queryFn: async () => {
       const res = await apiRequest("GET", "/api/dashboard/metrics");
+      return res.json();
+    },
+    refetchInterval: 30000,
+  });
+
+  const { data: todayOrders } = useQuery<{ count: number; totalAmount: number }>({
+    queryKey: ["/api/dashboard/today-orders"],
+    queryFn: async () => {
+      const res = await apiRequest("GET", "/api/dashboard/today-orders");
+      return res.json();
+    },
+    refetchInterval: 30000,
+  });
+
+  const [weekOffset, setWeekOffset] = useState(0);
+  const { data: weeklyData } = useQuery<Array<{ day: string; count: number }>>({
+    queryKey: ["/api/dashboard/orders-by-weekday", weekOffset],
+    queryFn: async () => {
+      const res = await apiRequest("GET", `/api/dashboard/orders-by-weekday?week=${weekOffset}`);
+      return res.json();
+    },
+    refetchInterval: 30000,
+  });
+
+  const { data: monthlyData } = useQuery<Array<{ month: string; sales: number }>>({
+    queryKey: ["/api/dashboard/sales-by-month"],
+    queryFn: async () => {
+      const res = await apiRequest("GET", "/api/dashboard/sales-by-month");
       return res.json();
     },
     refetchInterval: 30000,
@@ -88,6 +113,7 @@ export default function Dashboard() {
           <p className="text-gray-600 mt-1">Resumen de órdenes, canales y tareas</p>
         </header>
 
+        {/* Métricas principales */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
           <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200 flex items-center space-x-4 hover:shadow-md transition-shadow">
             <div className="p-3 bg-blue-100 rounded-full">
@@ -124,135 +150,194 @@ export default function Dashboard() {
               <FaStore className="text-purple-600 text-2xl" />
             </div>
             <div>
-              <p className="text-sm font-medium text-gray-600">Canales</p>
-              <p className="text-2xl font-bold text-gray-800">{metrics?.byChannel?.length ?? 0}</p>
+              <p className="text-sm font-medium text-gray-600">Canales Activos</p>
+              <p className="text-2xl font-bold text-gray-800">{metrics?.activeChannels ?? 0}</p>
             </div>
           </div>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
-          <Card className="p-6">
-            <CardHeader className="p-0 mb-4">
-              <CardTitle className="text-xl font-semibold text-gray-800 flex items-center">
-                <FaChartPie className="mr-2" /> Distribución por Canal
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="p-0">
-              <div className="space-y-4">
-                {metrics?.byChannel?.map((c: any) => (
-                  <div key={c.channelId} className="flex items-center justify-between p-3 bg-gray-50 rounded">
-                    <div className="flex items-center space-x-3">
-                      <span className="block w-4 h-4 rounded-full bg-indigo-500"></span>
-                      <span className="text-sm font-medium text-gray-700">{c.channelName}</span>
-                    </div>
-                    <span className="text-sm text-gray-600 font-semibold">{c.count} órdenes</span>
-                  </div>
-                ))}
+        {/* Nueva sección para órdenes del día */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+          <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-gray-800">Órdenes del Día</h3>
+              <div className="p-2 bg-blue-100 rounded-full">
+                <FaClipboardList className="text-blue-600 text-lg" />
               </div>
+            </div>
+            <div className="space-y-2">
+              <div className="flex justify-between items-center">
+                <span className="text-gray-600">Cantidad:</span>
+                <span className="text-xl font-bold text-blue-600">{todayOrders?.count || 0}</span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-gray-600">Total vendido:</span>
+                <span className="text-xl font-bold text-green-600">
+                  ${(todayOrders?.totalAmount || 0).toLocaleString()} MXN
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-gray-800">Órdenes por Día</h3>
+              <div className="flex items-center space-x-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setWeekOffset(prev => prev + 1)}
+                  disabled={!weeklyData}
+                  data-testid="button-previous-week"
+                >
+                  ← Anterior
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setWeekOffset(prev => Math.max(0, prev - 1))}
+                  disabled={weekOffset === 0}
+                  data-testid="button-next-week"
+                >
+                  Siguiente →
+                </Button>
+              </div>
+            </div>
+            <div className="space-y-2">
+              {weeklyData?.map((item) => (
+                <div key={item.day} className="flex justify-between items-center">
+                  <span className="text-gray-600">{item.day}:</span>
+                  <span className="font-semibold text-gray-800">{item.count}</span>
+                </div>
+              ))}
+              {!weeklyData && <div className="text-center text-gray-500">Cargando...</div>}
+            </div>
+          </div>
+        </div>
+
+        {/* Gráfico de ventas mensuales */}
+        <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200 mb-8">
+          <h3 className="text-lg font-semibold text-gray-800 mb-4">Ventas por Mes (Últimos 12 meses)</h3>
+          {monthlyData && monthlyData.length > 0 ? (
+            <div className="space-y-3">
+              {monthlyData.slice(-6).map((item) => (
+                <div key={item.month} className="flex justify-between items-center p-3 bg-gray-50 rounded">
+                  <span className="font-medium text-gray-700">{item.month}</span>
+                  <span className="font-bold text-green-600">
+                    ${item.sales.toLocaleString()} MXN
+                  </span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="text-center text-gray-500">Cargando datos de ventas...</div>
+          )}
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
+          {/* Notas rápidas */}
+          <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-gray-800">Notas Rápidas</h3>
+              <div className="p-2 bg-yellow-100 rounded-full">
+                <FaStickyNote className="text-yellow-600 text-lg" />
+              </div>
+            </div>
+            <div className="space-y-3">
+              <Textarea
+                placeholder="Agregar nota rápida..."
+                value={newNote}
+                onChange={(e) => setNewNote(e.target.value)}
+                className="min-h-[80px]"
+                data-testid="textarea-new-note"
+              />
+              <Button
+                onClick={handleAddNote}
+                disabled={!newNote.trim() || addNoteMutation.isPending}
+                className="w-full"
+                data-testid="button-add-note"
+              >
+                {addNoteMutation.isPending ? "Guardando..." : "Agregar Nota"}
+              </Button>
+              {notes.length > 0 && (
+                <div className="space-y-2 max-h-40 overflow-y-auto">
+                  {notes.slice(0, 3).map((note: NoteDTO) => (
+                    <div
+                      key={note.id}
+                      className="text-sm p-3 bg-yellow-50 border border-yellow-200 rounded flex justify-between items-start"
+                    >
+                      <p className="flex-1">{note.text}</p>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-6 w-6 p-0 ml-2"
+                        onClick={() => deleteNoteMutation.mutate(note.id)}
+                        data-testid={`button-delete-note-${note.id}`}
+                      >
+                        ×
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Distribución por Canal */}
+          <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-gray-800">Distribución por Canal</h3>
+              <div className="p-2 bg-purple-100 rounded-full">
+                <FaChartPie className="text-purple-600 text-lg" />
+              </div>
+            </div>
+            <div className="space-y-4">
+              {metrics?.byChannel?.map((c: any) => (
+                <div key={c.channelId} className="flex items-center justify-between p-3 bg-gray-50 rounded">
+                  <div className="flex items-center space-x-3">
+                    <span className="block w-4 h-4 rounded-full bg-indigo-500"></span>
+                    <span className="text-sm font-medium text-gray-700">{c.channelName}</span>
+                  </div>
+                  <span className="text-sm text-gray-600 font-semibold">{c.count} órdenes</span>
+                </div>
+              ))}
               <div className="mt-4 pt-4 border-t border-gray-200 text-sm text-gray-500">
                 <strong>Total:</strong> {metrics?.totalOrders ?? 0} órdenes distribuidas
               </div>
-            </CardContent>
-          </Card>
-
-          <Card className="p-6">
-            <CardHeader className="p-0 mb-4">
-              <CardTitle className="text-xl font-semibold text-gray-800 flex items-center">
-                <FaStickyNote className="mr-2" /> Mis Notas
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="p-0">
-              <div className="space-y-3">
-                {notes.length > 0 ? (
-                  notes.map((note: NoteDTO) => (
-                    <div
-                      key={note.id}
-                      className="text-sm text-gray-700 p-3 bg-yellow-50 border-l-4 border-yellow-400 rounded"
-                    >
-                      <div className="flex justify-between items-start">
-                        <p>{note.text}</p>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-6 w-6 p-0"
-                          onClick={() => deleteNoteMutation.mutate(note.id)}
-                        >
-                          ×
-                        </Button>
-                      </div>
-                      <p className="text-xs text-gray-500 mt-1">
-                        {new Date(note.createdAt).toLocaleString()}
-                      </p>
-                    </div>
-                  ))
-                ) : (
-                  <p className="text-sm text-gray-500 italic">No hay notas por ahora.</p>
-                )}
-              </div>
-              <div className="mt-4 flex gap-2">
-                <Textarea
-                  placeholder="Escribe una nueva nota..."
-                  value={newNote}
-                  onChange={(e) => setNewNote(e.target.value)}
-                  className="flex-1"
-                />
-                <Button
-                  onClick={handleAddNote}
-                  disabled={!newNote.trim() || addNoteMutation.isPending}
-                >
-                  Agregar
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
+            </div>
+          </div>
         </div>
 
-        <Card className="p-6 mb-8">
-          <CardHeader className="p-0 mb-4">
-            <CardTitle className="text-xl font-semibold text-gray-800">
-              Progreso de Gestión
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="p-0">
-            <div className="w-full bg-gray-200 rounded-full h-4">
-              <div
-                className="bg-green-500 h-4 rounded-full transition-all duration-500"
-                style={{ 
-                  width: `${metrics && metrics.totalOrders > 0 
-                    ? (metrics.managed / metrics.totalOrders) * 100 
-                    : 0}%` 
-                }}
-              ></div>
-            </div>
-            <div className="flex justify-between mt-2 text-sm text-gray-600">
-              <span>
-                ✅ {metrics?.managed ?? 0} gestionadas (
-                {metrics && metrics.totalOrders > 0 
-                  ? Math.round((metrics.managed / metrics.totalOrders) * 100) 
-                  : 0}%)
-              </span>
-              <span>
-                ⚠️ {metrics?.unmanaged ?? 0} pendientes
-              </span>
-            </div>
-          </CardContent>
-        </Card>
+        {/* Progreso de Gestión */}
+        <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200 mb-8">
+          <h3 className="text-lg font-semibold text-gray-800 mb-4">Progreso de Gestión</h3>
+          <div className="w-full bg-gray-200 rounded-full h-4">
+            <div
+              className="bg-green-500 h-4 rounded-full transition-all duration-500"
+              style={{ 
+                width: `${metrics && metrics.totalOrders > 0 
+                  ? (metrics.managed / metrics.totalOrders) * 100 
+                  : 0}%` 
+              }}
+            ></div>
+          </div>
+          <div className="flex justify-between mt-2 text-sm text-gray-600">
+            <span>
+              ✅ {metrics?.managed ?? 0} gestionadas (
+              {metrics && metrics.totalOrders > 0 
+                ? Math.round((metrics.managed / metrics.totalOrders) * 100) 
+                : 0}%)
+            </span>
+            <span>
+              ⚠️ {metrics?.unmanaged ?? 0} pendientes
+            </span>
+          </div>
+        </div>
 
-        {/* Añadir Calendario */}
+        {/* Calendario */}
         <div className="mb-8">
           <Calendar />
         </div>
-
-        <Card className="p-6">
-          <CardHeader className="p-0 mb-4">
-            <CardTitle className="text-xl font-semibold text-gray-800">
-              Gráfico de Órdenes
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="p-0">
-            <OrdersChart />
-          </CardContent>
-        </Card>
       </div>
     </div>
   );

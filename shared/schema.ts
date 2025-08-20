@@ -114,7 +114,7 @@ export const orders = pgTable("orders", {
   shopId: integer("shop_id").notNull(),                     // INT NOT NULL ← importante
   orderId: text("order_id").notNull(),                      // TEXT NOT NULL (ID externo de la plataforma)
   // UNIQUE (shop_id, order_id) ← se maneja en la DB
-  channelId: integer("channel_id"),                         // INT NULL (si existe)
+  // channelId: integer("channel_id"),                      // No existe en la DB real, se usa shop_id
   customerName: text("customer_name"),                      // TEXT
   customerEmail: text("customer_email"),                    // TEXT
   subtotalPrice: decimal("subtotal_price"),                 // NUMERIC
