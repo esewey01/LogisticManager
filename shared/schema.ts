@@ -108,61 +108,57 @@ export type Carrier = typeof carriers.$inferSelect;
 export type InsertCarrier = typeof carriers.$inferInsert;
 
 // === ÓRDENES ===
-// Estructura completa basada en la base de datos real
+// Estructura basada en el esquema real proporcionado
 export const orders = pgTable("orders", {
-  id: bigint("id", { mode: "bigint" }).primaryKey(),
-  shopId: integer("shop_id"),
-  channelId: integer("channel_id"),
-  name: text("name"),
-  orderNumber: text("order_number"),
-  idShopify: text("id_shopify"),
-  orderId: text("order_id"),
-  customerName: text("customer_name"),
-  customerFirstName: text("customer_first_name"),
-  customerLastName: text("customer_last_name"),
-  customerEmail: text("customer_email"),
-  contactPhone: text("contact_phone"),
-  shipName: text("ship_name"),
-  shipPhone: text("ship_phone"),
-  shipAddress1: text("ship_address1"),
-  shipCity: text("ship_city"),
-  shipProvince: text("ship_province"),
-  shipCountry: text("ship_country"),
-  shipZip: text("ship_zip"),
-  currency: text("currency"),
-  subtotalPrice: decimal("subtotal_price"),
-  totalAmount: decimal("total_amount"),
-  financialStatus: text("financial_status"),
-  fulfillmentStatus: text("fulfillment_status"),
-  status: text("status"),
-  hasTicket: boolean("has_ticket"),
-  isManaged: boolean("is_managed"),
-  tags: text("tags").array(),
-  orderNote: text("order_note"),
-  noteAttributes: json("note_attributes"),
-  shopifyCreatedAt: timestamp("shopify_created_at", { withTimezone: true }),
-  shopifyUpdatedAt: timestamp("shopify_updated_at", { withTimezone: true }),
-  shopifyProcessedAt: timestamp("shopify_processed_at", { withTimezone: true }),
-  shopifyClosedAt: timestamp("shopify_closed_at", { withTimezone: true }),
-  shopifyCancelledAt: timestamp("shopify_cancelled_at", { withTimezone: true }),
-  createdAt: timestamp("created_at"),
-  updatedAt: timestamp("updated_at"),
-  cancelReason: text("cancel_reason"),
+  id: bigint("id", { mode: "bigint" }).primaryKey(),        // BIGSERIAL PRIMARY KEY
+  shopId: integer("shop_id").notNull(),                     // INT NOT NULL ← importante
+  orderId: text("order_id").notNull(),                      // TEXT NOT NULL (ID externo de la plataforma)
+  // UNIQUE (shop_id, order_id) ← se maneja en la DB
+  channelId: integer("channel_id"),                         // INT NULL (si existe)
+  customerName: text("customer_name"),                      // TEXT
+  customerEmail: text("customer_email"),                    // TEXT
+  subtotalPrice: decimal("subtotal_price"),                 // NUMERIC
+  totalAmount: decimal("total_amount"),                     // NUMERIC
+  currency: text("currency"),                               // TEXT
+  financialStatus: text("financial_status"),                // TEXT
+  fulfillmentStatus: text("fulfillment_status"),            // TEXT
+  tags: text("tags").array(),                               // TEXT[]
+  noteAttributes: json("note_attributes"),                  // JSONB
+  createdAt: timestamp("created_at"),                       // TIMESTAMP
+  shopifyCreatedAt: timestamp("shopify_created_at", { withTimezone: true }), // TIMESTAMPTZ
+  shopifyUpdatedAt: timestamp("shopify_updated_at", { withTimezone: true }), // TIMESTAMPTZ
+  shopifyProcessedAt: timestamp("shopify_processed_at", { withTimezone: true }), // TIMESTAMPTZ
+  shopifyClosedAt: timestamp("shopify_closed_at", { withTimezone: true }), // TIMESTAMPTZ
+  shopifyCancelledAt: timestamp("shopify_cancelled_at", { withTimezone: true }), // TIMESTAMPTZ
 });
 
 export type Order = typeof orders.$inferSelect;
 export type InsertOrder = typeof orders.$inferInsert;
 
+// === ORDER_ITEMS ===
+// Items de órdenes basado en el esquema real
+export const orderItems = pgTable("order_items", {
+  id: serial("id").primaryKey(),                          // SERIAL PRIMARY KEY
+  orderId: bigint("order_id", { mode: "bigint" }).notNull(), // BIGINT NOT NULL (FK a orders.id con ON DELETE CASCADE)
+  sku: text("sku"),                                       // TEXT
+  quantity: integer("quantity").notNull(),                // INT NOT NULL
+  price: decimal("price"),                                // NUMERIC
+  shopifyProductId: text("shopify_product_id"),           // TEXT
+  shopifyVariantId: text("shopify_variant_id"),           // TEXT
+});
+export type OrderItem = typeof orderItems.$inferSelect;
+export type InsertOrderItem = typeof orderItems.$inferInsert;
+
 // === TICKETS ===
-// Tickets vinculados a órdenes (soporte/gestión)
+// Tickets basados en el esquema real
 export const tickets = pgTable("tickets", {
-  id: serial("id").primaryKey(),
-  orderId: integer("order_id"),                           // referencia a orders.id
-  ticketNumber: text("ticket_number"),                    // folio del ticket
-  status: text("status"),                                 // estado del ticket
-  notes: text("notes"),                                   // notas libres
-  createdAt: timestamp("created_at"),
-  updatedAt: timestamp("updated_at"),
+  id: serial("id").primaryKey(),                          // SERIAL PRIMARY KEY
+  ticketNumber: text("ticket_number").unique().notNull(), // TEXT UNIQUE NOT NULL
+  orderId: integer("order_id").notNull(),                 // INTEGER NOT NULL (FK a orders.id con ON DELETE CASCADE)
+  status: text("status").notNull().default('open'),       // TEXT NOT NULL DEFAULT 'open'
+  notes: text("notes"),                                   // TEXT
+  createdAt: timestamp("created_at").defaultNow(),        // TIMESTAMP DEFAULT now()
+  updatedAt: timestamp("updated_at"),                     // TIMESTAMP
 });
 export type Ticket = typeof tickets.$inferSelect;
 export type InsertTicket = typeof tickets.$inferInsert;
@@ -240,22 +236,7 @@ export const variants = pgTable("variants", {
 export type Variant = typeof variants.$inferSelect;
 export type InsertVariant = typeof variants.$inferInsert;
 
-// === ÍTEMS DE ORDEN ===
-// Líneas de orden (productos dentro de una orden)
-export const orderItems = pgTable("order_items", {
-  id: serial("id").primaryKey(),
-  orderId: bigint("order_id", { mode: "bigint" }),        // referencia a orders.id
-  productId: integer("product_id"),                       // referencia a products.id (opcional)
-  variantId: integer("variant_id"),                       // referencia a variants.id (opcional)
-  shopifyProductId: text("shopify_product_id"),
-  shopifyVariantId: text("shopify_variant_id"),
-  sku: text("sku"),                                       // SKU del producto
-  price: decimal("price"),                                // precio unitario
-  quantity: integer("quantity"),                          // cantidad
-  createdAt: timestamp("created_at"),
-});
-export type OrderItem = typeof orderItems.$inferSelect;
-export type InsertOrderItem = typeof orderItems.$inferInsert;
+
 
 // === COMBOS DE PRODUCTOS ===
 // Relación para productos combo (un producto que contiene otros)
