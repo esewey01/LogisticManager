@@ -429,17 +429,17 @@ export class DatabaseStorage implements IStorage {
   async getOrder(id: number): Promise<any | undefined> {
     try {
       console.log(`[Storage] getOrder called with ID: ${id}`);
-      
+
       // Usar la sintaxis estándar de Drizzle primero
       const [orden] = await baseDatos
         .select()
         .from(tablaOrdenes)
         .where(eq(tablaOrdenes.id, BigInt(id)));
-      
+
       console.log(`[Storage] Raw order found:`, !!orden);
-      
+
       if (!orden) return undefined;
-      
+
       // Formatear la respuesta
       const result = {
         id: String(orden.id),
@@ -465,7 +465,7 @@ export class DatabaseStorage implements IStorage {
         tags: [],
         orderNote: orden.note || ''
       };
-      
+
       console.log(`[Storage] Formatted order result:`, result);
       return result;
     } catch (error) {
@@ -911,8 +911,8 @@ export class DatabaseStorage implements IStorage {
       .select({
         channelId: tablaOrdenes.shopId,
         channelName: sql<string>`CASE 
-          WHEN ${tablaOrdenes.shopId} = 1 THEN 'Tienda 1'
-          WHEN ${tablaOrdenes.shopId} = 2 THEN 'Tienda 2'
+          WHEN ${tablaOrdenes.shopId} = 1 THEN 'WordWide'
+          WHEN ${tablaOrdenes.shopId} = 2 THEN 'CrediTienda'
           ELSE 'Tienda ' || ${tablaOrdenes.shopId}::text
         END`,
         count: sql<number>`COUNT(*)`,
@@ -977,34 +977,53 @@ export class DatabaseStorage implements IStorage {
   }
 
   /** Obtiene datos de órdenes por día de la semana para gráfico. */
+  // storage.ts
   async getOrdersByWeekday(weekOffset: number = 0): Promise<Array<{ day: string; count: number }>> {
     try {
-      const startDate = new Date();
-      startDate.setDate(startDate.getDate() - (7 * weekOffset) - 6); // 7 días atrás desde hoy
-      startDate.setHours(0, 0, 0, 0);
-      
-      const endDate = new Date(startDate);
-      endDate.setDate(endDate.getDate() + 6);
-      endDate.setHours(23, 59, 59, 999);
-
+      // NOTA: todo el cálculo de fechas lo hacemos en SQL con la zona horaria de CDMX
       const result = await baseDatos.execute(sql`
-        SELECT 
-          EXTRACT(DOW FROM shopify_created_at) as dow,
-          COUNT(*) as count
-        FROM orders 
-        WHERE shopify_created_at >= ${startDate.toISOString()}
-          AND shopify_created_at <= ${endDate.toISOString()}
-        GROUP BY EXTRACT(DOW FROM shopify_created_at)
-        ORDER BY dow
-      `);
+      WITH base AS (
+        SELECT (now() AT TIME ZONE 'America/Mexico_City') AS now_cdmx
+      ),
+      limites AS (
+        SELECT
+          -- Semana que inicia en DOMINGO:
+          -- Truco: mueve +1 día para usar date_trunc('week') (que es lunes),
+          -- luego resta 1 día para quedar en domingo.
+          (date_trunc('week', (now_cdmx + INTERVAL '1 day')) - INTERVAL '1 day')
+            - (${weekOffset}::int * INTERVAL '7 day') AS ini,
+          CASE
+            -- Semana actual: corta en hoy+1d para no mostrar días futuros
+            WHEN ${weekOffset}::int = 0 THEN LEAST(
+              (date_trunc('week', (now_cdmx + INTERVAL '1 day')) - INTERVAL '1 day') + INTERVAL '7 day',
+              date_trunc('day', now_cdmx) + INTERVAL '1 day'
+            )
+            -- Semanas pasadas: rango completo domingo→domingo
+            ELSE (
+              (date_trunc('week', (now_cdmx + INTERVAL '1 day')) - INTERVAL '1 day')
+                - (${weekOffset}::int * INTERVAL '7 day')
+              + INTERVAL '7 day'
+            )
+          END AS fin
+        FROM base
+      )
+      SELECT
+        EXTRACT(DOW FROM (shopify_created_at AT TIME ZONE 'America/Mexico_City'))::int AS dow,
+        COUNT(*)::bigint AS count
+      FROM orders, limites
+      WHERE shopify_created_at IS NOT NULL
+        AND (shopify_created_at AT TIME ZONE 'America/Mexico_City') >= limites.ini
+        AND (shopify_created_at AT TIME ZONE 'America/Mexico_City') <  limites.fin
+      GROUP BY 1
+      ORDER BY 1;
+    `);
 
+
+      // Mapeo fijo para que salgan siempre los 7 días, aun si no hay datos
       const dayNames = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
       const data = dayNames.map((day, index) => {
         const found = result.rows.find((row: any) => Number(row.dow) === index);
-        return {
-          day,
-          count: found ? Number(found.count) : 0
-        };
+        return { day, count: found ? Number(found.count) : 0 };
       });
 
       return data;
@@ -1013,6 +1032,8 @@ export class DatabaseStorage implements IStorage {
       return [];
     }
   }
+
+
 
   /** Obtiene ventas por mes para gráfico. */
   async getSalesByMonth(): Promise<Array<{ month: string; sales: number }>> {
@@ -1051,7 +1072,7 @@ export class DatabaseStorage implements IStorage {
 
     try {
       const conds: any[] = [];
-      
+
       if (search) {
         const searchPattern = `%${search.toLowerCase()}%`;
         conds.push(
@@ -1198,7 +1219,7 @@ export class DatabaseStorage implements IStorage {
 
     try {
       const conds: any[] = [];
-      
+
       // Filtro por estado de gestión usando case-insensitive
       if (statusFilter === "unmanaged") {
         conds.push(
@@ -1209,16 +1230,16 @@ export class DatabaseStorage implements IStorage {
           sql`LOWER(COALESCE(o.fulfillment_status, '')) = 'fulfilled'`
         );
       }
-      
+
       // Filtro por canal (campo no existe en DB real, omitir por ahora)
       // if (channelId !== undefined) {
       //   conds.push(sql`o.channel_id = ${channelId}`);
       // }
-      
+
       // Búsqueda textual mejorada con soporte para tipos específicos
       if (search) {
         const searchPattern = `%${search.toLowerCase()}%`;
-        
+
         if (searchType === "sku") {
           conds.push(
             sql`EXISTS (
@@ -1266,7 +1287,7 @@ export class DatabaseStorage implements IStorage {
       }
 
       // Combinar condiciones
-      const whereClause = conds.length > 0 ? sql`${conds.reduce((acc, cond, i) => 
+      const whereClause = conds.length > 0 ? sql`${conds.reduce((acc, cond, i) =>
         i === 0 ? cond : sql`${acc} AND ${cond}`
       )}` : undefined;
 
@@ -1317,21 +1338,21 @@ export class DatabaseStorage implements IStorage {
       `;
 
       console.log(`📊 Ejecutando queries...`);
-      
+
       const [rows, totalRes] = await Promise.all([
         baseDatos.execute(baseQuery),
         baseDatos.execute(countQuery)
       ]);
 
       const total = Number(totalRes.rows[0]?.count ?? 0);
-      
+
       console.log(`✅ Resultados: ${rows.rows.length} filas, total: ${total}`);
-      
-      return { 
-        rows: rows.rows as any[], 
-        page, 
-        pageSize, 
-        total 
+
+      return {
+        rows: rows.rows as any[],
+        page,
+        pageSize,
+        total
       };
 
     } catch (error: any) {
@@ -1362,12 +1383,12 @@ export class DatabaseStorage implements IStorage {
         )
         .where(eq(tablaItemsOrden.orderId, BigInt(orderId)))
         .orderBy(asc(tablaItemsOrden.id));
-      
+
       // Remover duplicados por ID si existen
-      const uniqueItems = items.filter((item, index, self) => 
+      const uniqueItems = items.filter((item, index, self) =>
         index === self.findIndex(t => t.id === item.id)
       );
-      
+
       return uniqueItems;
     } catch (error) {
       console.error("Error getting order items:", error);

@@ -48,6 +48,7 @@ export default function Dashboard() {
     refetchInterval: 30000,
   });
 
+
   const { data: monthlyData } = useQuery<Array<{ month: string; sales: number }>>({
     queryKey: ["/api/dashboard/sales-by-month"],
     queryFn: async () => {
@@ -314,18 +315,18 @@ export default function Dashboard() {
           <div className="w-full bg-gray-200 rounded-full h-4">
             <div
               className="bg-green-500 h-4 rounded-full transition-all duration-500"
-              style={{ 
-                width: `${metrics && metrics.totalOrders > 0 
-                  ? (metrics.managed / metrics.totalOrders) * 100 
-                  : 0}%` 
+              style={{
+                width: `${metrics && metrics.totalOrders > 0
+                  ? (metrics.managed / metrics.totalOrders) * 100
+                  : 0}%`
               }}
             ></div>
           </div>
           <div className="flex justify-between mt-2 text-sm text-gray-600">
             <span>
               ✅ {metrics?.managed ?? 0} gestionadas (
-              {metrics && metrics.totalOrders > 0 
-                ? Math.round((metrics.managed / metrics.totalOrders) * 100) 
+              {metrics && metrics.totalOrders > 0
+                ? Math.round((metrics.managed / metrics.totalOrders) * 100)
                 : 0}%)
             </span>
             <span>

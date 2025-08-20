@@ -4,9 +4,6 @@ var __export = (target, all) => {
     __defProp(target, name, { get: all[name], enumerable: true });
 };
 
-// server/index.ts
-import fetchOrig from "node-fetch";
-
 // server/shopifyEnv.ts
 function getShopifyCredentials(storeParam) {
   const storeNumber = parseInt(storeParam || "1", 10);
@@ -258,7 +255,9 @@ __export(schema_exports, {
   canales: () => channels,
   carriers: () => carriers,
   catalogProducts: () => catalogProducts,
+  catalogoProductos: () => catalogoProductos,
   channels: () => channels,
+  createBulkTicketsSchema: () => createBulkTicketsSchema,
   externalProducts: () => externalProducts,
   insertNoteSchema: () => insertNoteSchema,
   insertOrderSchema: () => insertOrderSchema,
@@ -283,7 +282,7 @@ __export(schema_exports, {
   usuarios: () => users,
   variants: () => variants
 });
-import { pgTable, serial, text, boolean, timestamp, integer, decimal, date } from "drizzle-orm/pg-core";
+import { pgTable, serial, text, boolean, timestamp, integer, decimal, bigint, json } from "drizzle-orm/pg-core";
 import { z } from "zod";
 var users = pgTable("users", {
   id: serial("id").primaryKey(),
@@ -335,6 +334,44 @@ var catalogProducts = pgTable("catalog_products", {
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at")
 });
+var catalogoProductos = pgTable("catalogo_productos", {
+  skuInterno: text("sku_interno").primaryKey().unique(),
+  // SKU interno único
+  sku: text("sku"),
+  // SKU externo
+  nombreProducto: text("nombre_producto"),
+  // nombre del producto
+  marca: text("marca"),
+  // marca
+  modelo: text("modelo"),
+  // modelo
+  categoria: text("categoria"),
+  // categoría
+  marcaProducto: text("marca_producto"),
+  // marca del producto
+  variante: text("variante"),
+  // variante
+  codigoBarras: text("codigo_barras"),
+  // código de barras
+  foto: text("foto"),
+  // URL de la foto
+  peso: decimal("peso"),
+  // peso
+  alto: decimal("alto"),
+  // altura
+  ancho: decimal("ancho"),
+  // ancho
+  largo: decimal("largo"),
+  // largo
+  condicion: text("condicion"),
+  // condición
+  stock: integer("stock"),
+  // stock disponible
+  costo: decimal("costo"),
+  // costo
+  situacion: text("situacion")
+  // situación
+});
 var channels = pgTable("channels", {
   id: serial("id").primaryKey(),
   code: text("code").notNull().unique(),
@@ -362,65 +399,76 @@ var carriers = pgTable("carriers", {
   updatedAt: timestamp("updated_at")
 });
 var orders = pgTable("orders", {
-  id: serial("id").primaryKey(),
-  // Identificadores / orígenes
-  idShopify: text("id_shopify"),
-  // id de Shopify como texto
-  orderId: text("order_id"),
-  // si lo usas aparte de idShopify
+  id: bigint("id", { mode: "bigint" }).primaryKey(),
+  // BIGSERIAL PRIMARY KEY
   shopId: integer("shop_id").notNull(),
-  // tienda (1, 2, ...)
-  // Datos cliente / envío
-  customerFirstName: text("customer_first_name"),
-  customerLastName: text("customer_last_name"),
+  // INT NOT NULL ← importante
+  orderId: text("order_id").notNull(),
+  // TEXT NOT NULL (ID externo de la plataforma)
+  // UNIQUE (shop_id, order_id) ← se maneja en la DB
+  // channelId: integer("channel_id"),                      // No existe en la DB real, se usa shop_id
   customerName: text("customer_name"),
+  // TEXT
   customerEmail: text("customer_email"),
-  shipName: text("ship_name"),
-  shipPhone: text("ship_phone"),
-  shipAddress1: text("ship_address1"),
-  shipCity: text("ship_city"),
-  shipProvince: text("ship_province"),
-  shipCountry: text("ship_country"),
-  shipZip: text("ship_zip"),
-  // Económicos / estatus
-  totalAmount: decimal("total_amount"),
+  // TEXT
   subtotalPrice: decimal("subtotal_price"),
+  // NUMERIC
+  totalAmount: decimal("total_amount"),
+  // NUMERIC
   currency: text("currency"),
+  // TEXT
   financialStatus: text("financial_status"),
+  // TEXT
   fulfillmentStatus: text("fulfillment_status"),
-  status: text("status"),
-  // Metadatos Shopify visibles en tu tabla
-  name: text("name"),
-  orderNumber: text("order_number"),
+  // TEXT
   tags: text("tags").array(),
-  // Fechas “nativas” de Shopify (timestamptz en BD)
+  // TEXT[]
+  noteAttributes: json("note_attributes"),
+  // JSONB
+  createdAt: timestamp("created_at"),
+  // TIMESTAMP
   shopifyCreatedAt: timestamp("shopify_created_at", { withTimezone: true }),
+  // TIMESTAMPTZ
   shopifyUpdatedAt: timestamp("shopify_updated_at", { withTimezone: true }),
+  // TIMESTAMPTZ
   shopifyProcessedAt: timestamp("shopify_processed_at", { withTimezone: true }),
+  // TIMESTAMPTZ
   shopifyClosedAt: timestamp("shopify_closed_at", { withTimezone: true }),
-  shopifyCancelledAt: timestamp("shopify_cancelled_at", { withTimezone: true }),
-  // (opcional pero útil)
-  cancelReason: text("cancel_reason"),
-  // Flags de gestión interna
-  channelId: integer("channel_id"),
-  isManaged: boolean("is_managed").default(false),
-  hasTicket: boolean("has_ticket").default(false),
-  // Timestamps internos de tu app
-  createdAt: timestamp("created_at").defaultNow(),
-  updatedAt: timestamp("updated_at")
+  // TIMESTAMPTZ
+  shopifyCancelledAt: timestamp("shopify_cancelled_at", { withTimezone: true })
+  // TIMESTAMPTZ
+});
+var orderItems = pgTable("order_items", {
+  id: serial("id").primaryKey(),
+  // SERIAL PRIMARY KEY
+  orderId: bigint("order_id", { mode: "bigint" }).notNull(),
+  // BIGINT NOT NULL (FK a orders.id con ON DELETE CASCADE)
+  sku: text("sku"),
+  // TEXT
+  quantity: integer("quantity").notNull(),
+  // INT NOT NULL
+  price: decimal("price"),
+  // NUMERIC
+  shopifyProductId: text("shopify_product_id"),
+  // TEXT
+  shopifyVariantId: text("shopify_variant_id")
+  // TEXT
 });
 var tickets = pgTable("tickets", {
   id: serial("id").primaryKey(),
-  ticketNumber: text("ticket_number").notNull().unique(),
-  // folio del ticket
+  // SERIAL PRIMARY KEY
+  ticketNumber: text("ticket_number").unique().notNull(),
+  // TEXT UNIQUE NOT NULL
   orderId: integer("order_id").notNull(),
-  // referencia a orders.id
+  // INTEGER NOT NULL (FK a orders.id con ON DELETE CASCADE)
   status: text("status").notNull().default("open"),
-  // estado del ticket
+  // TEXT NOT NULL DEFAULT 'open'
   notes: text("notes"),
-  // notas libres
+  // TEXT
   createdAt: timestamp("created_at").defaultNow(),
+  // TIMESTAMP DEFAULT now()
   updatedAt: timestamp("updated_at")
+  // TIMESTAMP
 });
 var shippingRules = pgTable("shipping_rules", {
   id: serial("id").primaryKey(),
@@ -442,11 +490,12 @@ var shippingRules = pgTable("shipping_rules", {
 });
 var notes = pgTable("notes", {
   id: serial("id").primaryKey(),
-  date: date("date").notNull(),
-  // fecha asociada a la nota
+  userId: integer("user_id").notNull(),
+  // usuario propietario de la nota
   content: text("content").notNull(),
   // contenido de la nota
-  createdAt: timestamp("created_at").defaultNow()
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow()
 });
 var products = pgTable("products", {
   id: serial("id").primaryKey(),
@@ -475,10 +524,10 @@ var externalProducts = pgTable("external_products", {
 });
 var variants = pgTable("variants", {
   id: serial("id").primaryKey(),
-  idShopify: text("id_shopify").notNull(),
-  // ID de variante en Shopify
-  productId: integer("product_id").notNull(),
+  productId: integer("product_id"),
   // referencia a products.id
+  idShopify: text("id_shopify"),
+  // ID de variante en Shopify
   sku: text("sku"),
   // SKU de la variante
   price: decimal("price"),
@@ -489,27 +538,8 @@ var variants = pgTable("variants", {
   // código de barras
   inventoryQty: integer("inventory_qty"),
   // cantidad en inventario
-  createdAt: timestamp("created_at").defaultNow(),
+  createdAt: timestamp("created_at"),
   updatedAt: timestamp("updated_at")
-});
-var orderItems = pgTable("order_items", {
-  id: serial("id").primaryKey(),
-  orderId: integer("order_id").notNull(),
-  // referencia a orders.id
-  // en schema de items
-  shopifyProductId: text("shopify_product_id"),
-  shopifyVariantId: text("shopify_variant_id"),
-  productId: integer("product_id"),
-  // referencia a products.id (opcional)
-  variantId: integer("variant_id"),
-  // referencia a variants.id (opcional)
-  sku: text("sku"),
-  // SKU del producto
-  quantity: integer("quantity").notNull(),
-  // cantidad
-  price: decimal("price"),
-  // precio unitario
-  createdAt: timestamp("created_at").defaultNow()
 });
 var productComboItems = pgTable("product_combo_items", {
   id: serial("id").primaryKey(),
@@ -522,26 +552,37 @@ var productComboItems = pgTable("product_combo_items", {
   createdAt: timestamp("created_at").defaultNow()
 });
 var insertOrderSchema = z.object({
-  // Campos originales
-  orderId: z.string().min(1, "El ID de la orden es obligatorio"),
-  channelId: z.number().int().positive("El ID del canal debe ser un n\xFAmero positivo"),
+  // Campos originales (más flexibles)
+  orderId: z.string().optional(),
+  channelId: z.number().int().optional(),
   customerName: z.string().optional(),
   totalAmount: z.string().optional(),
-  // se acepta como string para evitar issues de decimal
   isManaged: z.boolean().optional().default(false),
   hasTicket: z.boolean().optional().default(false),
-  status: z.string().default("pending"),
-  // Nuevos campos Shopify
-  idShopify: z.string().min(1, "ID de Shopify requerido"),
-  shopId: z.number().int().min(1).max(2, "Shop ID debe ser 1 o 2"),
+  status: z.string().optional().default("pending"),
+  // Campos Shopify (más flexibles)
+  idShopify: z.string().optional(),
+  shopId: z.number().int().optional(),
   name: z.string().optional(),
   orderNumber: z.string().optional(),
   financialStatus: z.string().optional(),
   fulfillmentStatus: z.string().optional(),
-  currency: z.string().default("MXN"),
+  currency: z.string().optional().default("MXN"),
   subtotalPrice: z.string().optional(),
-  customerEmail: z.string().email().optional(),
-  tags: z.array(z.string()).optional().default([])
+  customerEmail: z.string().optional(),
+  customerFirstName: z.string().optional(),
+  customerLastName: z.string().optional(),
+  contactPhone: z.string().optional(),
+  shipName: z.string().optional(),
+  shipPhone: z.string().optional(),
+  shipAddress1: z.string().optional(),
+  shipCity: z.string().optional(),
+  shipProvince: z.string().optional(),
+  shipCountry: z.string().optional(),
+  shipZip: z.string().optional(),
+  tags: z.array(z.string()).optional().default([]),
+  orderNote: z.string().optional(),
+  cancelReason: z.string().optional()
 });
 var insertProductSchema = z.object({
   idShopify: z.string().min(1, "ID de Shopify requerido"),
@@ -562,14 +603,18 @@ var insertVariantSchema = z.object({
   inventoryQty: z.number().int().optional()
 });
 var insertTicketSchema = z.object({
-  ticketNumber: z.string().min(1, "El n\xFAmero de ticket es obligatorio"),
+  ticketNumber: z.string().optional(),
   orderId: z.number().int().positive("El ID de la orden debe ser un n\xFAmero positivo"),
   status: z.string().default("open"),
   notes: z.string().optional()
 });
+var createBulkTicketsSchema = z.object({
+  orderIds: z.array(z.union([z.number().int().positive(), z.string().min(1)])).min(1, "Debe seleccionar al menos una orden"),
+  notes: z.string().optional()
+});
 var insertNoteSchema = z.object({
-  date: z.string().min(1),
-  content: z.string().min(1, "El contenido es obligatorio")
+  text: z.string().min(1, "El contenido es obligatorio"),
+  date: z.string().optional()
 });
 
 // server/db.ts
@@ -588,7 +633,17 @@ console.log("[DB] Conectando a:", u.hostname);
 var db = drizzle(pool, { schema: schema_exports });
 
 // server/storage.ts
-import { eq, and, or, isNull, desc, asc, sql, count, gte, lte } from "drizzle-orm";
+import {
+  eq,
+  and,
+  isNull,
+  desc,
+  asc,
+  sql,
+  count,
+  gte,
+  lte
+} from "drizzle-orm";
 var createdAtEff = (tabla) => sql`COALESCE(${tabla.shopifyCreatedAt}, ${tabla.createdAt})`;
 var DatabaseStorage = class {
   // ==== USUARIOS ====
@@ -689,18 +744,64 @@ var DatabaseStorage = class {
   /** Lista órdenes con filtros opcionales (canal, gestionada, con ticket). */
   async getOrders(filtros) {
     const condiciones = [];
-    if (filtros?.channelId !== void 0) condiciones.push(eq(orders.channelId, filtros.channelId));
-    if (filtros?.managed !== void 0) condiciones.push(eq(orders.isManaged, filtros.managed));
-    if (filtros?.hasTicket !== void 0) condiciones.push(eq(orders.hasTicket, filtros.hasTicket));
+    if (filtros?.channelId !== void 0)
+      condiciones.push(eq(orders.channelId, filtros.channelId));
+    if (filtros?.managed !== void 0) {
+      if (filtros.managed) {
+        condiciones.push(sql`LOWER(COALESCE(${orders.fulfillmentStatus}, '')) = 'fulfilled'`);
+      } else {
+        condiciones.push(sql`LOWER(COALESCE(${orders.fulfillmentStatus}, '')) IN ('', 'unfulfilled')`);
+      }
+    }
+    if (filtros?.hasTicket !== void 0) {
+      if (filtros.hasTicket) {
+        condiciones.push(sql`EXISTS(SELECT 1 FROM tickets t WHERE t.order_id = ${orders.id})`);
+      } else {
+        condiciones.push(sql`NOT EXISTS(SELECT 1 FROM tickets t WHERE t.order_id = ${orders.id})`);
+      }
+    }
     if (condiciones.length > 0) {
       return await db.select().from(orders).where(and(...condiciones)).orderBy(desc(createdAtEff(orders)));
     }
     return await db.select().from(orders).orderBy(desc(createdAtEff(orders)));
   }
-  /** Obtiene una orden por ID. */
+  /** Obtiene una orden por ID con detalles completos. */
   async getOrder(id) {
-    const [orden] = await db.select().from(orders).where(eq(orders.id, id));
-    return orden;
+    try {
+      console.log(`[Storage] getOrder called with ID: ${id}`);
+      const [orden] = await db.select().from(orders).where(eq(orders.id, BigInt(id)));
+      console.log(`[Storage] Raw order found:`, !!orden);
+      if (!orden) return void 0;
+      const result = {
+        id: String(orden.id),
+        orderId: orden.orderId,
+        name: orden.name || "",
+        customerName: orden.customerName || "",
+        customerEmail: orden.customerEmail || "",
+        totalAmount: String(orden.totalAmount || 0),
+        subtotalPrice: String(orden.subtotalPrice || 0),
+        fulfillmentStatus: orden.fulfillmentStatus || "",
+        financialStatus: orden.financialStatus || "",
+        createdAt: orden.shopifyCreatedAt || orden.createdAt,
+        shopifyCreatedAt: orden.shopifyCreatedAt || orden.createdAt,
+        shopId: orden.shopId || 0,
+        shipName: orden.shipName || "",
+        shipPhone: orden.shipPhone || "",
+        shipAddress1: orden.shipAddress1 || "",
+        shipCity: orden.shipCity || "",
+        shipProvince: orden.shipProvince || "",
+        shipCountry: orden.shipCountry || "",
+        shipZip: orden.shipZip || "",
+        currency: orden.currency || "MXN",
+        tags: [],
+        orderNote: orden.note || ""
+      };
+      console.log(`[Storage] Formatted order result:`, result);
+      return result;
+    } catch (error) {
+      console.error("[Storage] Error getting order:", error);
+      return void 0;
+    }
   }
   /** Crea una orden. */
   async createOrder(datos) {
@@ -709,16 +810,39 @@ var DatabaseStorage = class {
   }
   /** Actualiza una orden. */
   async updateOrder(id, updates) {
-    const [orden] = await db.update(orders).set({ ...updates, updatedAt: /* @__PURE__ */ new Date() }).where(eq(orders.id, id)).returning();
+    const [orden] = await db.update(orders).set(updates).where(eq(orders.id, BigInt(id))).returning();
     return orden;
   }
   /** Lista órdenes por nombre de cliente. */
   async getOrdersByCustomer(nombreCliente) {
     return await db.select().from(orders).where(eq(orders.customerName, nombreCliente)).orderBy(desc(orders.createdAt));
   }
+  async getOrdersByChannel() {
+    const result = await db.execute(sql`
+    SELECT 
+      c.code as channel_code,
+      c.name as channel_name,
+      COUNT(o.id)::int as orders
+    FROM orders o
+    JOIN channels c ON o.channel_id = c.id
+    WHERE o.created_at >= NOW() - INTERVAL '30 days'
+    GROUP BY c.code, c.name
+    ORDER BY orders DESC
+  `);
+    return result.rows.map((row) => ({
+      channelCode: row.channel_code,
+      channelName: row.channel_name,
+      orders: row.orders
+    }));
+  }
   /** Obtiene una orden por ID de Shopify y tienda. */
   async getOrderByShopifyId(shopifyId, shopId) {
-    const [orden] = await db.select().from(orders).where(and(eq(orders.idShopify, shopifyId), eq(orders.shopId, shopId)));
+    const [orden] = await db.select().from(orders).where(
+      and(
+        eq(orders.orderId, shopifyId),
+        eq(orders.shopId, shopId)
+      )
+    );
     return orden;
   }
   // ==== TICKETS ====
@@ -741,6 +865,54 @@ var DatabaseStorage = class {
     const [ticket] = await db.update(tickets).set({ ...updates, updatedAt: /* @__PURE__ */ new Date() }).where(eq(tickets.id, id)).returning();
     return ticket;
   }
+  /** Obtiene el siguiente número de ticket secuencial empezando en 30000. */
+  async getNextTicketNumber() {
+    const resultado = await db.select({ maxTicket: sql`MAX(${tickets.ticketNumber})` }).from(tickets).where(sql`${tickets.ticketNumber} ~ '^[0-9]+$'`);
+    const maxTicket = resultado[0]?.maxTicket;
+    let nextNumber = 3e4;
+    if (maxTicket && !isNaN(Number(maxTicket))) {
+      nextNumber = Math.max(3e4, Number(maxTicket) + 1);
+    }
+    return nextNumber.toString();
+  }
+  /** Crea tickets masivos para múltiples órdenes. */
+  async createBulkTickets(orderIds, notes2) {
+    const tickets2 = [];
+    let updated = 0;
+    for (const orderId of orderIds) {
+      const numeroOrdenNumerica = typeof orderId === "string" ? parseInt(orderId) : orderId;
+      const orden = await this.getOrder(numeroOrdenNumerica);
+      if (!orden) {
+        console.log(`\u26A0\uFE0F  Orden ${orderId} no encontrada, omitiendo...`);
+        continue;
+      }
+      const numeroTicket = await this.getNextTicketNumber();
+      const ticketNuevo = await this.createTicket({
+        ticketNumber: numeroTicket,
+        orderId: numeroOrdenNumerica,
+        status: "open",
+        notes: notes2 || `Ticket creado masivamente para orden ${orden.orderId || orderId}`
+      });
+      tickets2.push(ticketNuevo);
+      await this.updateOrder(numeroOrdenNumerica, {
+        fulfillmentStatus: "fulfilled"
+      });
+      updated++;
+    }
+    return { tickets: tickets2, updated };
+  }
+  /** Normaliza órdenes con fulfillment_status NULL marcándolas como fulfilled. */
+  async normalizeNullFulfillmentStatus() {
+    console.log("\u{1F504} Normalizando fulfillment_status NULL...");
+    const resultado = await db.update(orders).set({
+      fulfillmentStatus: "fulfilled"
+    }).where(isNull(orders.fulfillmentStatus)).returning({ id: orders.id });
+    const updated = resultado.length;
+    console.log(
+      `\u2705 ${updated} \xF3rdenes normalizadas con fulfillment_status FULFILLED`
+    );
+    return { updated };
+  }
   // ==== REGLAS DE ENVÍO ====
   /** Devuelve reglas de envío activas. */
   async getShippingRules() {
@@ -752,11 +924,15 @@ var DatabaseStorage = class {
     return nuevaRegla;
   }
   // ==== NOTAS ====
+  /** Lista notas por usuario. */
+  async getUserNotes(userId) {
+    return await db.select().from(notes).where(eq(notes.userId, userId)).orderBy(desc(notes.createdAt));
+  }
   /** Lista notas; si se pasa userId, filtra por usuario. */
   async getNotesRange(from, to) {
-    const fromStr = from.toISOString().slice(0, 10);
-    const toStr = to.toISOString().slice(0, 10);
-    return await db.select().from(notes).where(and(gte(notes.date, fromStr), lte(notes.date, toStr))).orderBy(asc(notes.date));
+    return await db.select().from(notes).where(
+      and(gte(notes.createdAt, from), lte(notes.createdAt, to))
+    ).orderBy(asc(notes.createdAt));
   }
   /** Crea una nota. */
   async createNote(nota) {
@@ -765,7 +941,7 @@ var DatabaseStorage = class {
   }
   /** Actualiza una nota. */
   async updateNote(id, updates) {
-    const [nota] = await db.update(notes).set(updates).where(eq(notes.id, id)).returning();
+    const [nota] = await db.update(notes).set({ ...updates, updatedAt: /* @__PURE__ */ new Date() }).where(eq(notes.id, id)).returning();
     return nota;
   }
   /** Elimina una nota por ID. */
@@ -792,7 +968,12 @@ var DatabaseStorage = class {
   }
   /** Obtiene un producto por ID de Shopify y tienda. */
   async getProductByShopifyId(shopifyId, shopId) {
-    const [producto] = await db.select().from(products).where(and(eq(products.idShopify, shopifyId), eq(products.shopId, shopId)));
+    const [producto] = await db.select().from(products).where(
+      and(
+        eq(products.idShopify, shopifyId),
+        eq(products.shopId, shopId)
+      )
+    );
     return producto;
   }
   /** Crea un producto. */
@@ -832,81 +1013,379 @@ var DatabaseStorage = class {
    * Métricas de dashboard entre dos fechas.
    */
   async getDashboardMetricsRange(from, to) {
-    const totalResult = await db.select({ count: count() }).from(orders).where(and(gte(orders.createdAt, from), lte(orders.createdAt, to)));
-    const unmanagedResult = await db.select({ count: count() }).from(orders).where(
-      and(
-        or(isNull(orders.fulfillmentStatus), eq(orders.fulfillmentStatus, "UNFULFILLED")),
-        gte(orders.createdAt, from),
-        lte(orders.createdAt, to)
-      )
+    const range = and(
+      gte(orders.createdAt, from),
+      lte(orders.createdAt, to)
     );
-    const ordersByDay = await db.execute(
-      sql`SELECT DATE(created_at) AS day, COUNT(*)::int FROM orders WHERE created_at BETWEEN ${from} AND ${to} GROUP BY 1 ORDER BY 1`
-    );
+    const totalOrdersRes = await db.select({ count: count() }).from(orders).where(range);
+    const totalSalesRes = await db.select({
+      sum: sql`COALESCE(SUM(${orders.totalAmount}),0)`
+    }).from(orders).where(range);
+    const unmanagedRes = await db.select({ count: count() }).from(orders).where(and(
+      sql`LOWER(COALESCE(${orders.fulfillmentStatus}, '')) IN ('', 'unfulfilled')`,
+      range
+    ));
+    const managedRes = await db.select({ count: count() }).from(orders).where(and(
+      sql`LOWER(COALESCE(${orders.fulfillmentStatus}, '')) = 'fulfilled'`,
+      range
+    ));
+    const byChannelRes = await db.select({
+      channelId: orders.shopId,
+      channelName: sql`CASE 
+          WHEN ${orders.shopId} = 1 THEN 'Tienda 1'
+          WHEN ${orders.shopId} = 2 THEN 'Tienda 2'
+          ELSE 'Tienda ' || ${orders.shopId}::text
+        END`,
+      count: sql`COUNT(*)`
+    }).from(orders).where(range).groupBy(orders.shopId);
+    const byShopRes = await db.select({
+      shopId: orders.shopId,
+      count: sql`COUNT(*)`
+    }).from(orders).where(range).groupBy(orders.shopId);
     return {
-      totalOrders: Number(totalResult[0]?.count ?? 0),
-      unmanaged: Number(unmanagedResult[0]?.count ?? 0),
-      ordersByDay: ordersByDay.rows ?? ordersByDay ?? []
+      totalOrders: Number(totalOrdersRes[0]?.count ?? 0),
+      totalSales: Number(totalSalesRes[0]?.sum ?? 0),
+      unmanaged: Number(unmanagedRes[0]?.count ?? 0),
+      managed: Number(managedRes[0]?.count ?? 0),
+      byChannel: byChannelRes.map((r) => ({
+        channelId: Number(r.channelId ?? 0),
+        channelName: r.channelName ?? "",
+        count: Number(r.count ?? 0)
+      })),
+      byShop: byShopRes.map((r) => ({
+        shopId: Number(r.shopId ?? 0),
+        shopName: null,
+        count: Number(r.count ?? 0)
+      }))
     };
+  }
+  /** Obtiene órdenes del día actual. */
+  async getTodayOrders() {
+    try {
+      const today = /* @__PURE__ */ new Date();
+      today.setHours(0, 0, 0, 0);
+      const tomorrow = new Date(today);
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      const result = await db.execute(sql`
+        SELECT 
+          COUNT(*) as count,
+          COALESCE(SUM(CAST(total_amount AS NUMERIC)), 0) as total_amount
+        FROM orders 
+        WHERE shopify_created_at >= ${today.toISOString()} 
+          AND shopify_created_at < ${tomorrow.toISOString()}
+      `);
+      const stats = result.rows[0];
+      return {
+        count: Number(stats.count) || 0,
+        totalAmount: Number(stats.total_amount) || 0
+      };
+    } catch (error) {
+      console.error("Error getting today orders:", error);
+      return { count: 0, totalAmount: 0 };
+    }
+  }
+  /** Obtiene datos de órdenes por día de la semana para gráfico. */
+  async getOrdersByWeekday(weekOffset = 0) {
+    try {
+      const startDate = /* @__PURE__ */ new Date();
+      startDate.setDate(startDate.getDate() - 7 * weekOffset - 6);
+      startDate.setHours(0, 0, 0, 0);
+      const endDate = new Date(startDate);
+      endDate.setDate(endDate.getDate() + 6);
+      endDate.setHours(23, 59, 59, 999);
+      const result = await db.execute(sql`
+        SELECT 
+          EXTRACT(DOW FROM shopify_created_at) as dow,
+          COUNT(*) as count
+        FROM orders 
+        WHERE shopify_created_at >= ${startDate.toISOString()}
+          AND shopify_created_at <= ${endDate.toISOString()}
+        GROUP BY EXTRACT(DOW FROM shopify_created_at)
+        ORDER BY dow
+      `);
+      const dayNames = ["Dom", "Lun", "Mar", "Mi\xE9", "Jue", "Vie", "S\xE1b"];
+      const data = dayNames.map((day, index) => {
+        const found = result.rows.find((row) => Number(row.dow) === index);
+        return {
+          day,
+          count: found ? Number(found.count) : 0
+        };
+      });
+      return data;
+    } catch (error) {
+      console.error("Error getting orders by weekday:", error);
+      return [];
+    }
+  }
+  /** Obtiene ventas por mes para gráfico. */
+  async getSalesByMonth() {
+    try {
+      const result = await db.execute(sql`
+        SELECT 
+          TO_CHAR(shopify_created_at, 'YYYY-MM') as month,
+          COALESCE(SUM(CAST(total_amount AS NUMERIC)), 0) as sales
+        FROM orders 
+        WHERE shopify_created_at >= CURRENT_DATE - INTERVAL '12 months'
+        GROUP BY TO_CHAR(shopify_created_at, 'YYYY-MM')
+        ORDER BY month
+      `);
+      return result.rows.map((row) => ({
+        month: row.month || "",
+        sales: Number(row.sales) || 0
+      }));
+    } catch (error) {
+      console.error("Error getting sales by month:", error);
+      return [];
+    }
+  }
+  // ==== CATÁLOGO DE PRODUCTOS ====
+  /** Obtiene productos paginados con filtros. */
+  async getProductsPaginated(params) {
+    const { page, pageSize, search, categoria, activo } = params;
+    try {
+      const conds = [];
+      if (search) {
+        const searchPattern = `%${search.toLowerCase()}%`;
+        conds.push(
+          sql`(
+            LOWER(COALESCE(nombre, '')) LIKE ${searchPattern} OR
+            LOWER(COALESCE(sku, '')) LIKE ${searchPattern} OR
+            LOWER(COALESCE(descripcion, '')) LIKE ${searchPattern}
+          )`
+        );
+      }
+      if (categoria) {
+        conds.push(eq(products.categoria, categoria));
+      }
+      if (activo !== void 0) {
+        conds.push(eq(products.activo, activo));
+      }
+      const whereClause = conds.length > 0 ? and(...conds) : void 0;
+      const offset = Math.max(0, (page - 1) * pageSize);
+      const productos = await db.select().from(products).where(whereClause).orderBy(desc(products.updatedAt)).limit(pageSize).offset(offset);
+      const totalResult = await db.select({ count: count() }).from(products).where(whereClause);
+      const total = Number(totalResult[0]?.count ?? 0);
+      return {
+        rows: productos.map((p) => ({
+          ...p,
+          id: Number(p.id),
+          precio: p.precio ? Number(p.precio) : null,
+          inventario: p.inventario || 0,
+          fechaCreacion: p.createdAt,
+          fechaActualizacion: p.updatedAt
+        })),
+        total,
+        page,
+        pageSize
+      };
+    } catch (error) {
+      console.error("Error getting products paginated:", error);
+      return { rows: [], total: 0, page, pageSize };
+    }
+  }
+  /** Obtiene las categorías únicas de productos. */
+  async getProductCategories() {
+    try {
+      const result = await db.selectDistinct({ categoria: products.categoria }).from(products).where(isNotNull(products.categoria));
+      return result.map((r) => r.categoria).filter(Boolean).sort();
+    } catch (error) {
+      console.error("Error getting product categories:", error);
+      return [];
+    }
+  }
+  /** Crea un nuevo producto en el catálogo. */
+  async createProduct(datos) {
+    const [producto] = await db.insert(products).values({
+      nombre: datos.nombre,
+      sku: datos.sku,
+      descripcion: datos.descripcion,
+      precio: datos.precio ? String(datos.precio) : null,
+      categoria: datos.categoria,
+      marca: datos.marca,
+      activo: datos.activo ?? true,
+      inventario: datos.inventario ?? 0,
+      createdAt: /* @__PURE__ */ new Date(),
+      updatedAt: /* @__PURE__ */ new Date()
+    }).returning();
+    return {
+      ...producto,
+      id: Number(producto.id),
+      precio: producto.precio ? Number(producto.precio) : null,
+      fechaCreacion: producto.createdAt,
+      fechaActualizacion: producto.updatedAt
+    };
+  }
+  /** Actualiza un producto del catálogo. */
+  async updateProduct(id, datos) {
+    const [producto] = await db.update(products).set({
+      ...datos,
+      precio: datos.precio ? String(datos.precio) : void 0,
+      updatedAt: /* @__PURE__ */ new Date()
+    }).where(eq(products.id, id)).returning();
+    return {
+      ...producto,
+      id: Number(producto.id),
+      precio: producto.precio ? Number(producto.precio) : null,
+      fechaCreacion: producto.createdAt,
+      fechaActualizacion: producto.updatedAt
+    };
+  }
+  /** Elimina un producto del catálogo. */
+  async deleteProduct(id) {
+    await db.delete(products).where(eq(products.id, id));
   }
   // ==== ÓRDENES PAGINADAS ====
   async getOrdersPaginated(params) {
-    const { statusFilter, channelId, page, pageSize } = params;
-    const conds = [];
-    if (statusFilter === "unmanaged") {
-      conds.push(
-        or(isNull(orders.fulfillmentStatus), eq(orders.fulfillmentStatus, "UNFULFILLED"))
-      );
-    } else if (statusFilter === "managed") {
-      conds.push(eq(orders.fulfillmentStatus, "FULFILLED"));
+    const { statusFilter, channelId, page, pageSize, search, searchType = "all" } = params;
+    console.log(`\u{1F50D} getOrdersPaginated - filtros:`, { statusFilter, channelId, page, pageSize, search });
+    try {
+      const conds = [];
+      if (statusFilter === "unmanaged") {
+        conds.push(
+          sql`LOWER(COALESCE(o.fulfillment_status, '')) IN ('', 'unfulfilled')`
+        );
+      } else if (statusFilter === "managed") {
+        conds.push(
+          sql`LOWER(COALESCE(o.fulfillment_status, '')) = 'fulfilled'`
+        );
+      }
+      if (search) {
+        const searchPattern = `%${search.toLowerCase()}%`;
+        if (searchType === "sku") {
+          conds.push(
+            sql`EXISTS (
+              SELECT 1 FROM order_items oi2 
+              WHERE oi2.order_id = o.id 
+              AND LOWER(COALESCE(oi2.sku, '')) LIKE ${searchPattern}
+            )`
+          );
+        } else if (searchType === "customer") {
+          conds.push(
+            sql`(
+              LOWER(COALESCE(o.customer_name, '')) LIKE ${searchPattern} OR 
+              LOWER(COALESCE(o.customer_email, '')) LIKE ${searchPattern}
+            )`
+          );
+        } else if (searchType === "product") {
+          conds.push(
+            sql`EXISTS (
+              SELECT 1 FROM order_items oi2 
+              WHERE oi2.order_id = o.id 
+              AND (
+                LOWER(COALESCE(oi2.title, '')) LIKE ${searchPattern} OR
+                LOWER(COALESCE(oi2.variant_title, '')) LIKE ${searchPattern}
+              )
+            )`
+          );
+        } else {
+          conds.push(
+            sql`(
+              LOWER(COALESCE(o.order_id, '')) LIKE ${searchPattern} OR 
+              LOWER(COALESCE(o.customer_name, '')) LIKE ${searchPattern} OR 
+              LOWER(COALESCE(o.customer_email, '')) LIKE ${searchPattern} OR
+              EXISTS (
+                SELECT 1 FROM order_items oi2 
+                WHERE oi2.order_id = o.id 
+                AND (
+                  LOWER(COALESCE(oi2.sku, '')) LIKE ${searchPattern} OR
+                  LOWER(COALESCE(oi2.title, '')) LIKE ${searchPattern} OR
+                  LOWER(COALESCE(oi2.variant_title, '')) LIKE ${searchPattern}
+                )
+              )
+            )`
+          );
+        }
+      }
+      const whereClause = conds.length > 0 ? sql`${conds.reduce(
+        (acc, cond, i) => i === 0 ? cond : sql`${acc} AND ${cond}`
+      )}` : void 0;
+      const offset = Math.max(0, (page - 1) * pageSize);
+      const baseQuery = sql`
+        SELECT 
+          o.id::text as id,
+          COALESCE(o.name, o.order_id, '') as name,
+          COALESCE(o.customer_name, '') as "customerName",
+          o.shop_id as "channelId",
+          CASE 
+            WHEN o.shop_id = 1 THEN 'Tienda 1'
+            WHEN o.shop_id = 2 THEN 'Tienda 2'
+            ELSE 'Tienda ' || o.shop_id::text
+          END as "channelName", 
+          COALESCE(o.total_amount, '0') as "totalAmount",
+          COALESCE(o.fulfillment_status, '') as "fulfillmentStatus",
+          COALESCE(o.shopify_created_at, o.created_at, NOW()) as "createdAt",
+          COALESCE(COUNT(oi.id), 0) as "itemsCount",
+          COALESCE(ARRAY_AGG(oi.sku) FILTER (WHERE oi.sku IS NOT NULL), ARRAY[]::text[]) as skus,
+          CASE
+            WHEN LOWER(COALESCE(o.fulfillment_status, '')) IN ('', 'unfulfilled') THEN 'SIN_GESTIONAR'
+            WHEN LOWER(COALESCE(o.fulfillment_status, '')) = 'fulfilled' THEN 'GESTIONADA'
+            WHEN LOWER(COALESCE(o.fulfillment_status, '')) = 'restocked' THEN 'DEVUELTO'
+            ELSE 'ERROR'
+          END as "uiStatus",
+          EXISTS(SELECT 1 FROM tickets t WHERE t.order_id = o.id) as "hasTicket",
+          CASE 
+            WHEN LOWER(COALESCE(o.fulfillment_status, '')) = 'fulfilled' THEN true
+            ELSE false
+          END as "isManaged"
+        FROM orders o
+        LEFT JOIN order_items oi ON oi.order_id = o.id
+        ${whereClause ? sql`WHERE ${whereClause}` : sql``}
+        GROUP BY o.id, o.order_id, o.name, o.customer_name, o.total_amount, 
+                 o.fulfillment_status, o.shopify_created_at, o.created_at, o.shop_id
+        ORDER BY COALESCE(o.shopify_created_at, o.created_at) DESC
+        LIMIT ${pageSize} OFFSET ${offset}
+      `;
+      const countQuery = sql`
+        SELECT COUNT(DISTINCT o.id) as count
+        FROM orders o
+        ${whereClause ? sql`WHERE ${whereClause}` : sql``}
+      `;
+      console.log(`\u{1F4CA} Ejecutando queries...`);
+      const [rows, totalRes] = await Promise.all([
+        db.execute(baseQuery),
+        db.execute(countQuery)
+      ]);
+      const total = Number(totalRes.rows[0]?.count ?? 0);
+      console.log(`\u2705 Resultados: ${rows.rows.length} filas, total: ${total}`);
+      return {
+        rows: rows.rows,
+        page,
+        pageSize,
+        total
+      };
+    } catch (error) {
+      console.error(`\u274C Error en getOrdersPaginated:`, error);
+      throw new Error(`Error al obtener \xF3rdenes paginadas: ${error.message}`);
     }
-    if (channelId !== void 0) {
-      conds.push(eq(orders.channelId, channelId));
-    }
-    const whereClause = conds.length ? and(...conds) : void 0;
-    const offset = Math.max(0, (page - 1) * pageSize);
-    const baseSelect = db.select({
-      id: orders.id,
-      name: orders.name,
-      customerName: orders.customerName,
-      channelId: orders.channelId,
-      totalAmount: orders.totalAmount,
-      fulfillmentStatus: orders.fulfillmentStatus,
-      createdAt: orders.createdAt,
-      itemsCount: sql`COUNT(${orderItems.id})`.as("items_count"),
-      uiStatus: sql`
-        CASE
-          WHEN ${orders.fulfillmentStatus} IS NULL OR ${orders.fulfillmentStatus} = 'UNFULFILLED' THEN 'SIN_GESTIONAR'
-          WHEN ${orders.fulfillmentStatus} = 'FULFILLED' THEN 'GESTIONADA'
-          ELSE 'ERROR'
-        END
-      `.as("ui_status")
-    }).from(orders).leftJoin(orderItems, eq(orderItems.orderId, orders.id));
-    const dataQ = whereClause ? baseSelect.where(whereClause) : baseSelect;
-    const rows = await dataQ.groupBy(
-      orders.id,
-      orders.name,
-      orders.customerName,
-      orders.channelId,
-      orders.totalAmount,
-      orders.fulfillmentStatus,
-      orders.createdAt
-    ).orderBy(desc(orders.createdAt)).limit(pageSize).offset(offset);
-    const baseCount = db.select({ count: count() }).from(orders);
-    const countQ = whereClause ? baseCount.where(whereClause) : baseCount;
-    const totalRes = await countQ;
-    return { rows, page, pageSize, total: Number(totalRes[0]?.count ?? 0) };
   }
   // Items de una orden
   async getOrderItems(orderId) {
-    return await db.select({
-      id: orderItems.id,
-      sku: orderItems.sku,
-      quantity: orderItems.quantity,
-      price: orderItems.price,
-      title: products.title,
-      vendor: products.vendor
-    }).from(orderItems).leftJoin(products, eq(products.id, orderItems.productId)).where(eq(orderItems.orderId, orderId)).orderBy(asc(orderItems.id));
+    try {
+      const items = await db.select({
+        id: orderItems.id,
+        sku: orderItems.sku,
+        quantity: orderItems.quantity,
+        price: orderItems.price,
+        title: products.title,
+        vendor: products.vendor,
+        productName: products.title,
+        // Alias para el modal
+        skuInterno: orderItems.sku,
+        // SKU interno 
+        skuExterno: orderItems.sku
+        // SKU externo (mismo por ahora)
+      }).from(orderItems).leftJoin(
+        products,
+        eq(products.idShopify, orderItems.shopifyProductId)
+      ).where(eq(orderItems.orderId, BigInt(orderId))).orderBy(asc(orderItems.id));
+      const uniqueItems = items.filter(
+        (item, index, self) => index === self.findIndex((t) => t.id === item.id)
+      );
+      return uniqueItems;
+    } catch (error) {
+      console.error("Error getting order items:", error);
+      return [];
+    }
   }
   // Productos paginados por tienda
   async getProductsPaginated(shopId, page, pageSize) {
@@ -931,6 +1410,14 @@ var DatabaseStorage = class {
 var storage = new DatabaseStorage();
 
 // server/services/OrderSyncService.ts
+function toTextArrayFromTags(tags) {
+  if (!tags) return void 0;
+  const arr = tags.split(",").map((s) => s.trim()).filter(Boolean);
+  return arr.length ? arr : [];
+}
+function pickPhone(o) {
+  return o.phone ?? o?.shipping_address?.phone ?? o?.billing_address?.phone ?? o?.customer?.phone ?? null;
+}
 var OrderSyncService = class {
   client;
   storeNumber;
@@ -940,67 +1427,94 @@ var OrderSyncService = class {
     this.storeNumber = parseInt(storeParam, 10);
     this.channelId = this.storeNumber;
   }
-  convertShopifyOrder(shopifyOrder) {
-    const o = shopifyOrder;
+  /** Mapea orden REST de Shopify → InsertOrder (tu schema) */
+  convertShopifyOrder(o) {
     const idStr = String(o.id);
     const first = o.customer?.first_name ?? null;
     const last = o.customer?.last_name ?? null;
     const ship = o.shipping_address ?? void 0;
+    const contactPhone = pickPhone(o);
+    const customerEmail = o.email ?? o.customer?.email ?? null;
     return {
-      // Campos básicos existentes
+      // Identificadores básicos
       orderId: idStr,
-      channelId: this.channelId,
-      customerName: first || last ? `${first ?? ""} ${last ?? ""}`.trim() : o.email || "Sin nombre",
-      totalAmount: o.total_price ?? null,
-      isManaged: false,
-      hasTicket: false,
-      status: "pending",
-      // Shopify
+      // si lo usas aparte de idShopify
       idShopify: idStr,
       shopId: this.storeNumber,
+      channelId: this.channelId,
+      // Nombres / UI
       name: o.name ?? null,
       orderNumber: o.order_number != null ? String(o.order_number) : null,
+      customerFirstName: first,
+      customerLastName: last,
+      customerName: first || last ? `${first ?? ""} ${last ?? ""}`.trim() : customerEmail || "Sin nombre",
+      // Estados & dinero
       financialStatus: o.financial_status ?? null,
       fulfillmentStatus: o.fulfillment_status ?? null,
       currency: o.currency ?? null,
       subtotalPrice: o.subtotal_price ?? null,
-      customerEmail: o.email ?? null,
-      tags: o.tags ? o.tags.split(",").map((t) => t.trim()).filter(Boolean) : [],
-      // Fechas Nativas de Shopify
+      totalAmount: o.total_price ?? null,
+      // Fechas nativas Shopify
       shopifyCreatedAt: o.created_at ? new Date(o.created_at) : null,
       shopifyUpdatedAt: o.updated_at ? new Date(o.updated_at) : null,
+      shopifyProcessedAt: o.processed_at ? new Date(o.processed_at) : null,
+      shopifyClosedAt: o.closed_at ? new Date(o.closed_at) : null,
       shopifyCancelledAt: o.cancelled_at ? new Date(o.cancelled_at) : null,
+      // Cancelación / notas / contacto
       cancelReason: o.cancel_reason ?? null,
-      // Datos de envío/cliente
-      customerFirstName: first,
-      customerLastName: last,
+      orderNote: o.note ?? null,
+      contactPhone,
+      customerEmail,
+      tags: toTextArrayFromTags(o.tags),
+      // Envío (útil en tu UI)
       shipName: ship?.name ?? null,
       shipPhone: ship?.phone ?? null,
       shipAddress1: ship?.address1 ?? null,
       shipCity: ship?.city ?? null,
       shipProvince: ship?.province ?? null,
       shipCountry: ship?.country ?? null,
-      shipZip: ship?.zip ?? null
+      shipZip: ship?.zip ?? null,
+      // Flags internos
+      isManaged: false,
+      hasTicket: false,
+      status: "pending"
     };
   }
+  /** Convierte line items Shopify → InsertOrderItem[] (tu schema) */
   convertOrderItems(shopifyOrder, localOrderId) {
-    return shopifyOrder.line_items.map((item) => ({
+    return (shopifyOrder.line_items || []).map((item) => ({
       orderId: localOrderId,
-      // FK local a orders.id (numérico)
+      // FK local a orders.id
       productId: null,
-      // resolverás luego contra tu catálogo
+      // resolverás luego vs tu catálogo
       variantId: null,
       sku: item.sku,
       quantity: item.quantity,
       price: item.price,
-      // 👇 ya tienes estas columnas en order_items
       shopifyProductId: item.product_id != null ? String(item.product_id) : null,
       shopifyVariantId: item.variant_id != null ? String(item.variant_id) : null,
       title: item.title ?? null
     }));
   }
+  /** Upsert sin tocar storage: busca por (shopId, idShopify) y actualiza o crea */
+  async upsertOrder(orderData, items) {
+    const existing = await storage.getOrderByShopifyId(orderData.idShopify, this.storeNumber);
+    if (existing) {
+      await storage.updateOrder(existing.id, orderData);
+      return existing.id;
+    } else {
+      const newOrder = await storage.createOrder(orderData);
+      if (items.length > 0) {
+        for (const it of items) {
+          await storage.createOrderItem({ ...it, orderId: newOrder.id });
+        }
+      }
+      return newOrder.id;
+    }
+  }
+  /** Backfill de órdenes (histórico) */
   async backfillOrders(sinceDate, cursor, limit = 50) {
-    console.log(`Iniciando backfill para tienda ${this.storeNumber}${sinceDate ? ` desde ${sinceDate}` : ""}`);
+    console.log(`Iniciando backfill tienda ${this.storeNumber}${sinceDate ? ` desde ${sinceDate}` : ""}`);
     const result = {
       success: false,
       ordersProcessed: 0,
@@ -1015,44 +1529,38 @@ var OrderSyncService = class {
         params = {
           limit: Math.min(limit, 250),
           status: "any",
-          fields: "id,name,order_number,email,created_at,updated_at,financial_status,fulfillment_status,currency,total_price,subtotal_price,tags,line_items,customer,shipping_address,cancel_reason,cancelled_at"
+          // Campos REST que necesitamos para mapear todo:
+          fields: "id,name,order_number,email,phone,created_at,updated_at,processed_at,closed_at,financial_status,fulfillment_status,currency,total_price,subtotal_price,tags,note,line_items,customer,shipping_address,billing_address,cancel_reason,cancelled_at"
         };
         if (sinceDate) params.created_at_min = sinceDate;
       } else {
         params = {
           limit: Math.min(limit, 250),
-          page_info: cursor
-          // opcional: podrías omitir fields también (más seguro con Shopify REST)
+          page_info: cursor,
+          // puedes incluir 'fields' igual que arriba; si algún store falla, quítalo aquí
+          fields: "id,name,order_number,email,phone,created_at,updated_at,processed_at,closed_at,financial_status,fulfillment_status,currency,total_price,subtotal_price,tags,note,line_items,customer,shipping_address,billing_address,cancel_reason,cancelled_at"
         };
       }
       const response = await this.client.getOrders(params);
-      const orders2 = response.orders || [];
-      console.log(`Ordenes Obtenidas ${orders2.length} \xF3rdenes de tienda ${this.storeNumber}`);
-      for (const shopifyOrder of orders2) {
+      const list = response.orders || [];
+      console.log(`\xD3rdenes obtenidas: ${list.length} (tienda ${this.storeNumber})`);
+      for (const shopifyOrder of list) {
         try {
-          const existing = await storage.getOrderByShopifyId(String(shopifyOrder.id), this.storeNumber);
-          if (existing) {
-            const orderData = this.convertShopifyOrder(shopifyOrder);
-            await storage.updateOrder(existing.id, orderData);
-            console.log(`Actualizada ${shopifyOrder.name}`);
-          } else {
-            const orderData = this.convertShopifyOrder(shopifyOrder);
-            const newOrder = await storage.createOrder(orderData);
-            const items = shopifyOrder.line_items ?? [];
-            console.log(`> ${shopifyOrder.name}: items=${items.length}`);
-            if (items.length > 0) {
-              const orderItems2 = this.convertOrderItems(shopifyOrder, newOrder.id);
-              for (const it of orderItems2) await storage.createOrderItem(it);
-            }
-          }
+          const orderData = this.convertShopifyOrder(shopifyOrder);
+          const items = this.convertOrderItems(
+            shopifyOrder,
+            0
+            /* se reemplaza al crear */
+          );
+          await this.upsertOrder(orderData, items);
           result.ordersProcessed++;
         } catch (e) {
-          const msg = `Error procesando ${shopifyOrder.name}: ${e}`;
+          const msg = `Error procesando ${shopifyOrder.name ?? shopifyOrder.id}: ${e}`;
           console.log("error", msg);
           result.errors.push(msg);
         }
       }
-      result.hasNextPage = response.hasNextPage;
+      result.hasNextPage = !!response.hasNextPage;
       result.lastCursor = response.nextPageInfo || void 0;
       result.success = result.errors.length === 0;
       console.log(`\u2705 Backfill tienda ${this.storeNumber}: ${result.ordersProcessed} \xF3rdenes`);
@@ -1065,6 +1573,7 @@ var OrderSyncService = class {
       return result;
     }
   }
+  /** Sync incremental (actualizadas desde X fecha/hora) */
   async incrementalSync(updatedSince) {
     console.log(`\u{1F504} Sync incremental tienda ${this.storeNumber} desde ${updatedSince}`);
     const result = {
@@ -1079,35 +1588,24 @@ var OrderSyncService = class {
         updated_at_min: updatedSince,
         status: "any",
         limit: 100,
-        fields: "id,name,order_number,email,created_at,updated_at,financial_status,fulfillment_status,currency,total_price,subtotal_price,tags,line_items,customer,shipping_address,cancel_reason,cancelled_at"
+        fields: "id,name,order_number,email,phone,created_at,updated_at,processed_at,closed_at,financial_status,fulfillment_status,currency,total_price,subtotal_price,tags,note,line_items,customer,shipping_address,billing_address,cancel_reason,cancelled_at"
       };
       const response = await this.client.getOrders(params);
-      const orders2 = response.orders || [];
-      console.log(`\u{1F4E6} Sync incremental: ${orders2.length} \xF3rdenes`);
-      for (const shopifyOrder of orders2) {
+      const list = response.orders || [];
+      console.log(`\u{1F4E6} Sync incremental: ${list.length} \xF3rdenes`);
+      for (const shopifyOrder of list) {
         try {
-          const existing = await storage.getOrderByShopifyId(String(shopifyOrder.id), this.storeNumber);
           const orderData = this.convertShopifyOrder(shopifyOrder);
-          if (existing) {
-            await storage.updateOrder(existing.id, orderData);
-            console.log(`\u{1F504} Actualizada ${shopifyOrder.name}`);
-          } else {
-            const newOrder = await storage.createOrder(orderData);
-            const items = shopifyOrder.line_items ?? [];
-            if (items.length > 0) {
-              const orderItems2 = this.convertOrderItems(shopifyOrder, newOrder.id);
-              for (const it of orderItems2) await storage.createOrderItem(it);
-            }
-            console.log(`Nueva ${shopifyOrder.name}`);
-          }
+          const items = this.convertOrderItems(shopifyOrder, 0);
+          await this.upsertOrder(orderData, items);
           result.ordersProcessed++;
         } catch (e) {
-          const msg = `Error incremental ${shopifyOrder.name}: ${e}`;
+          const msg = `Error incremental ${shopifyOrder.name ?? shopifyOrder.id}: ${e}`;
           console.log("error", msg);
           result.errors.push(msg);
         }
       }
-      result.hasNextPage = response.hasNextPage;
+      result.hasNextPage = !!response.hasNextPage;
       result.lastCursor = response.nextPageInfo || void 0;
       result.success = result.errors.length === 0;
       console.log(`Sync incremental ok: ${result.ordersProcessed}`);
@@ -1336,7 +1834,6 @@ function listStoreNumbersFromEnv() {
   return Array.from(nums).sort((a, b) => a - b);
 }
 var orderLock = {};
-var productLock = {};
 function nowISO() {
   return (/* @__PURE__ */ new Date()).toISOString();
 }
@@ -1361,26 +1858,6 @@ async function runOrderIncremental(store) {
     orderLock[store] = false;
   }
 }
-async function runProductSync(store) {
-  if (productLock[store]) {
-    console.log(`[CRON][${nowISO()}] Products store ${store}: saltando (en ejecuci\xF3n)`);
-    return;
-  }
-  productLock[store] = true;
-  try {
-    const limit = parseInt(process.env.PRODUCT_SYNC_LIMIT ?? "250", 10);
-    const svc = new ProductService(String(store));
-    const res = await svc.syncProductsFromShopify(limit);
-    console.log(
-      `[CRON][${nowISO()}] Products store ${store}: processed=${res.productsProcessed} errors=${res.errors.length}`
-    );
-    if (res.errors.length) console.log(res.errors.slice(0, 3));
-  } catch (e) {
-    console.error(`[CRON][${nowISO()}] Products store ${store} ERROR:`, e.message || e);
-  } finally {
-    productLock[store] = false;
-  }
-}
 function startSchedulers() {
   const stores = listStoreNumbersFromEnv();
   if (stores.length === 0) {
@@ -1397,7 +1874,6 @@ function startSchedulers() {
   })();
   for (const s of stores) {
     setInterval(() => runOrderIncremental(s), orderMs);
-    setInterval(() => runProductSync(s), prodMs);
   }
 }
 
@@ -1531,11 +2007,21 @@ var esquemaLogin = z2.object({
   email: z2.string().email(),
   password: z2.string().min(1)
 });
-var requiereAutenticacion = (req, res, next) => {
+var requiereAutenticacion = async (req, res, next) => {
   if (!req.session.userId) {
     return res.status(401).json({ message: "No autorizado" });
   }
-  next();
+  try {
+    const usuario = await storage.getUser(req.session.userId);
+    if (!usuario) {
+      return res.status(401).json({ message: "Usuario no encontrado" });
+    }
+    req.user = usuario;
+    next();
+  } catch (error) {
+    console.log("Error en middleware autenticaci\xF3n:", error);
+    return res.status(500).json({ message: "Error interno" });
+  }
 };
 var requiereAdmin = async (req, res, next) => {
   if (!req.session.userId) {
@@ -1737,17 +2223,99 @@ async function registerRoutes(app) {
       res.status(500).json({ message: "No se pudieron obtener m\xE9tricas" });
     }
   });
+  app.get("/api/dashboard/today-orders", requiereAutenticacion, async (req, res) => {
+    try {
+      const data = await storage.getTodayOrders();
+      res.json(data);
+    } catch {
+      res.status(500).json({ message: "No se pudieron obtener \xF3rdenes del d\xEDa" });
+    }
+  });
+  app.get("/api/dashboard/orders-by-weekday", requiereAutenticacion, async (req, res) => {
+    try {
+      const weekOffset = req.query.week ? Number(req.query.week) : 0;
+      const data = await storage.getOrdersByWeekday(weekOffset);
+      res.json(data);
+    } catch {
+      res.status(500).json({ message: "No se pudieron obtener \xF3rdenes por d\xEDa" });
+    }
+  });
+  app.get("/api/dashboard/sales-by-month", requiereAutenticacion, async (req, res) => {
+    try {
+      const data = await storage.getSalesByMonth();
+      res.json(data);
+    } catch {
+      res.status(500).json({ message: "No se pudieron obtener ventas mensuales" });
+    }
+  });
+  app.get("/api/products", requiereAutenticacion, async (req, res) => {
+    try {
+      const page = Number(req.query.page) || 1;
+      const pageSize = Number(req.query.pageSize) || 25;
+      const search = req.query.search;
+      const categoria = req.query.categoria;
+      const activo = req.query.activo;
+      const productos = await storage.getProductsPaginated({
+        page,
+        pageSize,
+        search,
+        categoria: categoria !== "all" ? categoria : void 0,
+        activo: activo !== "all" ? activo === "true" : void 0
+      });
+      res.json(productos);
+    } catch {
+      res.status(500).json({ message: "No se pudieron obtener productos" });
+    }
+  });
+  app.get("/api/products/categories", requiereAutenticacion, async (req, res) => {
+    try {
+      const categorias = await storage.getProductCategories();
+      res.json(categorias);
+    } catch {
+      res.status(500).json({ message: "No se pudieron obtener categor\xEDas" });
+    }
+  });
+  app.post("/api/products", requiereAutenticacion, async (req, res) => {
+    try {
+      const producto = await storage.createProduct(req.body);
+      res.status(201).json(producto);
+    } catch {
+      res.status(500).json({ message: "No se pudo crear el producto" });
+    }
+  });
+  app.patch("/api/products/:id", requiereAutenticacion, async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      const producto = await storage.updateProduct(id, req.body);
+      res.json(producto);
+    } catch {
+      res.status(500).json({ message: "No se pudo actualizar el producto" });
+    }
+  });
+  app.delete("/api/products/:id", requiereAutenticacion, async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      await storage.deleteProduct(id);
+      res.status(204).send();
+    } catch {
+      res.status(500).json({ message: "No se pudo eliminar el producto" });
+    }
+  });
   app.get("/api/orders", requiereAutenticacion, async (req, res) => {
     try {
       const statusFilter = req.query.statusFilter || "unmanaged";
       const channelId = req.query.channelId && req.query.channelId !== "all" ? Number(req.query.channelId) : void 0;
       const page = req.query.page ? Number(req.query.page) : 1;
       const pageSize = req.query.pageSize ? Number(req.query.pageSize) : 15;
+      const search = req.query.search;
+      const searchType = req.query.searchType;
       const data = await storage.getOrdersPaginated({
         statusFilter,
         channelId,
         page,
-        pageSize
+        pageSize,
+        search,
+        searchType
       });
       res.json(data);
     } catch {
@@ -1768,14 +2336,60 @@ async function registerRoutes(app) {
   app.get("/api/orders/:id", requiereAutenticacion, async (req, res) => {
     try {
       const id = Number(req.params.id);
+      console.log(`[GET /api/orders/:id] Solicitando orden ID: ${id}`);
       if (Number.isNaN(id))
         return res.status(400).json({ message: "ID de orden inv\xE1lido" });
       const orden = await storage.getOrder(id);
+      console.log(`[GET /api/orders/:id] Orden encontrada:`, !!orden);
       if (!orden)
         return res.status(404).json({ message: "Orden no encontrada" });
       res.json(orden);
-    } catch {
+    } catch (error) {
+      console.error(`[GET /api/orders/:id] Error:`, error);
       res.status(500).json({ message: "No se pudo obtener la orden" });
+    }
+  });
+  app.post("/api/orders/:id/cancel", requiereAutenticacion, async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      if (Number.isNaN(id))
+        return res.status(400).json({ message: "ID de orden inv\xE1lido" });
+      const orden = await storage.getOrder(id);
+      if (!orden) return res.status(404).json({ ok: false, errors: "Orden no encontrada" });
+      const { reason, staffNote, notifyCustomer, restock, refundToOriginal } = req.body;
+      const { shop, token, apiVersion } = getShopifyCredentials(String(orden.shopId));
+      const gid = orden.orderId && orden.orderId.startsWith("gid://") ? orden.orderId : `gid://shopify/Order/${orden.orderId || orden.id}`;
+      const mutation = `mutation orderCancel($id: ID!, $reason: OrderCancelReason, $staffNote: String, $email: Boolean, $restock: Boolean, $refund: Boolean){
+        orderCancel(id: $id, reason: $reason, staffNote: $staffNote, email: $email, restock: $restock, refund: $refund){
+          job { id }
+          userErrors { field message }
+        }
+      }`;
+      const variables = {
+        id: gid,
+        reason,
+        staffNote,
+        email: !!notifyCustomer,
+        restock: !!restock,
+        refund: !!refundToOriginal
+      };
+      const r = await fetch(`https://${shop}/admin/api/${apiVersion}/graphql.json`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Shopify-Access-Token": token
+        },
+        body: JSON.stringify({ query: mutation, variables })
+      });
+      const data = await r.json();
+      const userErrors = data?.data?.orderCancel?.userErrors || data?.errors;
+      if (!r.ok || userErrors && userErrors.length) {
+        return res.status(400).json({ ok: false, errors: userErrors });
+      }
+      return res.json({ ok: true, job: data?.data?.orderCancel?.job });
+    } catch (e) {
+      console.error("cancel order", e?.message);
+      res.status(500).json({ ok: false, errors: e?.message });
     }
   });
   app.post("/api/orders", requiereAutenticacion, async (req, res) => {
@@ -1809,7 +2423,7 @@ async function registerRoutes(app) {
   app.post("/api/tickets", requiereAutenticacion, async (req, res) => {
     try {
       const datosTicket = insertTicketSchema.parse(req.body);
-      const numeroTicket = `TK-${(/* @__PURE__ */ new Date()).getFullYear()}-${String(Date.now()).slice(-6)}`;
+      const numeroTicket = await storage.getNextTicketNumber();
       const ticket = await storage.createTicket({
         ...datosTicket,
         ticketNumber: numeroTicket
@@ -1817,6 +2431,45 @@ async function registerRoutes(app) {
       res.status(201).json(ticket);
     } catch {
       res.status(400).json({ message: "Datos de ticket inv\xE1lidos" });
+    }
+  });
+  app.post("/api/tickets/bulk", requiereAutenticacion, async (req, res) => {
+    try {
+      const { orderIds, notes: notes2 } = createBulkTicketsSchema.parse(req.body);
+      console.log(`\u{1F3AB} Creando tickets masivos para ${orderIds.length} \xF3rdenes...`);
+      const resultado = await storage.createBulkTickets(orderIds, notes2);
+      console.log(`\u2705 ${resultado.tickets.length} tickets creados, ${resultado.updated} \xF3rdenes actualizadas`);
+      res.status(201).json({
+        ok: true,
+        message: `Se crearon ${resultado.tickets.length} tickets exitosamente`,
+        tickets: resultado.tickets,
+        ordersUpdated: resultado.updated
+      });
+    } catch (error) {
+      console.error("\u274C Error creando tickets masivos:", error);
+      res.status(400).json({
+        ok: false,
+        message: "Error al crear tickets masivos",
+        error: error?.message
+      });
+    }
+  });
+  app.post("/api/orders/normalize-fulfillment", requiereAutenticacion, async (req, res) => {
+    try {
+      console.log("\u{1F504} Iniciando normalizaci\xF3n de fulfillment_status...");
+      const resultado = await storage.normalizeNullFulfillmentStatus();
+      res.json({
+        ok: true,
+        message: `Se normalizaron ${resultado.updated} \xF3rdenes con fulfillment_status NULL`,
+        updated: resultado.updated
+      });
+    } catch (error) {
+      console.error("\u274C Error en normalizaci\xF3n:", error);
+      res.status(500).json({
+        ok: false,
+        message: "Error al normalizar \xF3rdenes",
+        error: error?.message
+      });
     }
   });
   app.get("/api/channels", requiereAutenticacion, async (_req, res) => {
@@ -1845,22 +2498,43 @@ async function registerRoutes(app) {
   });
   app.get("/api/notes", requiereAutenticacion, async (req, res) => {
     try {
-      const { from, to } = req.query;
-      const fromDate = from ? new Date(String(from)) : /* @__PURE__ */ new Date();
-      const toDate = to ? new Date(String(to)) : /* @__PURE__ */ new Date();
-      const notas = await storage.getNotesRange(fromDate, toDate);
-      res.json(notas);
-    } catch {
-      res.status(500).json({ message: "No se pudieron obtener notas" });
+      const userId = req.user.id;
+      const notas = await storage.getUserNotes(userId);
+      const mapped = notas?.map((n) => ({
+        id: n.id,
+        content: n.content,
+        date: new Date(n.createdAt).toISOString().split("T")[0],
+        // Para el calendario
+        createdAt: n.createdAt
+      })) ?? [];
+      res.json(mapped);
+    } catch (error) {
+      console.log("Error en GET /api/notes:", error);
+      res.status(500).json([]);
     }
   });
   app.post("/api/notes", requiereAutenticacion, async (req, res) => {
     try {
-      const datosNota = insertNoteSchema.parse(req.body);
-      const nota = await storage.createNote(datosNota);
-      res.status(201).json(nota);
-    } catch {
-      res.status(400).json({ message: "Datos de nota inv\xE1lidos" });
+      const userId = req.user.id;
+      const { text: text2 } = insertNoteSchema.parse(req.body);
+      console.log("Creando nota para usuario:", userId, "con contenido:", text2);
+      const nota = await storage.createNote({
+        userId,
+        content: text2
+      });
+      console.log("Nota creada:", nota);
+      res.status(201).json({
+        id: nota.id,
+        content: nota.content,
+        date: new Date(nota.createdAt).toISOString().split("T")[0],
+        createdAt: nota.createdAt
+      });
+    } catch (error) {
+      console.log("Error en POST /api/notes:", error);
+      if (error instanceof z2.ZodError) {
+        return res.status(400).json({ message: "Datos de nota inv\xE1lidos", errors: error.errors });
+      }
+      res.status(500).json({ message: "Error interno del servidor" });
     }
   });
   app.put("/api/notes/:id", requiereAutenticacion, async (req, res) => {
@@ -1983,6 +2657,26 @@ async function registerRoutes(app) {
       res.status(500).json({
         ok: false,
         error: e.message
+      });
+    }
+  });
+  app.post("/api/integrations/shopify/sync-now", requiereAutenticacion, async (req, res) => {
+    try {
+      console.log("\u{1F504} Iniciando sincronizaci\xF3n manual de Shopify...");
+      const resultado = await syncShopifyOrders({ store: "all", limit: 50 });
+      console.log("\u2705 Sincronizaci\xF3n manual completada");
+      res.json({
+        ok: true,
+        message: "Sincronizaci\xF3n completada exitosamente",
+        resultado,
+        timestamp: (/* @__PURE__ */ new Date()).toISOString()
+      });
+    } catch (error) {
+      console.error("\u274C Error en sincronizaci\xF3n manual:", error);
+      res.status(500).json({
+        ok: false,
+        message: "Error durante la sincronizaci\xF3n",
+        error: error?.message || "Error desconocido"
       });
     }
   });
@@ -2305,7 +2999,7 @@ function serveStatic(app) {
 // server/index.ts
 var _g = globalThis;
 if (typeof _g.fetch !== "function") {
-  _g.fetch = fetchOrig;
+  console.log("Using built-in fetch");
 }
 var aplicacion = express2();
 aplicacion.use(

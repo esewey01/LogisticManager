@@ -1,22 +1,4 @@
-/*
 
-Auth: POST /api/auth/login, POST /api/auth/logout, GET /api/auth/user
-
-Dashboard: GET /api/dashboard/metrics
-
-Órdenes: GET /api/orders, GET /api/orders/:id, POST /api/orders, PATCH /api/orders/:id
-
-Tickets: GET /api/tickets, POST /api/tickets
-
-Catálogos: GET /api/channels, GET /api/brands, GET /api/carriers
-
-Notas: GET /api/notes, POST /api/notes, DELETE /api/notes/:id
-
-Admin: GET /api/admin/users
-
-Integraciones (demo): GET /api/integrations/shopify/sync, GET /api/integrations/mercadolibre/simulate
-
-*/
 
 import type { Express } from "express";
 import { createServer, type Server } from "http";
@@ -55,7 +37,7 @@ const requiereAutenticacion = async (req: any, res: any, next: any) => {
   if (!req.session.userId) {
     return res.status(401).json({ message: "No autorizado" });
   }
-  
+
   // Obtener datos del usuario y asignarlos a req.user
   try {
     const usuario = await almacenamiento.getUser(req.session.userId);
@@ -346,15 +328,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // routes/dashboard.ts (o donde tengas tus rutas)
   app.get("/api/dashboard/orders-by-weekday", requiereAutenticacion, async (req, res) => {
     try {
-      const weekOffset = req.query.week ? Number(req.query.week) : 0;
-      const data = await almacenamiento.getOrdersByWeekday(weekOffset);
+      const week = Number(req.query.week ?? 0);
+      const data = await almacenamiento.getOrdersByWeekday(week);
       res.json(data);
     } catch {
       res.status(500).json({ message: "No se pudieron obtener órdenes por día" });
     }
   });
+
 
   app.get("/api/dashboard/sales-by-month", requiereAutenticacion, async (req, res) => {
     try {
@@ -466,13 +450,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const id = Number(req.params.id);
       console.log(`[GET /api/orders/:id] Solicitando orden ID: ${id}`);
-      
+
       if (Number.isNaN(id))
         return res.status(400).json({ message: "ID de orden inválido" });
 
       const orden = await almacenamiento.getOrder(id);
       console.log(`[GET /api/orders/:id] Orden encontrada:`, !!orden);
-      
+
       if (!orden)
         return res.status(404).json({ message: "Orden no encontrada" });
       res.json(orden);
@@ -559,7 +543,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  
+
 
   // ---------- Tickets ----------
   app.get("/api/tickets", requiereAutenticacion, async (_req, res) => {
@@ -591,12 +575,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/tickets/bulk", requiereAutenticacion, async (req, res) => {
     try {
       const { orderIds, notes } = createBulkTicketsSchema.parse(req.body);
-      
+
       console.log(`🎫 Creando tickets masivos para ${orderIds.length} órdenes...`);
       const resultado = await almacenamiento.createBulkTickets(orderIds, notes);
-      
+
       console.log(`✅ ${resultado.tickets.length} tickets creados, ${resultado.updated} órdenes actualizadas`);
-      
+
       res.status(201).json({
         ok: true,
         message: `Se crearon ${resultado.tickets.length} tickets exitosamente`,
@@ -605,10 +589,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
     } catch (error: any) {
       console.error("❌ Error creando tickets masivos:", error);
-      res.status(400).json({ 
-        ok: false, 
+      res.status(400).json({
+        ok: false,
         message: "Error al crear tickets masivos",
-        error: error?.message 
+        error: error?.message
       });
     }
   });
@@ -618,7 +602,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       console.log('🔄 Iniciando normalización de fulfillment_status...');
       const resultado = await almacenamiento.normalizeNullFulfillmentStatus();
-      
+
       res.json({
         ok: true,
         message: `Se normalizaron ${resultado.updated} órdenes con fulfillment_status NULL`,
@@ -626,10 +610,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
     } catch (error: any) {
       console.error("❌ Error en normalización:", error);
-      res.status(500).json({ 
-        ok: false, 
+      res.status(500).json({
+        ok: false,
         message: "Error al normalizar órdenes",
-        error: error?.message 
+        error: error?.message
       });
     }
   });
@@ -667,14 +651,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const userId = req.user.id;
       const notas = await almacenamiento.getUserNotes(userId);
-      
+
       const mapped = notas?.map((n) => ({
         id: n.id,
         content: n.content,
         date: new Date(n.createdAt!).toISOString().split('T')[0], // Para el calendario
         createdAt: n.createdAt,
       })) ?? [];
-      
+
       res.json(mapped);
     } catch (error) {
       console.log('Error en GET /api/notes:', error);
@@ -686,20 +670,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const userId = req.user.id;
       const { text } = insertNoteSchema.parse(req.body);
-      
+
       console.log('Creando nota para usuario:', userId, 'con contenido:', text);
-      
+
       const nota = await almacenamiento.createNote({
         userId: userId,
         content: text,
       });
-      
+
       console.log('Nota creada:', nota);
-      res.status(201).json({ 
-        id: nota.id, 
-        content: nota.content, 
+      res.status(201).json({
+        id: nota.id,
+        content: nota.content,
         date: new Date(nota.createdAt!).toISOString().split('T')[0],
-        createdAt: nota.createdAt 
+        createdAt: nota.createdAt
       });
     } catch (error) {
       console.log('Error en POST /api/notes:', error);
@@ -860,12 +844,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/integrations/shopify/sync-now", requiereAutenticacion, async (req, res) => {
     try {
       console.log('🔄 Iniciando sincronización manual de Shopify...');
-      
+
       // Usar la función existente syncShopifyOrders
       const resultado = await syncShopifyOrders({ store: "all", limit: 50 });
-      
+
       console.log('✅ Sincronización manual completada');
-      
+
       res.json({
         ok: true,
         message: "Sincronización completada exitosamente",
