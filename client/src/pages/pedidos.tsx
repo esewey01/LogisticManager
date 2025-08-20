@@ -61,6 +61,7 @@ type Channel = { id: number | string; name: string; code?: string; color?: strin
 
 export default function Pedidos() {
   const [search, setSearch] = useState("");
+  const [searchType, setSearchType] = useState<"all" | "sku" | "customer" | "product">("all");
   const [statusFilter, setStatusFilter] = useState<"unmanaged" | "managed" | "all">("unmanaged");
   const [channelFilter, setChannelFilter] = useState<string>("all");
   const [selectedOrders, setSelectedOrders] = useState<Array<number | string>>([]);
@@ -73,13 +74,14 @@ export default function Pedidos() {
   const { toast } = useToast();
   const [sortField, setSortField] = useState<keyof OrderRow | null>(null);
   const [sortOrder, setSortOrder] = useState<"asc" | "desc" | null>(null);
+  const [isSearchFocused, setIsSearchFocused] = useState(false);
 
   // TODO: si agregas filtros/paginación, ponlos aquí y en queryKey
 
   const { data: ordersResp, isLoading } = useQuery<OrdersResp>({
     queryKey: [
       "/api/orders",
-      { page, pageSize, statusFilter, channelFilter, search, sortField, sortOrder },
+      { page, pageSize, statusFilter, channelFilter, search, searchType, sortField, sortOrder },
     ],
     queryFn: async () => {
       const params = new URLSearchParams({
@@ -88,6 +90,7 @@ export default function Pedidos() {
         statusFilter,
         ...(channelFilter !== "all" && { channelId: channelFilter }),
         ...(search && { search }),
+        ...(search && searchType !== "all" && { searchType }),
         ...(sortField && { sortField }),
         ...(sortOrder && { sortOrder }),
       });
@@ -255,13 +258,77 @@ export default function Pedidos() {
         <CardContent className="p-6">
           <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between space-y-4 lg:space-y-0 lg:space-x-4">
             <div className="flex flex-col sm:flex-row space-y-4 sm:space-y-0 sm:space-x-4 flex-1">
-              <div className="flex-1">
+              <div className="flex-1 relative">
                 <Input
-                  placeholder="Buscar por cliente, SKU, o ID de pedido..."
+                  placeholder={
+                    searchType === "all" 
+                      ? "Buscar por cliente, SKU, o ID de pedido..."
+                      : searchType === "sku"
+                      ? "Buscar por SKU..."
+                      : searchType === "customer" 
+                      ? "Buscar por cliente..."
+                      : "Buscar por producto..."
+                  }
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
-                  className="w-full"
+                  onFocus={() => setIsSearchFocused(true)}
+                  onBlur={() => setTimeout(() => setIsSearchFocused(false), 200)}
+                  className="w-full pr-10"
+                  data-testid="input-search"
                 />
+                <div className="absolute right-2 top-1/2 transform -translate-y-1/2">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-6 w-6 p-0"
+                    onClick={() => setIsSearchFocused(!isSearchFocused)}
+                  >
+                    <i className="fas fa-filter text-xs"></i>
+                  </Button>
+                </div>
+                {isSearchFocused && (
+                  <div className="absolute top-full left-0 right-0 bg-white border border-gray-200 rounded-b-md shadow-lg z-10 p-3 mt-1">
+                    <div className="text-xs font-medium text-gray-700 mb-2">Tipo de búsqueda:</div>
+                    <div className="grid grid-cols-4 gap-2">
+                      <Button
+                        variant={searchType === "all" ? "secondary" : "outline"}
+                        size="sm"
+                        onClick={() => setSearchType("all")}
+                        className="text-xs"
+                        data-testid="button-search-all"
+                      >
+                        Todo
+                      </Button>
+                      <Button
+                        variant={searchType === "sku" ? "secondary" : "outline"}
+                        size="sm"
+                        onClick={() => setSearchType("sku")}
+                        className="text-xs"
+                        data-testid="button-search-sku"
+                      >
+                        SKU
+                      </Button>
+                      <Button
+                        variant={searchType === "customer" ? "secondary" : "outline"}
+                        size="sm"
+                        onClick={() => setSearchType("customer")}
+                        className="text-xs"
+                        data-testid="button-search-customer"
+                      >
+                        Cliente
+                      </Button>
+                      <Button
+                        variant={searchType === "product" ? "secondary" : "outline"}
+                        size="sm"
+                        onClick={() => setSearchType("product")}
+                        className="text-xs"
+                        data-testid="button-search-product"
+                      >
+                        Producto
+                      </Button>
+                    </div>
+                  </div>
+                )}
               </div>
 
               <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as any)}>

@@ -337,6 +337,94 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.get("/api/dashboard/today-orders", requiereAutenticacion, async (req, res) => {
+    try {
+      const data = await almacenamiento.getTodayOrders();
+      res.json(data);
+    } catch {
+      res.status(500).json({ message: "No se pudieron obtener órdenes del día" });
+    }
+  });
+
+  app.get("/api/dashboard/orders-by-weekday", requiereAutenticacion, async (req, res) => {
+    try {
+      const weekOffset = req.query.week ? Number(req.query.week) : 0;
+      const data = await almacenamiento.getOrdersByWeekday(weekOffset);
+      res.json(data);
+    } catch {
+      res.status(500).json({ message: "No se pudieron obtener órdenes por día" });
+    }
+  });
+
+  app.get("/api/dashboard/sales-by-month", requiereAutenticacion, async (req, res) => {
+    try {
+      const data = await almacenamiento.getSalesByMonth();
+      res.json(data);
+    } catch {
+      res.status(500).json({ message: "No se pudieron obtener ventas mensuales" });
+    }
+  });
+
+  // ---------- Catálogo de Productos ----------
+  app.get("/api/products", requiereAutenticacion, async (req, res) => {
+    try {
+      const page = Number(req.query.page) || 1;
+      const pageSize = Number(req.query.pageSize) || 25;
+      const search = req.query.search as string | undefined;
+      const categoria = req.query.categoria as string | undefined;
+      const activo = req.query.activo as string | undefined;
+
+      const productos = await almacenamiento.getProductsPaginated({
+        page,
+        pageSize,
+        search,
+        categoria: categoria !== "all" ? categoria : undefined,
+        activo: activo !== "all" ? activo === "true" : undefined,
+      });
+      res.json(productos);
+    } catch {
+      res.status(500).json({ message: "No se pudieron obtener productos" });
+    }
+  });
+
+  app.get("/api/products/categories", requiereAutenticacion, async (req, res) => {
+    try {
+      const categorias = await almacenamiento.getProductCategories();
+      res.json(categorias);
+    } catch {
+      res.status(500).json({ message: "No se pudieron obtener categorías" });
+    }
+  });
+
+  app.post("/api/products", requiereAutenticacion, async (req, res) => {
+    try {
+      const producto = await almacenamiento.createProduct(req.body);
+      res.status(201).json(producto);
+    } catch {
+      res.status(500).json({ message: "No se pudo crear el producto" });
+    }
+  });
+
+  app.patch("/api/products/:id", requiereAutenticacion, async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      const producto = await almacenamiento.updateProduct(id, req.body);
+      res.json(producto);
+    } catch {
+      res.status(500).json({ message: "No se pudo actualizar el producto" });
+    }
+  });
+
+  app.delete("/api/products/:id", requiereAutenticacion, async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      await almacenamiento.deleteProduct(id);
+      res.status(204).send();
+    } catch {
+      res.status(500).json({ message: "No se pudo eliminar el producto" });
+    }
+  });
+
   // ---------- Órdenes ----------
   app.get("/api/orders", requiereAutenticacion, async (req, res) => {
     try {
@@ -345,12 +433,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const page = req.query.page ? Number(req.query.page) : 1;
       const pageSize = req.query.pageSize ? Number(req.query.pageSize) : 15;
       const search = req.query.search as string | undefined;
+      const searchType = req.query.searchType as "all" | "sku" | "customer" | "product" | undefined;
       const data = await almacenamiento.getOrdersPaginated({
         statusFilter: statusFilter as any,
         channelId,
         page,
         pageSize,
         search,
+        searchType,
       });
       res.json(data);
     } catch {

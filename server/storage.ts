@@ -948,6 +948,241 @@ export class DatabaseStorage implements IStorage {
     };
   }
 
+  /** Obtiene órdenes del día actual. */
+  async getTodayOrders(): Promise<{ count: number; totalAmount: number }> {
+    try {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const tomorrow = new Date(today);
+      tomorrow.setDate(tomorrow.getDate() + 1);
+
+      const result = await baseDatos.execute(sql`
+        SELECT 
+          COUNT(*) as count,
+          COALESCE(SUM(CAST(total_amount AS NUMERIC)), 0) as total_amount
+        FROM orders 
+        WHERE shopify_created_at >= ${today.toISOString()} 
+          AND shopify_created_at < ${tomorrow.toISOString()}
+      `);
+
+      const stats = result.rows[0] as any;
+      return {
+        count: Number(stats.count) || 0,
+        totalAmount: Number(stats.total_amount) || 0,
+      };
+    } catch (error) {
+      console.error("Error getting today orders:", error);
+      return { count: 0, totalAmount: 0 };
+    }
+  }
+
+  /** Obtiene datos de órdenes por día de la semana para gráfico. */
+  async getOrdersByWeekday(weekOffset: number = 0): Promise<Array<{ day: string; count: number }>> {
+    try {
+      const startDate = new Date();
+      startDate.setDate(startDate.getDate() - (7 * weekOffset) - 6); // 7 días atrás desde hoy
+      startDate.setHours(0, 0, 0, 0);
+      
+      const endDate = new Date(startDate);
+      endDate.setDate(endDate.getDate() + 6);
+      endDate.setHours(23, 59, 59, 999);
+
+      const result = await baseDatos.execute(sql`
+        SELECT 
+          EXTRACT(DOW FROM shopify_created_at) as dow,
+          COUNT(*) as count
+        FROM orders 
+        WHERE shopify_created_at >= ${startDate.toISOString()}
+          AND shopify_created_at <= ${endDate.toISOString()}
+        GROUP BY EXTRACT(DOW FROM shopify_created_at)
+        ORDER BY dow
+      `);
+
+      const dayNames = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
+      const data = dayNames.map((day, index) => {
+        const found = result.rows.find((row: any) => Number(row.dow) === index);
+        return {
+          day,
+          count: found ? Number(found.count) : 0
+        };
+      });
+
+      return data;
+    } catch (error) {
+      console.error("Error getting orders by weekday:", error);
+      return [];
+    }
+  }
+
+  /** Obtiene ventas por mes para gráfico. */
+  async getSalesByMonth(): Promise<Array<{ month: string; sales: number }>> {
+    try {
+      const result = await baseDatos.execute(sql`
+        SELECT 
+          TO_CHAR(shopify_created_at, 'YYYY-MM') as month,
+          COALESCE(SUM(CAST(total_amount AS NUMERIC)), 0) as sales
+        FROM orders 
+        WHERE shopify_created_at >= CURRENT_DATE - INTERVAL '12 months'
+        GROUP BY TO_CHAR(shopify_created_at, 'YYYY-MM')
+        ORDER BY month
+      `);
+
+      return result.rows.map((row: any) => ({
+        month: row.month || '',
+        sales: Number(row.sales) || 0
+      }));
+    } catch (error) {
+      console.error("Error getting sales by month:", error);
+      return [];
+    }
+  }
+
+  // ==== CATÁLOGO DE PRODUCTOS ====
+
+  /** Obtiene productos paginados con filtros. */
+  async getProductsPaginated(params: {
+    page: number;
+    pageSize: number;
+    search?: string;
+    categoria?: string;
+    activo?: boolean;
+  }): Promise<{ rows: any[]; total: number; page: number; pageSize: number }> {
+    const { page, pageSize, search, categoria, activo } = params;
+
+    try {
+      const conds: any[] = [];
+      
+      if (search) {
+        const searchPattern = `%${search.toLowerCase()}%`;
+        conds.push(
+          sql`(
+            LOWER(COALESCE(nombre, '')) LIKE ${searchPattern} OR
+            LOWER(COALESCE(sku, '')) LIKE ${searchPattern} OR
+            LOWER(COALESCE(descripcion, '')) LIKE ${searchPattern}
+          )`
+        );
+      }
+
+      if (categoria) {
+        conds.push(eq(tablaProductos.categoria, categoria));
+      }
+
+      if (activo !== undefined) {
+        conds.push(eq(tablaProductos.activo, activo));
+      }
+
+      const whereClause = conds.length > 0 ? and(...conds) : undefined;
+      const offset = Math.max(0, (page - 1) * pageSize);
+
+      // Obtener productos
+      const productos = await baseDatos
+        .select()
+        .from(tablaProductos)
+        .where(whereClause)
+        .orderBy(desc(tablaProductos.updatedAt))
+        .limit(pageSize)
+        .offset(offset);
+
+      // Contar total
+      const totalResult = await baseDatos
+        .select({ count: count() })
+        .from(tablaProductos)
+        .where(whereClause);
+
+      const total = Number(totalResult[0]?.count ?? 0);
+
+      return {
+        rows: productos.map(p => ({
+          ...p,
+          id: Number(p.id),
+          precio: p.precio ? Number(p.precio) : null,
+          inventario: p.inventario || 0,
+          fechaCreacion: p.createdAt,
+          fechaActualizacion: p.updatedAt
+        })),
+        total,
+        page,
+        pageSize
+      };
+    } catch (error) {
+      console.error("Error getting products paginated:", error);
+      return { rows: [], total: 0, page, pageSize };
+    }
+  }
+
+  /** Obtiene las categorías únicas de productos. */
+  async getProductCategories(): Promise<string[]> {
+    try {
+      const result = await baseDatos
+        .selectDistinct({ categoria: tablaProductos.categoria })
+        .from(tablaProductos)
+        .where(isNotNull(tablaProductos.categoria));
+
+      return result
+        .map(r => r.categoria)
+        .filter(Boolean)
+        .sort() as string[];
+    } catch (error) {
+      console.error("Error getting product categories:", error);
+      return [];
+    }
+  }
+
+  /** Crea un nuevo producto en el catálogo. */
+  async createProduct(datos: any): Promise<any> {
+    const [producto] = await baseDatos
+      .insert(tablaProductos)
+      .values({
+        nombre: datos.nombre,
+        sku: datos.sku,
+        descripcion: datos.descripcion,
+        precio: datos.precio ? String(datos.precio) : null,
+        categoria: datos.categoria,
+        marca: datos.marca,
+        activo: datos.activo ?? true,
+        inventario: datos.inventario ?? 0,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .returning();
+
+    return {
+      ...producto,
+      id: Number(producto.id),
+      precio: producto.precio ? Number(producto.precio) : null,
+      fechaCreacion: producto.createdAt,
+      fechaActualizacion: producto.updatedAt
+    };
+  }
+
+  /** Actualiza un producto del catálogo. */
+  async updateProduct(id: number, datos: any): Promise<any> {
+    const [producto] = await baseDatos
+      .update(tablaProductos)
+      .set({
+        ...datos,
+        precio: datos.precio ? String(datos.precio) : undefined,
+        updatedAt: new Date(),
+      })
+      .where(eq(tablaProductos.id, id))
+      .returning();
+
+    return {
+      ...producto,
+      id: Number(producto.id),
+      precio: producto.precio ? Number(producto.precio) : null,
+      fechaCreacion: producto.createdAt,
+      fechaActualizacion: producto.updatedAt
+    };
+  }
+
+  /** Elimina un producto del catálogo. */
+  async deleteProduct(id: number): Promise<void> {
+    await baseDatos
+      .delete(tablaProductos)
+      .where(eq(tablaProductos.id, id));
+  }
+
   // ==== ÓRDENES PAGINADAS ====
   async getOrdersPaginated(params: {
     statusFilter: "unmanaged" | "managed" | "all";
@@ -955,8 +1190,9 @@ export class DatabaseStorage implements IStorage {
     page: number;
     pageSize: number;
     search?: string;
+    searchType?: "all" | "sku" | "customer" | "product";
   }): Promise<{ rows: any[]; total: number; page: number; pageSize: number }> {
-    const { statusFilter, channelId, page, pageSize, search } = params;
+    const { statusFilter, channelId, page, pageSize, search, searchType = "all" } = params;
 
     console.log(`🔍 getOrdersPaginated - filtros:`, { statusFilter, channelId, page, pageSize, search });
 
@@ -979,18 +1215,54 @@ export class DatabaseStorage implements IStorage {
       //   conds.push(sql`o.channel_id = ${channelId}`);
       // }
       
-      // Búsqueda textual solo por order_id y SKU (case-insensitive) basado en esquema real
+      // Búsqueda textual mejorada con soporte para tipos específicos
       if (search) {
-        conds.push(
-          sql`(
-            LOWER(COALESCE(o.order_id, '')) LIKE LOWER(${'%' + search + '%'}) OR 
-            EXISTS (
+        const searchPattern = `%${search.toLowerCase()}%`;
+        
+        if (searchType === "sku") {
+          conds.push(
+            sql`EXISTS (
               SELECT 1 FROM order_items oi2 
               WHERE oi2.order_id = o.id 
-              AND LOWER(COALESCE(oi2.sku, '')) LIKE LOWER(${'%' + search + '%'})
-            )
-          )`
-        );
+              AND LOWER(COALESCE(oi2.sku, '')) LIKE ${searchPattern}
+            )`
+          );
+        } else if (searchType === "customer") {
+          conds.push(
+            sql`(
+              LOWER(COALESCE(o.customer_name, '')) LIKE ${searchPattern} OR 
+              LOWER(COALESCE(o.customer_email, '')) LIKE ${searchPattern}
+            )`
+          );
+        } else if (searchType === "product") {
+          conds.push(
+            sql`EXISTS (
+              SELECT 1 FROM order_items oi2 
+              WHERE oi2.order_id = o.id 
+              AND (
+                LOWER(COALESCE(oi2.title, '')) LIKE ${searchPattern} OR
+                LOWER(COALESCE(oi2.variant_title, '')) LIKE ${searchPattern}
+              )
+            )`
+          );
+        } else { // "all" or default
+          conds.push(
+            sql`(
+              LOWER(COALESCE(o.order_id, '')) LIKE ${searchPattern} OR 
+              LOWER(COALESCE(o.customer_name, '')) LIKE ${searchPattern} OR 
+              LOWER(COALESCE(o.customer_email, '')) LIKE ${searchPattern} OR
+              EXISTS (
+                SELECT 1 FROM order_items oi2 
+                WHERE oi2.order_id = o.id 
+                AND (
+                  LOWER(COALESCE(oi2.sku, '')) LIKE ${searchPattern} OR
+                  LOWER(COALESCE(oi2.title, '')) LIKE ${searchPattern} OR
+                  LOWER(COALESCE(oi2.variant_title, '')) LIKE ${searchPattern}
+                )
+              )
+            )`
+          );
+        }
       }
 
       // Combinar condiciones
