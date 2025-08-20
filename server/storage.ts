@@ -396,10 +396,20 @@ export class DatabaseStorage implements IStorage {
 
     if (filtros?.channelId !== undefined)
       condiciones.push(eq(tablaOrdenes.channelId, filtros.channelId));
-    if (filtros?.managed !== undefined)
-      condiciones.push(eq(tablaOrdenes.isManaged, filtros.managed));
-    if (filtros?.hasTicket !== undefined)
-      condiciones.push(eq(tablaOrdenes.hasTicket, filtros.hasTicket));
+    if (filtros?.managed !== undefined) {
+      if (filtros.managed) {
+        condiciones.push(sql`LOWER(COALESCE(${tablaOrdenes.fulfillmentStatus}, '')) = 'fulfilled'`);
+      } else {
+        condiciones.push(sql`LOWER(COALESCE(${tablaOrdenes.fulfillmentStatus}, '')) IN ('', 'unfulfilled')`);
+      }
+    }
+    if (filtros?.hasTicket !== undefined) {
+      if (filtros.hasTicket) {
+        condiciones.push(sql`EXISTS(SELECT 1 FROM tickets t WHERE t.order_id = ${tablaOrdenes.id})`);
+      } else {
+        condiciones.push(sql`NOT EXISTS(SELECT 1 FROM tickets t WHERE t.order_id = ${tablaOrdenes.id})`);
+      }
+    }
 
     if (condiciones.length > 0) {
       return await baseDatos
@@ -440,7 +450,7 @@ export class DatabaseStorage implements IStorage {
   ): Promise<Orden> {
     const [orden] = await baseDatos
       .update(tablaOrdenes)
-      .set({ ...updates, updatedAt: new Date() })
+      .set(updates)
       .where(eq(tablaOrdenes.id, BigInt(id)))
       .returning();
     return orden;
@@ -491,7 +501,7 @@ export class DatabaseStorage implements IStorage {
       .from(tablaOrdenes)
       .where(
         and(
-          eq(tablaOrdenes.idShopify, shopifyId),
+          eq(tablaOrdenes.orderId, shopifyId),
           eq(tablaOrdenes.shopId, shopId),
         ),
       );
@@ -586,15 +596,14 @@ export class DatabaseStorage implements IStorage {
         status: "open",
         notes:
           notes ||
-          `Ticket creado masivamente para orden ${orden.name || orderId}`,
+          `Ticket creado masivamente para orden ${orden.orderId || orderId}`,
       });
 
       tickets.push(ticketNuevo);
 
-      // Actualizar la orden para marcarla como gestionada y con ticket
+      // Actualizar la orden para marcar fulfillmentStatus como fulfilled
       await this.updateOrder(numeroOrdenNumerica, {
-        isManaged: true,
-        hasTicket: true,
+        fulfillmentStatus: "fulfilled",
       });
 
       updated++;
@@ -611,7 +620,6 @@ export class DatabaseStorage implements IStorage {
       .update(tablaOrdenes)
       .set({
         fulfillmentStatus: "fulfilled",
-        updatedAt: new Date(),
       })
       .where(isNull(tablaOrdenes.fulfillmentStatus))
       .returning({ id: tablaOrdenes.id });
@@ -845,12 +853,18 @@ export class DatabaseStorage implements IStorage {
     const unmanagedRes = await baseDatos
       .select({ count: count() })
       .from(tablaOrdenes)
-      .where(and(eq(tablaOrdenes.isManaged, false), range));
+      .where(and(
+        sql`LOWER(COALESCE(${tablaOrdenes.fulfillmentStatus}, '')) IN ('', 'unfulfilled')`,
+        range
+      ));
 
     const managedRes = await baseDatos
       .select({ count: count() })
       .from(tablaOrdenes)
-      .where(and(eq(tablaOrdenes.isManaged, true), range));
+      .where(and(
+        sql`LOWER(COALESCE(${tablaOrdenes.fulfillmentStatus}, '')) = 'fulfilled'`,
+        range
+      ));
 
     const byChannelRes = await baseDatos
       .select({
@@ -916,16 +930,16 @@ export class DatabaseStorage implements IStorage {
         );
       }
       
-      // Filtro por canal
-      if (channelId !== undefined) {
-        conds.push(sql`o.channel_id = ${channelId}`);
-      }
+      // Filtro por canal (campo no existe en DB real, omitir por ahora)
+      // if (channelId !== undefined) {
+      //   conds.push(sql`o.channel_id = ${channelId}`);
+      // }
       
-      // Búsqueda textual solo por name y SKU (case-insensitive)
+      // Búsqueda textual solo por order_id y SKU (case-insensitive) basado en esquema real
       if (search) {
         conds.push(
           sql`(
-            LOWER(COALESCE(o.name, '')) LIKE LOWER(${'%' + search + '%'}) OR 
+            LOWER(COALESCE(o.order_id, '')) LIKE LOWER(${'%' + search + '%'}) OR 
             EXISTS (
               SELECT 1 FROM order_items oi2 
               WHERE oi2.order_id = o.id 
@@ -942,14 +956,14 @@ export class DatabaseStorage implements IStorage {
 
       const offset = Math.max(0, (page - 1) * pageSize);
 
-      // Query principal con shape exacto para UI
+      // Query usando SOLO campos que existen en la estructura real de DB
       const baseQuery = sql`
         SELECT 
           o.id::text as id,
-          COALESCE(o.name, '') as name,
+          COALESCE(o.order_id, o.name, '') as name,
           COALESCE(o.customer_name, '') as "customerName",
-          COALESCE(o.channel_id, 0) as "channelId",
-          COALESCE(c.name, 'N/A') as "channelName",
+          0 as "channelId",
+          'N/A' as "channelName", 
           COALESCE(o.total_amount, '0') as "totalAmount",
           COALESCE(o.fulfillment_status, '') as "fulfillmentStatus",
           COALESCE(o.shopify_created_at, o.created_at, NOW()) as "createdAt",
@@ -961,24 +975,24 @@ export class DatabaseStorage implements IStorage {
             WHEN LOWER(COALESCE(o.fulfillment_status, '')) = 'restocked' THEN 'DEVUELTO'
             ELSE 'ERROR'
           END as "uiStatus",
-          COALESCE(o.has_ticket, false) as "hasTicket",
-          COALESCE(o.is_managed, false) as "isManaged"
+          EXISTS(SELECT 1 FROM tickets t WHERE t.order_id = o.id) as "hasTicket",
+          CASE 
+            WHEN LOWER(COALESCE(o.fulfillment_status, '')) = 'fulfilled' THEN true
+            ELSE false
+          END as "isManaged"
         FROM orders o
         LEFT JOIN order_items oi ON oi.order_id = o.id
-        LEFT JOIN channels c ON c.id = o.channel_id
         ${whereClause ? sql`WHERE ${whereClause}` : sql``}
-        GROUP BY o.id, o.name, o.customer_name, o.channel_id, c.name, o.total_amount, 
-                 o.fulfillment_status, o.shopify_created_at, o.created_at, o.has_ticket, o.is_managed
+        GROUP BY o.id, o.order_id, o.name, o.customer_name, o.total_amount, 
+                 o.fulfillment_status, o.shopify_created_at, o.created_at
         ORDER BY COALESCE(o.shopify_created_at, o.created_at) DESC
         LIMIT ${pageSize} OFFSET ${offset}
       `;
 
-      // Query para contar total
+      // Query para contar total simplificado
       const countQuery = sql`
         SELECT COUNT(DISTINCT o.id) as count
         FROM orders o
-        LEFT JOIN order_items oi ON oi.order_id = o.id
-        LEFT JOIN channels c ON c.id = o.channel_id
         ${whereClause ? sql`WHERE ${whereClause}` : sql``}
       `;
 
@@ -1020,7 +1034,7 @@ export class DatabaseStorage implements IStorage {
       .from(tablaItemsOrden)
       .leftJoin(
         tablaProductos,
-        eq(tablaProductos.id, tablaItemsOrden.productId),
+        eq(tablaProductos.idShopify, tablaItemsOrden.shopifyProductId),
       )
       .where(eq(tablaItemsOrden.orderId, BigInt(orderId)))
       .orderBy(asc(tablaItemsOrden.id));
