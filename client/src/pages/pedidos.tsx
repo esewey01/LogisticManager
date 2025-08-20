@@ -10,6 +10,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import OrderDetailsModal from "@/components/modals/OrderDetailsModal";
+import OrderDetailsModalNew from "@/components/modals/OrderDetailsModalNew";
 import CancelOrderModal from "@/components/modals/CancelOrderModal";
 import {
   Dialog,
@@ -64,6 +65,7 @@ export default function Pedidos() {
   const [channelFilter, setChannelFilter] = useState<string>("all");
   const [selectedOrders, setSelectedOrders] = useState<Array<number | string>>([]);
   const [selectedOrder, setSelectedOrder] = useState<OrderRow | null>(null);
+  const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
   const [cancelOrderId, setCancelOrderId] = useState<number | string | null>(null);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
@@ -445,7 +447,7 @@ export default function Pedidos() {
                         <Button
                           size="sm"
                           variant="outline"
-                          onClick={() => setSelectedOrder(order)}
+                          onClick={() => setSelectedOrderId(String(order.id))}
                         >
                           <i className="fas fa-eye mr-1"></i>
                           Ver
@@ -597,6 +599,14 @@ export default function Pedidos() {
           order={selectedOrder}
           onClose={() => setSelectedOrder(null)}
           channels={channels}
+        />
+      )}
+
+      {selectedOrderId && (
+        <OrderDetailsModalNew
+          orderId={selectedOrderId}
+          isOpen={!!selectedOrderId}
+          onClose={() => setSelectedOrderId(null)}
         />
       )}
     </div>

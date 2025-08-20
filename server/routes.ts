@@ -375,17 +375,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/orders/:id", requiereAutenticacion, async (req, res) => {
     try {
       const id = Number(req.params.id);
+      console.log(`[GET /api/orders/:id] Solicitando orden ID: ${id}`);
+      
       if (Number.isNaN(id))
         return res.status(400).json({ message: "ID de orden inválido" });
 
       const orden = await almacenamiento.getOrder(id);
+      console.log(`[GET /api/orders/:id] Orden encontrada:`, !!orden);
+      
       if (!orden)
         return res.status(404).json({ message: "Orden no encontrada" });
       res.json(orden);
-    } catch {
+    } catch (error) {
+      console.error(`[GET /api/orders/:id] Error:`, error);
       res.status(500).json({ message: "No se pudo obtener la orden" });
     }
   });
+
+
 
   app.post("/api/orders/:id/cancel", requiereAutenticacion, async (req, res) => {
     try {
@@ -398,9 +405,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const { reason, staffNote, notifyCustomer, restock, refundToOriginal } = req.body;
       const { shop, token, apiVersion } = getShopifyCredentials(String(orden.shopId));
-      const gid = (orden.idShopify && orden.idShopify.startsWith("gid://"))
-        ? orden.idShopify
-        : `gid://shopify/Order/${orden.idShopify || orden.id}`;
+      const gid = (orden.orderId && orden.orderId.startsWith("gid://"))
+        ? orden.orderId
+        : `gid://shopify/Order/${orden.orderId || orden.id}`;
 
       const mutation = `mutation orderCancel($id: ID!, $reason: OrderCancelReason, $staffNote: String, $email: Boolean, $restock: Boolean, $refund: Boolean){
         orderCancel(id: $id, reason: $reason, staffNote: $staffNote, email: $email, restock: $restock, refund: $refund){

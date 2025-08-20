@@ -425,13 +425,53 @@ export class DatabaseStorage implements IStorage {
       .orderBy(desc(createdAtEff(tablaOrdenes)));
   }
 
-  /** Obtiene una orden por ID. */
-  async getOrder(id: number): Promise<Orden | undefined> {
-    const [orden] = await baseDatos
-      .select()
-      .from(tablaOrdenes)
-      .where(eq(tablaOrdenes.id, BigInt(id)));
-    return orden;
+  /** Obtiene una orden por ID con detalles completos. */
+  async getOrder(id: number): Promise<any | undefined> {
+    try {
+      console.log(`[Storage] getOrder called with ID: ${id}`);
+      
+      // Usar la sintaxis estándar de Drizzle primero
+      const [orden] = await baseDatos
+        .select()
+        .from(tablaOrdenes)
+        .where(eq(tablaOrdenes.id, BigInt(id)));
+      
+      console.log(`[Storage] Raw order found:`, !!orden);
+      
+      if (!orden) return undefined;
+      
+      // Formatear la respuesta
+      const result = {
+        id: String(orden.id),
+        orderId: orden.orderId,
+        name: orden.name || '',
+        customerName: orden.customerName || '',
+        customerEmail: orden.customerEmail || '',
+        totalAmount: String(orden.totalAmount || 0),
+        subtotalPrice: String(orden.subtotalPrice || 0),
+        fulfillmentStatus: orden.fulfillmentStatus || '',
+        financialStatus: orden.financialStatus || '',
+        createdAt: orden.shopifyCreatedAt || orden.createdAt,
+        shopifyCreatedAt: orden.shopifyCreatedAt || orden.createdAt,
+        shopId: orden.shopId || 0,
+        shipName: orden.shipName || '',
+        shipPhone: orden.shipPhone || '',
+        shipAddress1: orden.shipAddress1 || '',
+        shipCity: orden.shipCity || '',
+        shipProvince: orden.shipProvince || '',
+        shipCountry: orden.shipCountry || '',
+        shipZip: orden.shipZip || '',
+        currency: orden.currency || 'MXN',
+        tags: [],
+        orderNote: orden.note || ''
+      };
+      
+      console.log(`[Storage] Formatted order result:`, result);
+      return result;
+    } catch (error) {
+      console.error("[Storage] Error getting order:", error);
+      return undefined;
+    }
   }
 
   /** Crea una orden. */
@@ -866,16 +906,20 @@ export class DatabaseStorage implements IStorage {
         range
       ));
 
+    // Usar shop_id como equivalente a channel para datos reales
     const byChannelRes = await baseDatos
       .select({
-        channelId: tablaOrdenes.channelId,
-        channelName: tablaCanales.name,
+        channelId: tablaOrdenes.shopId,
+        channelName: sql<string>`CASE 
+          WHEN ${tablaOrdenes.shopId} = 1 THEN 'Tienda 1'
+          WHEN ${tablaOrdenes.shopId} = 2 THEN 'Tienda 2'
+          ELSE 'Tienda ' || ${tablaOrdenes.shopId}::text
+        END`,
         count: sql<number>`COUNT(*)`,
       })
       .from(tablaOrdenes)
-      .leftJoin(tablaCanales, eq(tablaCanales.id, tablaOrdenes.channelId))
       .where(range)
-      .groupBy(tablaOrdenes.channelId, tablaCanales.name);
+      .groupBy(tablaOrdenes.shopId);
 
     const byShopRes = await baseDatos
       .select({
@@ -960,10 +1004,14 @@ export class DatabaseStorage implements IStorage {
       const baseQuery = sql`
         SELECT 
           o.id::text as id,
-          COALESCE(o.order_id, o.name, '') as name,
+          COALESCE(o.name, o.order_id, '') as name,
           COALESCE(o.customer_name, '') as "customerName",
-          0 as "channelId",
-          'N/A' as "channelName", 
+          o.shop_id as "channelId",
+          CASE 
+            WHEN o.shop_id = 1 THEN 'Tienda 1'
+            WHEN o.shop_id = 2 THEN 'Tienda 2'
+            ELSE 'Tienda ' || o.shop_id::text
+          END as "channelName", 
           COALESCE(o.total_amount, '0') as "totalAmount",
           COALESCE(o.fulfillment_status, '') as "fulfillmentStatus",
           COALESCE(o.shopify_created_at, o.created_at, NOW()) as "createdAt",
@@ -984,7 +1032,7 @@ export class DatabaseStorage implements IStorage {
         LEFT JOIN order_items oi ON oi.order_id = o.id
         ${whereClause ? sql`WHERE ${whereClause}` : sql``}
         GROUP BY o.id, o.order_id, o.name, o.customer_name, o.total_amount, 
-                 o.fulfillment_status, o.shopify_created_at, o.created_at
+                 o.fulfillment_status, o.shopify_created_at, o.created_at, o.shop_id
         ORDER BY COALESCE(o.shopify_created_at, o.created_at) DESC
         LIMIT ${pageSize} OFFSET ${offset}
       `;
@@ -1022,22 +1070,37 @@ export class DatabaseStorage implements IStorage {
 
   // Items de una orden
   async getOrderItems(orderId: number) {
-    return await baseDatos
-      .select({
-        id: tablaItemsOrden.id,
-        sku: tablaItemsOrden.sku,
-        quantity: tablaItemsOrden.quantity,
-        price: tablaItemsOrden.price,
-        title: tablaProductos.title,
-        vendor: tablaProductos.vendor,
-      })
-      .from(tablaItemsOrden)
-      .leftJoin(
-        tablaProductos,
-        eq(tablaProductos.idShopify, tablaItemsOrden.shopifyProductId),
-      )
-      .where(eq(tablaItemsOrden.orderId, BigInt(orderId)))
-      .orderBy(asc(tablaItemsOrden.id));
+    try {
+      const items = await baseDatos
+        .select({
+          id: tablaItemsOrden.id,
+          sku: tablaItemsOrden.sku,
+          quantity: tablaItemsOrden.quantity,
+          price: tablaItemsOrden.price,
+          title: tablaProductos.title,
+          vendor: tablaProductos.vendor,
+          productName: tablaProductos.title, // Alias para el modal
+          skuInterno: tablaItemsOrden.sku,   // SKU interno 
+          skuExterno: tablaItemsOrden.sku,   // SKU externo (mismo por ahora)
+        })
+        .from(tablaItemsOrden)
+        .leftJoin(
+          tablaProductos,
+          eq(tablaProductos.idShopify, tablaItemsOrden.shopifyProductId),
+        )
+        .where(eq(tablaItemsOrden.orderId, BigInt(orderId)))
+        .orderBy(asc(tablaItemsOrden.id));
+      
+      // Remover duplicados por ID si existen
+      const uniqueItems = items.filter((item, index, self) => 
+        index === self.findIndex(t => t.id === item.id)
+      );
+      
+      return uniqueItems;
+    } catch (error) {
+      console.error("Error getting order items:", error);
+      return [];
+    }
   }
 
   // Productos paginados por tienda
@@ -1084,6 +1147,8 @@ export class DatabaseStorage implements IStorage {
       .from(tablaProductosExternos);
     return { rows, total: Number(totalRes[0]?.count ?? 0), page, pageSize };
   }
+
+
 }
 
 // Instancia lista para usar (compatibilidad y alias en español)
