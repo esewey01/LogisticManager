@@ -352,13 +352,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // ---------- Catálogo de Productos ----------
   app.get("/api/products", requiereAutenticacion, async (req, res) => {
     try {
+      const { catalogStorage } = await import("./catalogStorage");
       const page = Number(req.query.page) || 1;
       const pageSize = Number(req.query.pageSize) || 25;
       const search = req.query.search as string | undefined;
       const categoria = req.query.categoria as string | undefined;
       const activo = req.query.activo as string | undefined;
 
-      const productos = await almacenamiento.getProductsPaginated({
+      const productos = await catalogStorage.getProductsPaginated({
         page,
         pageSize,
         search,
@@ -366,45 +367,54 @@ export async function registerRoutes(app: Express): Promise<Server> {
         activo: activo !== "all" ? activo === "true" : undefined,
       });
       res.json(productos);
-    } catch {
+    } catch (error) {
+      console.error("Error en /api/products:", error);
       res.status(500).json({ message: "No se pudieron obtener productos" });
     }
   });
 
   app.get("/api/products/categories", requiereAutenticacion, async (req, res) => {
     try {
-      const categorias = await almacenamiento.getProductCategories();
+      const { catalogStorage } = await import("./catalogStorage");
+      const categorias = await catalogStorage.getProductCategories();
       res.json(categorias);
-    } catch {
+    } catch (error) {
+      console.error("Error en /api/products/categories:", error);
       res.status(500).json({ message: "No se pudieron obtener categorías" });
     }
   });
 
   app.post("/api/products", requiereAutenticacion, async (req, res) => {
     try {
-      const producto = await almacenamiento.createProduct(req.body);
+      const { catalogStorage } = await import("./catalogStorage");
+      const producto = await catalogStorage.createProduct(req.body);
       res.status(201).json(producto);
-    } catch {
+    } catch (error) {
+      console.error("Error en POST /api/products:", error);
       res.status(500).json({ message: "No se pudo crear el producto" });
     }
   });
 
   app.patch("/api/products/:id", requiereAutenticacion, async (req, res) => {
     try {
-      const id = Number(req.params.id);
-      const producto = await almacenamiento.updateProduct(id, req.body);
+      const { catalogStorage } = await import("./catalogStorage");
+      const id = req.params.id; // Mantener como string para SKU
+      const producto = await catalogStorage.updateProduct(id, req.body);
       res.json(producto);
-    } catch {
+    } catch (error) {
+      console.error("Error en PATCH /api/products:", error);
       res.status(500).json({ message: "No se pudo actualizar el producto" });
     }
   });
 
   app.delete("/api/products/:id", requiereAutenticacion, async (req, res) => {
     try {
-      const id = Number(req.params.id);
-      await almacenamiento.deleteProduct(id);
+      const { catalogStorage } = await import("./catalogStorage");
+      const id = req.params.id; // Mantener como string para SKU
+      await catalogStorage.deleteProduct(id);
       res.status(204).send();
-    } catch {
+    } catch (error) {
+      console.error("Error en DELETE /api/products:", error);
       res.status(500).json({ message: "No se pudo eliminar el producto" });
     }
   });

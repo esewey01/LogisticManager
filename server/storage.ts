@@ -56,6 +56,7 @@ import {
   and,
   or,
   isNull,
+  isNotNull,
   desc,
   asc,
   sql,
@@ -444,7 +445,7 @@ export class DatabaseStorage implements IStorage {
       const result = {
         id: String(orden.id),
         orderId: orden.orderId,
-        name: orden.name || '',
+        name: orden.customerName || '',
         customerName: orden.customerName || '',
         customerEmail: orden.customerEmail || '',
         totalAmount: String(orden.totalAmount || 0),
@@ -454,13 +455,13 @@ export class DatabaseStorage implements IStorage {
         createdAt: orden.shopifyCreatedAt || orden.createdAt,
         shopifyCreatedAt: orden.shopifyCreatedAt || orden.createdAt,
         shopId: orden.shopId || 0,
-        shipName: orden.shipName || '',
-        shipPhone: orden.shipPhone || '',
-        shipAddress1: orden.shipAddress1 || '',
-        shipCity: orden.shipCity || '',
-        shipProvince: orden.shipProvince || '',
-        shipCountry: orden.shipCountry || '',
-        shipZip: orden.shipZip || '',
+        shipName: orden.shippingAddress || '',
+        shipPhone: orden.customerPhone || '',
+        shipAddress1: orden.shippingAddress || '',
+        shipCity: orden.shippingAddress || '',
+        shipProvince: orden.shippingAddress || '',
+        shipCountry: 'MX',
+        shipZip: '',
         currency: orden.currency || 'MXN',
         tags: [],
         orderNote: orden.note || ''
@@ -874,8 +875,10 @@ export class DatabaseStorage implements IStorage {
     byShop: { shopId: number; shopName: string | null; count: number }[];
   }> {
     const range = and(
-      gte(tablaOrdenes.createdAt, from),
-      lte(tablaOrdenes.createdAt, to),
+      gte(tablaOrdenes.shopifyCreatedAt, from),
+      lte(tablaOrdenes.shopifyCreatedAt, to),
+      isNotNull(tablaOrdenes.shopifyCreatedAt),
+      isNull(tablaOrdenes.shopifyCancelledAt)
     );
 
     const totalOrdersRes = await baseDatos
