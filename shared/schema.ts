@@ -2,7 +2,7 @@
 // NOTA: Mantengo los mismos exports originales para no romper imports existentes.
 //       Además agrego alias en español (usuarios, marcas, etc.) por claridad.
 
-import { pgTable, serial, text, boolean, timestamp, integer, decimal, date, bigint, json } from "drizzle-orm/pg-core";
+import { pgTable, serial, text, boolean, timestamp, integer, decimal, date, bigint, json, varchar, jsonb } from "drizzle-orm/pg-core";
 import { z } from "zod";
 
 // === USUARIOS ===
@@ -339,6 +339,47 @@ export interface DashboardMetrics {
   byChannel: Array<{ channelId: number; channelName: string; count: number }>;
   byShop: Array<{ shopId: number; shopName?: string | null; count: number }>;
 }
+
+// Product links para conciliación Catálogo ↔ Shopify
+export const productLinks = pgTable("product_links", {
+  id: serial("id").primaryKey(),
+  catalogoSku: varchar("catalogo_sku", { length: 100 }).notNull(),
+  shopifyVariantId: varchar("shopify_variant_id", { length: 100 }),
+  shopifyProductId: varchar("shopify_product_id", { length: 100 }),
+  variantId: integer("variant_id").references(() => variants.id),
+  productId: integer("product_id").references(() => products.id),
+  matchStatus: varchar("match_status", { length: 20 }).default("pending"), // 'matched', 'conflict', 'missing'
+  syncStatus: varchar("sync_status", { length: 20 }).default("pending"), // 'synced', 'error', 'pending'
+  errorMessage: text("error_message"),
+  lastSyncAt: timestamp("last_sync_at"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+  createdBy: integer("created_by").references(() => users.id),
+  updatedBy: integer("updated_by").references(() => users.id),
+});
+
+// Jobs queue para sincronización con Shopify
+export const shopifyJobs = pgTable("shopify_jobs", {
+  id: serial("id").primaryKey(),
+  shopId: integer("shop_id").notNull(),
+  jobType: varchar("job_type", { length: 50 }).notNull(), // 'update_product', 'update_variant', 'create_product'
+  shopifyProductId: varchar("shopify_product_id", { length: 100 }),
+  shopifyVariantId: varchar("shopify_variant_id", { length: 100 }),
+  payload: jsonb("payload").notNull(),
+  status: varchar("status", { length: 20 }).default("pending"), // 'pending', 'processing', 'completed', 'failed'
+  attempts: integer("attempts").default(0),
+  maxAttempts: integer("max_attempts").default(3),
+  errorMessage: text("error_message"),
+  processedAt: timestamp("processed_at"),
+  scheduledFor: timestamp("scheduled_for").defaultNow(),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export type ProductLink = typeof productLinks.$inferSelect;
+export type InsertProductLink = typeof productLinks.$inferInsert;
+
+export type ShopifyJob = typeof shopifyJobs.$inferSelect;
+export type InsertShopifyJob = typeof shopifyJobs.$inferInsert;
 
 // === Alias en español (opcionales) ===
 // Permiten importar en español sin romper los nombres originales.

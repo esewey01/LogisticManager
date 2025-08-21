@@ -419,6 +419,169 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // ---------- Página Productos Unificada ----------
+  
+  // Pestaña 1: Catálogo
+  app.get("/api/unified-products/catalog", requiereAutenticacion, async (req, res) => {
+    try {
+      const { productStorage } = await import("./productStorage");
+      const page = Number(req.query.page) || 1;
+      const pageSize = Number(req.query.pageSize) || 300;
+      const search = req.query.search as string;
+      const searchField = req.query.searchField as 'sku' | 'sku_interno' | 'codigo_barras' | 'nombre_producto';
+      const marca = req.query.marca as string;
+      const categoria = req.query.categoria as string;
+      const condicion = req.query.condicion as string;
+      const marca_producto = req.query.marca_producto as string;
+      const orderBy = req.query.orderBy as string;
+      const orderDir = req.query.orderDir as 'asc' | 'desc';
+
+      const result = await productStorage.getCatalogProducts({
+        page,
+        pageSize,
+        search,
+        searchField,
+        marca,
+        categoria,
+        condicion,
+        marca_producto,
+        orderBy,
+        orderDir
+      });
+
+      res.json(result);
+    } catch (error) {
+      console.error("Error en /api/unified-products/catalog:", error);
+      res.status(500).json({ message: "Error al obtener productos del catálogo" });
+    }
+  });
+
+  app.get("/api/unified-products/catalog/facets", requiereAutenticacion, async (req, res) => {
+    try {
+      const { productStorage } = await import("./productStorage");
+      const facets = await productStorage.getCatalogFacets();
+      res.json(facets);
+    } catch (error) {
+      console.error("Error en /api/unified-products/catalog/facets:", error);
+      res.status(500).json({ message: "Error al obtener facetas del catálogo" });
+    }
+  });
+
+  app.patch("/api/unified-products/catalog/:sku", requiereAutenticacion, async (req, res) => {
+    try {
+      const { productStorage } = await import("./productStorage");
+      const sku = req.params.sku;
+      const result = await productStorage.updateCatalogProduct(sku, req.body);
+      res.json(result);
+    } catch (error) {
+      console.error("Error en PATCH /api/unified-products/catalog:", error);
+      res.status(500).json({ message: "Error al actualizar producto del catálogo" });
+    }
+  });
+
+  // Pestaña 2: Shopify
+  app.get("/api/unified-products/shopify", requiereAutenticacion, async (req, res) => {
+    try {
+      const { productStorage } = await import("./productStorage");
+      const page = Number(req.query.page) || 1;
+      const pageSize = Number(req.query.pageSize) || 300;
+      const search = req.query.search as string;
+      const shopId = req.query.shopId ? Number(req.query.shopId) : undefined;
+      const status = req.query.status as string;
+      const vendor = req.query.vendor as string;
+      const productType = req.query.productType as string;
+      const syncStatus = req.query.syncStatus as string;
+
+      const result = await productStorage.getShopifyProducts({
+        page,
+        pageSize,
+        search,
+        shopId,
+        status,
+        vendor,
+        productType,
+        syncStatus
+      });
+
+      res.json(result);
+    } catch (error) {
+      console.error("Error en /api/unified-products/shopify:", error);
+      res.status(500).json({ message: "Error al obtener productos de Shopify" });
+    }
+  });
+
+  app.patch("/api/unified-products/shopify/variant/:id", requiereAutenticacion, async (req, res) => {
+    try {
+      const { productStorage } = await import("./productStorage");
+      const variantId = Number(req.params.id);
+      const userId = (req as any).user?.id || 1;
+      
+      const result = await productStorage.updateShopifyVariant(variantId, req.body, userId);
+      res.json(result);
+    } catch (error) {
+      console.error("Error en PATCH /api/unified-products/shopify/variant:", error);
+      res.status(500).json({ message: "Error al actualizar variante de Shopify" });
+    }
+  });
+
+  // Pestaña 3: Conciliación
+  app.get("/api/unified-products/reconciliation/stats", requiereAutenticacion, async (req, res) => {
+    try {
+      const { productStorage } = await import("./productStorage");
+      const stats = await productStorage.getReconciliationStats();
+      res.json(stats);
+    } catch (error) {
+      console.error("Error en /api/unified-products/reconciliation/stats:", error);
+      res.status(500).json({ message: "Error al obtener estadísticas de conciliación" });
+    }
+  });
+
+  app.get("/api/unified-products/reconciliation/unlinked/:type", requiereAutenticacion, async (req, res) => {
+    try {
+      const { productStorage } = await import("./productStorage");
+      const type = req.params.type as 'catalog' | 'shopify';
+      const page = Number(req.query.page) || 1;
+      const pageSize = Number(req.query.pageSize) || 300;
+
+      const result = await productStorage.getUnlinkedProducts(type, { page, pageSize });
+      res.json(result);
+    } catch (error) {
+      console.error("Error en /api/unified-products/reconciliation/unlinked:", error);
+      res.status(500).json({ message: "Error al obtener productos sin vincular" });
+    }
+  });
+
+  app.post("/api/unified-products/reconciliation/link", requiereAutenticacion, async (req, res) => {
+    try {
+      const { productStorage } = await import("./productStorage");
+      const userId = (req as any).user?.id || 1;
+      
+      const link = await productStorage.createProductLink({
+        ...req.body,
+        createdBy: userId,
+        updatedBy: userId
+      });
+      
+      res.status(201).json(link);
+    } catch (error) {
+      console.error("Error en POST /api/unified-products/reconciliation/link:", error);
+      res.status(500).json({ message: "Error al crear vínculo de producto" });
+    }
+  });
+
+  app.delete("/api/unified-products/reconciliation/link/:id", requiereAutenticacion, async (req, res) => {
+    try {
+      const { productStorage } = await import("./productStorage");
+      const id = Number(req.params.id);
+      
+      const result = await productStorage.deleteProductLink(id);
+      res.json(result);
+    } catch (error) {
+      console.error("Error en DELETE /api/unified-products/reconciliation/link:", error);
+      res.status(500).json({ message: "Error al eliminar vínculo de producto" });
+    }
+  });
+
   // ---------- Órdenes ----------
   app.get("/api/orders", requiereAutenticacion, async (req, res) => {
     try {

@@ -15,6 +15,7 @@ import Paqueteria from "@/pages/paqueteria";
 import AdminUsuarios from "@/pages/admin/usuarios";
 import Config from "@/pages/config";
 import ProductsView from "@/pages/ProductsView";
+import ProductosUnificada from "@/pages/productos";
 import AppLayout from "@/components/layout/AppLayout";
 
 function Router() {
@@ -46,6 +47,7 @@ function Router() {
         <Route path="/catalogo" component={Catalogo} />
         <Route path="/paqueteria" component={Paqueteria} />
         <Route path="/admin/usuarios" component={AdminUsuarios} />
+        <Route path="/productos-unificada" component={ProductosUnificada} />
         <Route path="/productos" component={ProductsView} />
         <Route path="/config" component={Config} />
         <Route component={NotFound} />

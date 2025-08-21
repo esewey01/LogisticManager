@@ -54,6 +54,12 @@ export default function Sidebar({ collapsed }: SidebarProps) {
       label: "Productos",
       badge: null,
     },
+    {
+      path: "/productos-unificada",
+      icon: "fas fa-layer-group",
+      label: "Productos Pro",
+      badge: null,
+    },
   ];
 
   const adminItems = [
