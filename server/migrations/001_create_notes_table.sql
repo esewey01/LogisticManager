@@ -1,7 +1,0 @@
-CREATE TABLE IF NOT EXISTS notes (
-  id BIGSERIAL PRIMARY KEY,
-  date DATE NOT NULL,
-  content TEXT NOT NULL,
-  created_at TIMESTAMP DEFAULT NOW()
-);
-CREATE INDEX IF NOT EXISTS notes_date_idx ON notes(date);
