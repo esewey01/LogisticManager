@@ -396,7 +396,7 @@ export class DatabaseStorage implements IStorage {
     const condiciones: any[] = [];
 
     if (filtros?.channelId !== undefined)
-      condiciones.push(eq(tablaOrdenes.channelId, filtros.channelId));
+      condiciones.push(eq(tablaOrdenes.shopId, filtros.channelId));
     if (filtros?.managed !== undefined) {
       if (filtros.managed) {
         condiciones.push(sql`LOWER(COALESCE(${tablaOrdenes.fulfillmentStatus}, '')) = 'fulfilled'`);
@@ -426,12 +426,15 @@ export class DatabaseStorage implements IStorage {
       .orderBy(desc(createdAtEff(tablaOrdenes)));
   }
 
-  /** Obtiene una orden por ID con detalles completos. */
-  async getOrder(id: number): Promise<any | undefined> {
+  /** 
+   * Obtiene una orden por ID con detalles completos 
+   * Corrección: Manejo correcto de bigint IDs y campos de la DB real
+   */
+  async getOrder(id: number): Promise<Orden | undefined> {
     try {
       console.log(`[Storage] getOrder called with ID: ${id}`);
 
-      // Usar la sintaxis estándar de Drizzle primero
+      // Usar la sintaxis estándar de Drizzle con el tipo correcto
       const [orden] = await baseDatos
         .select()
         .from(tablaOrdenes)
@@ -441,34 +444,9 @@ export class DatabaseStorage implements IStorage {
 
       if (!orden) return undefined;
 
-      // Formatear la respuesta
-      const result = {
-        id: String(orden.id),
-        orderId: orden.orderId,
-        name: orden.customerName || '',
-        customerName: orden.customerName || '',
-        customerEmail: orden.customerEmail || '',
-        totalAmount: String(orden.totalAmount || 0),
-        subtotalPrice: String(orden.subtotalPrice || 0),
-        fulfillmentStatus: orden.fulfillmentStatus || '',
-        financialStatus: orden.financialStatus || '',
-        createdAt: orden.shopifyCreatedAt || orden.createdAt,
-        shopifyCreatedAt: orden.shopifyCreatedAt || orden.createdAt,
-        shopId: orden.shopId || 0,
-        shipName: orden.shippingAddress || '',
-        shipPhone: orden.customerPhone || '',
-        shipAddress1: orden.shippingAddress || '',
-        shipCity: orden.shippingAddress || '',
-        shipProvince: orden.shippingAddress || '',
-        shipCountry: 'MX',
-        shipZip: '',
-        currency: orden.currency || 'MXN',
-        tags: [],
-        orderNote: orden.note || ''
-      };
-
-      console.log(`[Storage] Formatted order result:`, result);
-      return result;
+      // Retornar la orden tal como viene de la DB (ya tipada)
+      console.log(`[Storage] Returning order with ID: ${orden.id}`);
+      return orden;
     } catch (error) {
       console.error("[Storage] Error getting order:", error);
       return undefined;
@@ -515,13 +493,20 @@ export class DatabaseStorage implements IStorage {
       orders: number;
     }>(sql`
     SELECT 
-      c.code as channel_code,
-      c.name as channel_name,
+      CASE 
+        WHEN o.shop_id = 1 THEN 'WW'
+        WHEN o.shop_id = 2 THEN 'CT'
+        ELSE 'OTHER'
+      END as channel_code,
+      CASE 
+        WHEN o.shop_id = 1 THEN 'WordWide'
+        WHEN o.shop_id = 2 THEN 'CrediTienda'
+        ELSE 'Otra Tienda'
+      END as channel_name,
       COUNT(o.id)::int as orders
     FROM orders o
-    JOIN channels c ON o.channel_id = c.id
     WHERE o.created_at >= NOW() - INTERVAL '30 days'
-    GROUP BY c.code, c.name
+    GROUP BY o.shop_id
     ORDER BY orders DESC
   `);
 
@@ -1080,20 +1065,21 @@ export class DatabaseStorage implements IStorage {
         const searchPattern = `%${search.toLowerCase()}%`;
         conds.push(
           sql`(
-            LOWER(COALESCE(nombre, '')) LIKE ${searchPattern} OR
-            LOWER(COALESCE(sku, '')) LIKE ${searchPattern} OR
-            LOWER(COALESCE(descripcion, '')) LIKE ${searchPattern}
+            LOWER(COALESCE(title, '')) LIKE ${searchPattern} OR
+            LOWER(COALESCE(vendor, '')) LIKE ${searchPattern} OR
+            LOWER(COALESCE(product_type, '')) LIKE ${searchPattern}
           )`
         );
       }
 
-      if (categoria) {
-        conds.push(eq(tablaProductos.categoria, categoria));
-      }
+      // Comentar filtros por campos que no existen en la tabla products
+      // if (categoria) {
+      //   conds.push(eq(tablaProductos.categoria, categoria));
+      // }
 
-      if (activo !== undefined) {
-        conds.push(eq(tablaProductos.activo, activo));
-      }
+      // if (activo !== undefined) {
+      //   conds.push(eq(tablaProductos.activo, activo));
+      // }
 
       const whereClause = conds.length > 0 ? and(...conds) : undefined;
       const offset = Math.max(0, (page - 1) * pageSize);
@@ -1119,8 +1105,8 @@ export class DatabaseStorage implements IStorage {
         rows: productos.map(p => ({
           ...p,
           id: Number(p.id),
-          precio: p.precio ? Number(p.precio) : null,
-          inventario: p.inventario || 0,
+          // precio: p.precio ? Number(p.precio) : null, // Campo no existe
+          // inventario: p.inventario || 0, // Campo no existe
           fechaCreacion: p.createdAt,
           fechaActualizacion: p.updatedAt
         })),
@@ -1137,13 +1123,14 @@ export class DatabaseStorage implements IStorage {
   /** Obtiene las categorías únicas de productos. */
   async getProductCategories(): Promise<string[]> {
     try {
+      // Comentar hasta implementar campo categoria en products
       const result = await baseDatos
-        .selectDistinct({ categoria: tablaProductos.categoria })
+        .selectDistinct({ productType: tablaProductos.productType })
         .from(tablaProductos)
-        .where(isNotNull(tablaProductos.categoria));
+        .where(isNotNull(tablaProductos.productType));
 
       return result
-        .map(r => r.categoria)
+        .map(r => r.productType)
         .filter(Boolean)
         .sort() as string[];
     } catch (error) {
@@ -1152,55 +1139,46 @@ export class DatabaseStorage implements IStorage {
     }
   }
 
-  /** Crea un nuevo producto en el catálogo. */
-  async createProduct(datos: any): Promise<any> {
+  /** 
+   * Crea un nuevo producto Shopify (corregido para usar estructura real)
+   * NOTA: Esta función se mantiene para compatibilidad pero usa campos reales de products table
+   */
+  async createProduct(datos: InsertarProducto): Promise<Producto> {
     const [producto] = await baseDatos
       .insert(tablaProductos)
       .values({
-        nombre: datos.nombre,
-        sku: datos.sku,
-        descripcion: datos.descripcion,
-        precio: datos.precio ? String(datos.precio) : null,
-        categoria: datos.categoria,
-        marca: datos.marca,
-        activo: datos.activo ?? true,
-        inventario: datos.inventario ?? 0,
+        idShopify: datos.idShopify,
+        shopId: datos.shopId,
+        title: datos.title,
+        vendor: datos.vendor,
+        productType: datos.productType,
+        status: datos.status || 'active',
+        tags: datos.tags || [],
         createdAt: new Date(),
         updatedAt: new Date(),
       })
       .returning();
 
-    return {
-      ...producto,
-      id: Number(producto.id),
-      precio: producto.precio ? Number(producto.precio) : null,
-      fechaCreacion: producto.createdAt,
-      fechaActualizacion: producto.updatedAt
-    };
+    return producto;
   }
 
-  /** Actualiza un producto del catálogo. */
-  async updateProduct(id: number, datos: any): Promise<any> {
+  /** 
+   * Actualiza un producto Shopify (corregido para usar estructura real)
+   */
+  async updateProduct(id: number, updates: Partial<InsertarProducto>): Promise<Producto> {
     const [producto] = await baseDatos
       .update(tablaProductos)
       .set({
-        ...datos,
-        precio: datos.precio ? String(datos.precio) : undefined,
+        ...updates,
         updatedAt: new Date(),
       })
       .where(eq(tablaProductos.id, id))
       .returning();
 
-    return {
-      ...producto,
-      id: Number(producto.id),
-      precio: producto.precio ? Number(producto.precio) : null,
-      fechaCreacion: producto.createdAt,
-      fechaActualizacion: producto.updatedAt
-    };
+    return producto;
   }
 
-  /** Elimina un producto del catálogo. */
+  /** Elimina un producto Shopify. */
   async deleteProduct(id: number): Promise<void> {
     await baseDatos
       .delete(tablaProductos)

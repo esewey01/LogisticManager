@@ -695,24 +695,65 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/orders", requiereAutenticacion, async (req, res) => {
     try {
-      const datosOrden = insertOrderSchema.parse(req.body); // validación Zod
+      // Validación Zod con manejo de errores específicos
+      const datosOrden = insertOrderSchema.parse(req.body);
+      
+      // Generar ID único si no se proporciona (para compatibilidad con bigint)
+      if (!datosOrden.id) {
+        datosOrden.id = BigInt(Date.now() * 1000 + Math.floor(Math.random() * 1000));
+      }
+      
       const orden = await almacenamiento.createOrder(datosOrden);
       res.status(201).json(orden);
-    } catch {
-      res.status(400).json({ message: "Datos de orden inválidos" });
+    } catch (error: any) {
+      console.error("Error creating order:", error);
+      
+      if (error.name === 'ZodError') {
+        return res.status(400).json({ 
+          message: "Datos de orden inválidos",
+          errors: error.errors
+        });
+      }
+      
+      res.status(500).json({ 
+        message: "Error interno al crear la orden",
+        details: process.env.NODE_ENV === 'development' ? error.message : undefined
+      });
     }
   });
 
   app.patch("/api/orders/:id", requiereAutenticacion, async (req, res) => {
     try {
-      const id = Number(req.params.id);
-      if (Number.isNaN(id))
-        return res.status(400).json({ message: "ID de orden inválido" });
+      // Manejo correcto de bigint IDs
+      const id = req.params.id;
+      let numericId: bigint;
+      
+      try {
+        numericId = BigInt(id);
+      } catch (error) {
+        return res.status(400).json({ 
+          message: "ID de orden inválido",
+          details: "El ID debe ser un número válido"
+        });
+      }
 
-      const orden = await almacenamiento.updateOrder(id, req.body);
+      // Validar que la orden existe antes de actualizar
+      const existingOrder = await almacenamiento.getOrder(Number(numericId));
+      if (!existingOrder) {
+        return res.status(404).json({ 
+          message: "Orden no encontrada",
+          orderId: id
+        });
+      }
+
+      const orden = await almacenamiento.updateOrder(Number(numericId), req.body);
       res.json(orden);
-    } catch {
-      res.status(400).json({ message: "No se pudo actualizar la orden" });
+    } catch (error: any) {
+      console.error("Error updating order:", error);
+      res.status(500).json({ 
+        message: "Error interno al actualizar la orden",
+        details: process.env.NODE_ENV === 'development' ? error.message : undefined
+      });
     }
   });
 

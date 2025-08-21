@@ -252,39 +252,45 @@ export type InsertProductComboItem = typeof productComboItems.$inferInsert;
 
 // === ESQUEMAS ZOD (validación en rutas) ===
 // Se usan para validar cuerpo de peticiones en endpoints.
+// Schema corregido para inserción de órdenes - compatible con estructura real de DB
 export const insertOrderSchema = z.object({
-  // Campos originales (más flexibles)
-  orderId: z.string().optional(),
-  channelId: z.number().int().optional(),
+  // ID requerido (bigint)
+  id: z.union([z.bigint(), z.string(), z.number()]).optional(),
+  
+  // Campos obligatorios según DB
+  shopId: z.number().int().min(1).max(2),
+  orderId: z.string().min(1, "Order ID es requerido"),
+  
+  // Campos opcionales de cliente
   customerName: z.string().optional(),
+  customerEmail: z.string().optional(),
+  
+  // Campos de precio
+  subtotalPrice: z.string().optional(),
   totalAmount: z.string().optional(),
-  isManaged: z.boolean().optional().default(false),
-  hasTicket: z.boolean().optional().default(false),
-  status: z.string().optional().default("pending"),
-
-  // Campos Shopify (más flexibles)
-  idShopify: z.string().optional(),
-  shopId: z.number().int().optional(),
-  name: z.string().optional(),
-  orderNumber: z.string().optional(),
+  currency: z.string().default("MXN"),
+  
+  // Estados
   financialStatus: z.string().optional(),
   fulfillmentStatus: z.string().optional(),
-  currency: z.string().optional().default("MXN"),
-  subtotalPrice: z.string().optional(),
-  customerEmail: z.string().optional(),
-  customerFirstName: z.string().optional(),
-  customerLastName: z.string().optional(),
-  contactPhone: z.string().optional(),
-  shipName: z.string().optional(),
-  shipPhone: z.string().optional(),
-  shipAddress1: z.string().optional(),
-  shipCity: z.string().optional(),
-  shipProvince: z.string().optional(),
-  shipCountry: z.string().optional(),
-  shipZip: z.string().optional(),
-  tags: z.array(z.string()).optional().default([]),
-  orderNote: z.string().optional(),
-  cancelReason: z.string().optional(),
+  
+  // Metadatos
+  tags: z.array(z.string()).default([]),
+  noteAttributes: z.any().optional(),
+  
+  // Timestamps Shopify
+  createdAt: z.date().optional(),
+  shopifyCreatedAt: z.date().optional(),
+  shopifyUpdatedAt: z.date().optional(),
+  shopifyProcessedAt: z.date().optional(),
+  shopifyClosedAt: z.date().optional(),
+  shopifyCancelledAt: z.date().optional(),
+}).transform((data) => {
+  // Transformar ID a bigint si es necesario
+  if (data.id && typeof data.id !== 'bigint') {
+    data.id = typeof data.id === 'string' ? BigInt(data.id) : BigInt(data.id);
+  }
+  return data;
 });
 
 export const insertProductSchema = z.object({
