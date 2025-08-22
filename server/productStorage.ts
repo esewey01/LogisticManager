@@ -17,7 +17,10 @@ export class ProductStorage {
   
   // ================== CATÁLOGO ==================
   
-  /** Obtiene productos del catálogo con paginación y filtros avanzados */
+  /** 
+   * Obtiene productos del catálogo con paginación y filtros avanzados
+   * Corrección: Implementa búsqueda y filtros dinámicos correctamente
+   */
   async getCatalogProducts(params: {
     page: number;
     pageSize: number;
@@ -43,72 +46,111 @@ export class ProductStorage {
       orderDir = 'asc'
     } = params;
 
+    // Validación de parámetros de entrada
+    if (page < 1 || pageSize < 1 || pageSize > 1000) {
+      throw new Error("Parámetros de paginación inválidos");
+    }
+
     const offset = Math.max(0, (page - 1) * pageSize);
-    let whereConditions = ["1=1"];
-    let queryParams: any[] = [];
-    let paramIndex = 1;
-
-    // Búsqueda específica por campo
-    if (search && searchField) {
-      whereConditions.push(`LOWER(COALESCE(${searchField}, '')) LIKE LOWER($${paramIndex})`);
-      queryParams.push(`%${search}%`);
-      paramIndex++;
-    } else if (search) {
-      // Búsqueda general
-      whereConditions.push(`(
-        LOWER(COALESCE(sku, '')) LIKE LOWER($${paramIndex}) OR
-        LOWER(COALESCE(sku_interno, '')) LIKE LOWER($${paramIndex + 1}) OR
-        LOWER(COALESCE(codigo_barras, '')) LIKE LOWER($${paramIndex + 2}) OR
-        LOWER(COALESCE(nombre_producto, '')) LIKE LOWER($${paramIndex + 3})
-      )`);
-      const searchPattern = `%${search}%`;
-      queryParams.push(searchPattern, searchPattern, searchPattern, searchPattern);
-      paramIndex += 4;
-    }
-
-    // Filtros de facetas
-    if (marca) {
-      whereConditions.push(`marca = $${paramIndex}`);
-      queryParams.push(marca);
-      paramIndex++;
-    }
-    if (categoria) {
-      whereConditions.push(`categoria = $${paramIndex}`);
-      queryParams.push(categoria);
-      paramIndex++;
-    }
-    if (condicion) {
-      whereConditions.push(`condicion = $${paramIndex}`);
-      queryParams.push(condicion);
-      paramIndex++;
-    }
-    if (marca_producto) {
-      whereConditions.push(`marca_producto = $${paramIndex}`);
-      queryParams.push(marca_producto);
-      paramIndex++;
-    }
-
-    const whereClause = whereConditions.join(' AND ');
-    const orderClause = `ORDER BY ${orderBy} ${orderDir}`;
 
     try {
-      // Obtener productos usando SQL simple
-      const productos = await baseDatos.execute(sql`
+      // Construir consulta usando SQL directo para simplificar
+      let sqlQuery = `
         SELECT sku, marca, sku_interno, codigo_barras, nombre_producto, modelo, categoria, 
                condicion, marca_producto, variante, largo, ancho, alto, peso, foto, costo, stock
-        FROM catalogo_productos 
-        WHERE nombre_producto IS NOT NULL
-        ORDER BY nombre_producto
-        LIMIT ${pageSize} OFFSET ${offset}
-      `);
+        FROM catalogo_productos
+        WHERE 1=1
+      `;
+      const queryParams: any[] = [];
+      let paramCount = 0;
 
-      // Contar total
-      const totalResult = await baseDatos.execute(sql`
-        SELECT COUNT(*) as total 
-        FROM catalogo_productos 
-        WHERE nombre_producto IS NOT NULL
-      `);
+      // Aplicar filtros dinámicos usando SQL nativo
+      if (search) {
+        if (searchField && ['sku', 'sku_interno', 'codigo_barras', 'nombre_producto'].includes(searchField)) {
+          sqlQuery += ` AND LOWER(COALESCE(${searchField}, '')) LIKE LOWER($${++paramCount})`;
+          queryParams.push(`%${search.toLowerCase()}%`);
+        } else {
+          sqlQuery += ` AND (
+            LOWER(COALESCE(sku, '')) LIKE LOWER($${++paramCount}) OR
+            LOWER(COALESCE(sku_interno, '')) LIKE LOWER($${paramCount + 1}) OR
+            LOWER(COALESCE(codigo_barras, '')) LIKE LOWER($${paramCount + 2}) OR
+            LOWER(COALESCE(nombre_producto, '')) LIKE LOWER($${paramCount + 3})
+          )`;
+          const searchTerm = `%${search.toLowerCase()}%`;
+          queryParams.push(searchTerm, searchTerm, searchTerm, searchTerm);
+          paramCount += 4;
+        }
+      }
 
+      if (marca) {
+        sqlQuery += ` AND marca = $${++paramCount}`;
+        queryParams.push(marca);
+      }
+      if (categoria) {
+        sqlQuery += ` AND categoria = $${++paramCount}`;
+        queryParams.push(categoria);
+      }
+      if (condicion) {
+        sqlQuery += ` AND condicion = $${++paramCount}`;
+        queryParams.push(condicion);
+      }
+      if (marca_producto) {
+        sqlQuery += ` AND marca_producto = $${++paramCount}`;
+        queryParams.push(marca_producto);
+      }
+
+      // Aplicar ordenamiento (validar columna)
+      const validColumns = ['sku', 'nombre_producto', 'categoria', 'marca', 'marca_producto'];
+      const orderColumn = validColumns.includes(orderBy) ? orderBy : 'nombre_producto';
+      const orderDirection = orderDir === 'desc' ? 'DESC' : 'ASC';
+      
+      sqlQuery += ` ORDER BY ${orderColumn} ${orderDirection}`;
+      sqlQuery += ` LIMIT $${++paramCount} OFFSET $${++paramCount}`;
+      queryParams.push(pageSize, offset);
+
+      // Ejecutar consulta principal
+      const productos = await baseDatos.execute(sql.raw(sqlQuery, queryParams));
+
+      // Contar total con los mismos filtros
+      let countQuery = 'SELECT COUNT(*) as total FROM catalogo_productos WHERE 1=1';
+      const countParams: any[] = [];
+      let countParamCount = 0;
+
+      // Aplicar los mismos filtros para el conteo
+      if (search) {
+        if (searchField && ['sku', 'sku_interno', 'codigo_barras', 'nombre_producto'].includes(searchField)) {
+          countQuery += ` AND LOWER(COALESCE(${searchField}, '')) LIKE LOWER($${++countParamCount})`;
+          countParams.push(`%${search.toLowerCase()}%`);
+        } else {
+          countQuery += ` AND (
+            LOWER(COALESCE(sku, '')) LIKE LOWER($${++countParamCount}) OR
+            LOWER(COALESCE(sku_interno, '')) LIKE LOWER($${countParamCount + 1}) OR
+            LOWER(COALESCE(codigo_barras, '')) LIKE LOWER($${countParamCount + 2}) OR
+            LOWER(COALESCE(nombre_producto, '')) LIKE LOWER($${countParamCount + 3})
+          )`;
+          const searchTerm = `%${search.toLowerCase()}%`;
+          countParams.push(searchTerm, searchTerm, searchTerm, searchTerm);
+          countParamCount += 4;
+        }
+      }
+      if (marca) {
+        countQuery += ` AND marca = $${++countParamCount}`;
+        countParams.push(marca);
+      }
+      if (categoria) {
+        countQuery += ` AND categoria = $${++countParamCount}`;
+        countParams.push(categoria);
+      }
+      if (condicion) {
+        countQuery += ` AND condicion = $${++countParamCount}`;
+        countParams.push(condicion);
+      }
+      if (marca_producto) {
+        countQuery += ` AND marca_producto = $${++countParamCount}`;
+        countParams.push(marca_producto);
+      }
+
+      const totalResult = await baseDatos.execute(sql.raw(countQuery, countParams));
       const total = Number(totalResult.rows[0]?.total ?? 0);
 
       return {
@@ -129,15 +171,27 @@ export class ProductStorage {
           peso: p.peso ? Number(p.peso) : null,
           foto: p.foto,
           costo: p.costo ? Number(p.costo) : null,
-          stock: p.stock || 0,
+          stock: p.stock ? Number(p.stock) : 0,
         })),
         total,
         page,
-        pageSize
+        pageSize,
+        // Metadatos útiles para debugging
+        debug: process.env.NODE_ENV === 'development' ? {
+          appliedFilters: { search, searchField, marca, categoria, condicion, marca_producto },
+          orderBy: orderColumn,
+          orderDir
+        } : undefined
       };
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error getting catalog products:", error);
-      return { rows: [], total: 0, page, pageSize };
+      
+      // Manejo de errores específicos
+      if (error.message?.includes('column') && error.message?.includes('does not exist')) {
+        throw new Error(`Campo de ordenamiento inválido: ${orderBy}`);
+      }
+      
+      throw new Error(`Error al obtener productos del catálogo: ${error.message}`);
     }
   }
 

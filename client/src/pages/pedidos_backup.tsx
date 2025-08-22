@@ -13,6 +13,16 @@ import OrderDetailsModal from "@/components/modals/OrderDetailsModal";
 import OrderDetailsModalNew from "@/components/modals/OrderDetailsModalNew";
 import CancelOrderModal from "@/components/modals/CancelOrderModal";
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+
+
+import {
   Table,
   TableBody,
   TableCell,
@@ -44,6 +54,11 @@ type OrdersResp = {
 
 type Channel = { id: number | string; name: string; code?: string; color?: string; icon?: string };
 
+
+
+
+
+
 export default function Pedidos() {
   const [search, setSearch] = useState("");
   const [searchType, setSearchType] = useState<"all" | "sku" | "customer" | "product">("all");
@@ -59,42 +74,54 @@ export default function Pedidos() {
   const { toast } = useToast();
   const [sortField, setSortField] = useState<keyof OrderRow | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
+  const [sortOrder, setSortOrder] = useState<"asc" | "desc" | null>(null);
+  const [isSearchFocused, setIsSearchFocused] = useState(false);
 
-  // Query para obtener órdenes con los filtros aplicados
+  // TODO: si agregas filtros/paginación, ponlos aquí y en queryKey
+
   const { data: ordersResp, isLoading } = useQuery<OrdersResp>({
-    queryKey: ["/api/orders", { page, pageSize, search, searchType, statusFilter, channelFilter, sortField, sortOrder }],
+    queryKey: [
+      "/api/orders",
+      { page, pageSize, statusFilter, channelFilter, search, searchType, sortField, sortOrder },
+    ],
     queryFn: async () => {
       const params = new URLSearchParams({
-        page: page.toString(),
-        pageSize: pageSize.toString(),
+        page: String(page),
+        pageSize: String(pageSize),
+        statusFilter,
+        ...(channelFilter !== "all" && { channelId: channelFilter }),
         ...(search && { search }),
-        ...(searchType !== 'all' && { searchType }),
-        ...(statusFilter !== 'all' && { statusFilter }),
-        ...(channelFilter !== 'all' && { channelFilter }),
-        ...(sortField && { sortField, sortOrder })
+        ...(search && searchType !== "all" && { searchType }),
+        ...(sortField && { sortField }),
+        ...(sortOrder && { sortOrder }),
       });
-      
+
       const res = await apiRequest("GET", `/api/orders?${params}`);
       return res.json();
     },
-    refetchInterval: 30000,
   });
 
-  const orders = ordersResp?.rows ?? [];
-  const total = ordersResp?.total ?? 0;
+  const orders: OrderRow[] = ordersResp?.rows ?? [];
 
-  // Query para obtener canales
   const { data: channels = [] } = useQuery<Channel[]>({
     queryKey: ["/api/channels"],
     queryFn: async () => {
       const res = await apiRequest("GET", "/api/channels");
       return res.json();
-    }
+    },
+  });
+
+  const deleteOrderMutation = useMutation({
+    mutationFn: async ({ orderId, deleted }: { orderId: number | string; deleted: boolean }) => {
+      await apiRequest("PATCH", `/api/orders/${orderId}`, { status: deleted ? "DELETED" : null });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
+    },
   });
 
   const updateOrderMutation = useMutation({
-    mutationFn: async ({ orderId, updates }: { orderId: number | string; updates: Partial<OrderRow> }) => {
+    mutationFn: async ({ orderId, updates }: { orderId: number | string; updates: any }) => {
       await apiRequest("PATCH", `/api/orders/${orderId}`, updates);
     },
     onSuccess: () => {
@@ -269,6 +296,7 @@ export default function Pedidos() {
     }
   };
 
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -276,6 +304,8 @@ export default function Pedidos() {
       </div>
     );
   }
+
+
 
   return (
     <>
@@ -289,36 +319,89 @@ export default function Pedidos() {
       {/* Filters and Actions */}
       <Card className="mb-6">
         <CardContent className="p-6">
-          <div className="space-y-4">
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-              <Input
-                placeholder="Buscar pedidos..."
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                className="w-full"
-                data-testid="input-search"
-              />
+          <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between space-y-4 lg:space-y-0 lg:space-x-4">
+            <div className="flex flex-col sm:flex-row space-y-4 sm:space-y-0 sm:space-x-4 flex-1">
+              <div className="flex-1 relative">
+                <Input
+                  placeholder={
+                    searchType === "all" 
+                      ? "Buscar por cliente, SKU, o ID de pedido..."
+                      : searchType === "sku"
+                      ? "Buscar por SKU..."
+                      : searchType === "customer" 
+                      ? "Buscar por cliente..."
+                      : "Buscar por producto..."
+                  }
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  onFocus={() => setIsSearchFocused(true)}
+                  onBlur={() => setTimeout(() => setIsSearchFocused(false), 200)}
+                  className="w-full pr-10"
+                  data-testid="input-search"
+                />
+                <div className="absolute right-2 top-1/2 transform -translate-y-1/2">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-6 w-6 p-0"
+                    onClick={() => setIsSearchFocused(!isSearchFocused)}
+                  >
+                    <i className="fas fa-filter text-xs"></i>
+                  </Button>
+                </div>
+                {isSearchFocused && (
+                  <div className="absolute top-full left-0 right-0 bg-white border border-gray-200 rounded-b-md shadow-lg z-10 p-3 mt-1">
+                    <div className="text-xs font-medium text-gray-700 mb-2">Tipo de búsqueda:</div>
+                    <div className="grid grid-cols-4 gap-2">
+                      <Button
+                        variant={searchType === "all" ? "secondary" : "outline"}
+                        size="sm"
+                        onClick={() => setSearchType("all")}
+                        className="text-xs"
+                        data-testid="button-search-all"
+                      >
+                        Todo
+                      </Button>
+                      <Button
+                        variant={searchType === "sku" ? "secondary" : "outline"}
+                        size="sm"
+                        onClick={() => setSearchType("sku")}
+                        className="text-xs"
+                        data-testid="button-search-sku"
+                      >
+                        SKU
+                      </Button>
+                      <Button
+                        variant={searchType === "customer" ? "secondary" : "outline"}
+                        size="sm"
+                        onClick={() => setSearchType("customer")}
+                        className="text-xs"
+                        data-testid="button-search-customer"
+                      >
+                        Cliente
+                      </Button>
+                      <Button
+                        variant={searchType === "product" ? "secondary" : "outline"}
+                        size="sm"
+                        onClick={() => setSearchType("product")}
+                        className="text-xs"
+                        data-testid="button-search-product"
+                      >
+                        Producto
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </div>
 
-              <Select value={searchType} onValueChange={(value) => setSearchType(value as any)}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Tipo de búsqueda" />
+              <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as any)}>
+                <SelectTrigger className="w-full sm:w-56">
+                  <SelectValue placeholder="Estado de gestión" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">Buscar en todo</SelectItem>
-                  <SelectItem value="sku">Por SKU</SelectItem>
-                  <SelectItem value="customer">Por cliente</SelectItem>
-                  <SelectItem value="product">Por producto</SelectItem>
-                </SelectContent>
-              </Select>
-
-              <Select value={statusFilter} onValueChange={(value) => setStatusFilter(value as any)}>
-                <SelectTrigger className="w-full sm:w-48">
-                  <SelectValue placeholder="Filtrar por estado" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Todos los estados</SelectItem>
-                  <SelectItem value="unmanaged">Sin gestionar</SelectItem>
-                  <SelectItem value="managed">Gestionadas</SelectItem>
+                  <SelectItem value="unmanaged">Sin Gestionar</SelectItem>
+                  <SelectItem value="managed">Gestionados</SelectItem>
+                  <SelectItem value="all">Todos</SelectItem>
                 </SelectContent>
               </Select>
 
@@ -348,6 +431,8 @@ export default function Pedidos() {
                 Sincronizar ahora
               </Button>
 
+
+              
               {selectedOrders.length > 0 && (
                 <Button 
                   onClick={handleCreateTickets} 
@@ -467,66 +552,71 @@ export default function Pedidos() {
                       </div>
                     </TableCell>
                     <TableCell>
-                      <div className="flex items-center space-x-2">
-                        <div
-                          className="w-3 h-3 rounded-full"
-                          style={{ backgroundColor: channel.color }}
-                        />
-                        <span className="font-medium">{channel.code}</span>
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <span className="text-sm font-medium">{order.itemsCount}</span>
-                      <span className="text-xs text-gray-500 ml-1">productos</span>
-                    </TableCell>
-                    <TableCell>
-                      {order.totalAmount != null ? (
-                        <span className="font-medium">
-                          ${Number(order.totalAmount).toLocaleString()}
-                        </span>
-                      ) : (
-                        <span className="text-gray-400">--</span>
-                      )}
-                    </TableCell>
-                    <TableCell>
                       <Badge
-                        variant={
-                          order.uiStatus === "GESTIONADA"
-                            ? "default"
-                            : order.uiStatus === "SIN_GESTIONAR"
-                            ? "secondary"
-                            : "destructive"
-                        }
+                        style={{ backgroundColor: `${channel.color}20`, color: channel.color }}
+                        className="border-0"
                       >
-                        {order.uiStatus === "GESTIONADA"
-                          ? "Gestionada"
-                          : order.uiStatus === "SIN_GESTIONAR"
-                          ? "Sin gestionar"
-                          : "Error"}
+                        <i className={`${channel.icon} mr-1`}></i>
+                        {channel.code}
                       </Badge>
                     </TableCell>
-                    <TableCell className="text-sm text-gray-600">
+                    <TableCell>
+                      <div className="flex items-center space-x-1">
+                        <span>{order.itemsCount} items</span>
+                        {order.isCombo && (
+                          <Badge variant="secondary" className="text-xs">
+                            <i className="fas fa-box mr-1"></i>
+                            Combo
+                          </Badge>
+                        )}
+                      </div>
+                    </TableCell>
+                    <TableCell>${Number(order.totalAmount).toFixed(2)}</TableCell>
+                    <TableCell>
+                      {order.uiStatus === "GESTIONADA" && (
+                        <Badge variant="default">Gestionada</Badge>
+                      )}
+                      {order.uiStatus === "SIN_GESTIONAR" && (
+                        <Badge variant="destructive">Sin gestionar</Badge>
+                      )}
+                      {order.uiStatus === "ERROR" && (
+                        <Badge variant="outline" className="border-red-500 text-red-600">Error</Badge>
+                      )}
+                    </TableCell>
+
+                    <TableCell>
                       {new Date(order.createdAt).toLocaleDateString()}
                     </TableCell>
                     <TableCell>
                       <div className="flex space-x-2">
                         <Button
-                          variant="ghost"
                           size="sm"
+                          variant="outline"
                           onClick={() => setSelectedOrderId(String(order.id))}
-                          data-testid={`button-view-order-${order.id}`}
                         >
+                          <i className="fas fa-eye mr-1"></i>
                           Ver
                         </Button>
-
+                        {!order.isManaged && (
+                          <Button
+                            size="sm"
+                            onClick={() => updateOrderMutation.mutate({
+                              orderId: order.id,
+                              updates: { isManaged: true }
+                            })}
+                            disabled={updateOrderMutation.isPending}
+                          >
+                            <i className="fas fa-check mr-1"></i>
+                            {/* Gestionar */}
+                          </Button>
+                        )}
                         <Button
-                          variant="ghost"
                           size="sm"
+                          variant="destructive"
                           onClick={() => setCancelOrderId(order.id)}
-                          className="text-red-600 hover:text-red-800"
-                          data-testid={`button-cancel-order-${order.id}`}
                         >
-                          Cancelar
+                          <i className="fas fa-trash mr-1"></i>
+                          
                         </Button>
                       </div>
                     </TableCell>
@@ -536,6 +626,64 @@ export default function Pedidos() {
             </TableBody>
           </Table>
 
+          {ordersResp && (
+            <div className="flex items-center justify-between mt-4 text-sm">
+              <div className="text-gray-600">
+                Mostrando {(page - 1) * pageSize + 1}–
+                {Math.min(page * pageSize, ordersResp.total)} de {ordersResp.total} pedidos
+              </div>
+
+              <div className="flex items-center space-x-4">
+                {/* Selector de tamaño */}
+                <div className="flex items-center space-x-2">
+                  <label htmlFor="pageSize">Filas:</label>
+                  <Select
+                    value={String(pageSize)}
+                    onValueChange={(v) => {
+                      setPageSize(Number(v));
+                      setPage(1); // Reset a página 1 al cambiar tamaño
+                    }}
+                  >
+                    <SelectTrigger id="pageSize" className="w-20">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="50">50</SelectItem>
+                      <SelectItem value="100">100</SelectItem>
+                      <SelectItem value="150">150</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {/* Botones de paginación */}
+                <div className="flex items-center space-x-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setPage((p) => Math.max(1, p - 1))}
+                    disabled={page === 1}
+                  >
+                    Anterior
+                  </Button>
+                  <span className="px-2">
+                    Página {page} de {Math.ceil(ordersResp.total / pageSize)}
+                  </span>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      const totalPages = Math.ceil(ordersResp.total / pageSize);
+                      setPage((p) => Math.min(totalPages, p + 1));
+                    }}
+                    disabled={page >= Math.ceil(ordersResp.total / pageSize)}
+                  >
+                    Siguiente
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
+
           {filteredOrders.length === 0 && (
             <div className="text-center py-8">
               <p className="text-gray-500">No se encontraron pedidos que coincidan con los filtros.</p>
@@ -543,6 +691,8 @@ export default function Pedidos() {
           )}
         </CardContent>
       </Card>
+
+
 
       {selectedOrder && (
         <OrderDetailsModal

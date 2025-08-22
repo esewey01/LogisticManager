@@ -17,6 +17,7 @@ if (typeof _g.fetch !== "function") {
 // Importa Express y tipos para Tiposcript
 import express, { type Request, Response, NextFunction } from "express";
 import cors from "cors";
+import fileUpload from "express-fileupload";
 
 // Importa función que registra todas las rutas de la API
 import { registerRoutes } from "./routes";
@@ -46,6 +47,12 @@ aplicacion.use(express.json());
 
 // Middleware para parsear datos de formularios (application/x-www-form-urlencoded)
 aplicacion.use(express.urlencoded({ extended: true }));
+
+// Middleware para subida de archivos
+aplicacion.use(fileUpload({
+  limits: { fileSize: 50 * 1024 * 1024 }, // 50MB max
+  abortOnLimit: true
+}));
 
 
 // Middleware de logging personalizado - registra todas las peticiones

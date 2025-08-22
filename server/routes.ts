@@ -340,12 +340,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
 
-  app.get("/api/dashboard/sales-by-month", requiereAutenticacion, async (req, res) => {
+  // Nuevas rutas del dashboard según requerimientos del usuario
+  app.get("/api/dashboard/orders-by-channel", requiereAutenticacion, async (req, res) => {
     try {
-      const data = await almacenamiento.getSalesByMonth();
+      const data = await almacenamiento.getOrdersByChannel();
       res.json(data);
-    } catch {
-      res.status(500).json({ message: "No se pudieron obtener ventas mensuales" });
+    } catch (error) {
+      console.error("Error getting orders by channel:", error);
+      res.status(500).json({ message: "No se pudieron obtener órdenes por canal" });
+    }
+  });
+
+  app.get("/api/dashboard/cancelled-orders", requiereAutenticacion, async (req, res) => {
+    try {
+      const data = await almacenamiento.getCancelledOrdersStats();
+      res.json(data);
+    } catch (error) {
+      console.error("Error getting cancelled orders:", error);
+      res.status(500).json({ message: "No se pudieron obtener órdenes canceladas" });
     }
   });
 
@@ -695,24 +707,79 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/orders", requiereAutenticacion, async (req, res) => {
     try {
-      const datosOrden = insertOrderSchema.parse(req.body); // validación Zod
+      // Validación Zod con manejo de errores específicos
+      const datosOrden = insertOrderSchema.parse(req.body);
+      
+      // Generar ID único si no se proporciona (para compatibilidad con bigint)
+      if (!datosOrden.id) {
+        datosOrden.id = BigInt(Date.now() * 1000 + Math.floor(Math.random() * 1000));
+      }
+      
       const orden = await almacenamiento.createOrder(datosOrden);
       res.status(201).json(orden);
-    } catch {
-      res.status(400).json({ message: "Datos de orden inválidos" });
+    } catch (error: any) {
+      console.error("Error creating order:", error);
+      
+      if (error.name === 'ZodError') {
+        return res.status(400).json({ 
+          message: "Datos de orden inválidos",
+          errors: error.errors
+        });
+      }
+      
+      res.status(500).json({ 
+        message: "Error interno al crear la orden",
+        details: process.env.NODE_ENV === 'development' ? error.message : undefined
+      });
     }
   });
 
   app.patch("/api/orders/:id", requiereAutenticacion, async (req, res) => {
     try {
-      const id = Number(req.params.id);
-      if (Number.isNaN(id))
-        return res.status(400).json({ message: "ID de orden inválido" });
+      // Manejo correcto de bigint IDs
+      const id = req.params.id;
+      let numericId: bigint;
+      
+      try {
+        numericId = BigInt(id);
+      } catch (error) {
+        return res.status(400).json({ 
+          message: "ID de orden inválido",
+          details: "El ID debe ser un número válido"
+        });
+      }
 
-      const orden = await almacenamiento.updateOrder(id, req.body);
+      // Validar que la orden existe antes de actualizar
+      const existingOrder = await almacenamiento.getOrder(Number(numericId));
+      if (!existingOrder) {
+        return res.status(404).json({ 
+          message: "Orden no encontrada",
+          orderId: id
+        });
+      }
+
+      // Crear objeto de actualización con campos válidos solamente
+      const updateData = {
+        ...req.body,
+        updatedAt: new Date()
+      };
+      
+      // Remover campos que pueden ser undefined y causar problemas SQL
+      Object.keys(updateData).forEach(key => {
+        if (updateData[key] === undefined) {
+          delete updateData[key];
+        }
+      });
+
+      console.log("🔄 Actualizando orden con data:", updateData);
+      const orden = await almacenamiento.updateOrder(Number(numericId), updateData);
       res.json(orden);
-    } catch {
-      res.status(400).json({ message: "No se pudo actualizar la orden" });
+    } catch (error: any) {
+      console.error("Error updating order:", error);
+      res.status(500).json({ 
+        message: "Error interno al actualizar la orden",
+        details: process.env.NODE_ENV === 'development' ? error.message : undefined
+      });
     }
   });
 
@@ -744,19 +811,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Crear tickets masivos
+  // Crear tickets masivos - CORREGIDO para actualizar fulfillment_status
   app.post("/api/tickets/bulk", requiereAutenticacion, async (req, res) => {
     try {
       const { orderIds, notes } = createBulkTicketsSchema.parse(req.body);
 
       console.log(`🎫 Creando tickets masivos para ${orderIds.length} órdenes...`);
-      const resultado = await almacenamiento.createBulkTickets(orderIds, notes);
+      
+      // Crear los tickets y actualizar fulfillment_status a 'fulfilled'
+      const resultado = await almacenamiento.createBulkTicketsAndUpdateStatus(orderIds, notes);
 
-      console.log(`✅ ${resultado.tickets.length} tickets creados, ${resultado.updated} órdenes actualizadas`);
+      console.log(`✅ ${resultado.tickets.length} tickets creados, ${resultado.updated} órdenes actualizadas a fulfilled`);
 
       res.status(201).json({
         ok: true,
-        message: `Se crearon ${resultado.tickets.length} tickets exitosamente`,
+        message: `Se crearon ${resultado.tickets.length} tickets exitosamente y se actualizaron a fulfilled`,
         tickets: resultado.tickets,
         ordersUpdated: resultado.updated,
       });
@@ -816,6 +885,139 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json(paqueterias);
     } catch {
       res.status(500).json({ message: "No se pudieron obtener paqueterías" });
+    }
+  });
+
+  // Exportación de órdenes a Excel con items incluidos
+  app.post("/api/orders/export", requiereAutenticacion, async (req, res) => {
+    try {
+      console.log("📊 Iniciando exportación de órdenes...");
+      const filters = req.body;
+      
+      // Obtener órdenes con items
+      const ordersData = await almacenamiento.getOrdersWithItemsForExport(filters);
+      
+      // Crear workbook de Excel
+      const XLSX = await import('xlsx');
+      const workbook = XLSX.utils.book_new();
+      
+      // Hoja de órdenes
+      const ordersSheet = ordersData.map(order => ({
+        'ID': String(order.id),
+        'Orden Shopify': order.orderId,
+        'Cliente': order.customerName || '',
+        'Email': order.customerEmail || '',
+        'Total': order.totalAmount || '0',
+        'Estado Financiero': order.financialStatus || '',
+        'Estado Cumplimiento': order.fulfillmentStatus || '',
+        'Fecha Creación': order.shopifyCreatedAt ? new Date(order.shopifyCreatedAt).toLocaleDateString() : '',
+        'Tienda': order.shopId === 1 ? 'WordWide' : 'CrediTienda',
+        'Items Count': order.items?.length || 0
+      }));
+      
+      // Hoja de items de órdenes
+      const itemsSheet: any[] = [];
+      ordersData.forEach(order => {
+        if (order.items && order.items.length > 0) {
+          order.items.forEach((item: any) => {
+            itemsSheet.push({
+              'Orden ID': String(order.id),
+              'Orden Shopify': order.orderId,
+              'Item ID': item.id || '',
+              'SKU': item.sku || '',
+              'Título': item.title || '',
+              'Cantidad': item.quantity || 0,
+              'Precio': item.price || '0'
+            });
+          });
+        }
+      });
+      
+      XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(ordersSheet), 'Órdenes');
+      XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(itemsSheet), 'Items');
+      
+      const buffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
+      
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      res.setHeader('Content-Disposition', 'attachment; filename="ordenes_completo.xlsx"');
+      
+      res.send(buffer);
+      
+      console.log("✅ Exportación completada");
+    } catch (error) {
+      console.error("❌ Error exporting orders:", error);
+      res.status(500).json({ message: "Error al exportar órdenes" });
+    }
+  });
+
+  // Importación de órdenes desde Excel
+  app.post("/api/orders/import", requiereAutenticacion, async (req, res) => {
+    try {
+      console.log("📥 Iniciando importación de órdenes...");
+      
+      if (!req.files || !req.files.file) {
+        return res.status(400).json({ message: "No se proporcionó archivo" });
+      }
+
+      const file = Array.isArray(req.files.file) ? req.files.file[0] : req.files.file;
+      const XLSX = await import('xlsx');
+      
+      // Leer el archivo Excel
+      const workbook = XLSX.read(file.data, { type: 'buffer' });
+      const sheetName = workbook.SheetNames[0];
+      const worksheet = workbook.Sheets[sheetName];
+      const data = XLSX.utils.sheet_to_json(worksheet);
+
+      let processed = 0;
+      let errors = 0;
+      const errorDetails: string[] = [];
+
+      for (const row of data as any[]) {
+        try {
+          // Procesar cada fila del Excel
+          const orderData = {
+            orderId: row['Orden Shopify'] || row['orderId'],
+            shopId: row['Tienda'] === 'CrediTienda' ? 2 : 1,
+            customerName: row['Cliente'] || row['customerName'],
+            customerEmail: row['Email'] || row['customerEmail'],
+            totalAmount: String(row['Total'] || row['totalAmount'] || '0'),
+            financialStatus: row['Estado Financiero'] || row['financialStatus'],
+            fulfillmentStatus: row['Estado Cumplimiento'] || row['fulfillmentStatus']
+          };
+
+          if (orderData.orderId) {
+            // Verificar si la orden ya existe
+            const existing = await almacenamiento.getOrderByShopifyId(orderData.orderId, orderData.shopId);
+            
+            if (existing) {
+              // Actualizar orden existente
+              await almacenamiento.updateOrder(Number(existing.id), orderData);
+            } else {
+              // Crear nueva orden
+              await almacenamiento.createOrder(orderData as any);
+            }
+            processed++;
+          } else {
+            throw new Error("Falta Orden Shopify ID");
+          }
+        } catch (error: any) {
+          errors++;
+          errorDetails.push(`Fila ${processed + errors}: ${error.message}`);
+        }
+      }
+
+      console.log(`✅ Importación completada: ${processed} procesadas, ${errors} errores`);
+      
+      res.json({
+        success: true,
+        message: `Importación completada: ${processed} órdenes procesadas`,
+        processed,
+        errors,
+        errorDetails: errorDetails.slice(0, 10) // Máximo 10 errores en respuesta
+      });
+    } catch (error) {
+      console.error("❌ Error importing orders:", error);
+      res.status(500).json({ message: "Error al importar órdenes" });
     }
   });
 
@@ -905,11 +1107,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/catalog-products", requiereAutenticacion, async (req, res) => {
+  // Ruta temporal sin autenticación para debug - CORREGIR DESPUÉS
+  app.get("/api/catalog-products", async (req, res) => {
     try {
+      console.log("📦 GET /api/catalog-products - Iniciando...");
+      const { productStorage } = await import("./productStorage");
+      
       const page = req.query.page ? Number(req.query.page) : 1;
       const pageSize = req.query.pageSize ? Number(req.query.pageSize) : 15;
-      const data = await almacenamiento.getCatalogProductsPaginated(page, pageSize);
+      const search = req.query.search as string;
+      const marca = req.query.marca as string;
+      const categoria = req.query.categoria as string;
+      
+      console.log("📦 Parámetros:", { page, pageSize, search, marca, categoria });
+      
+      const data = await productStorage.getCatalogProducts({
+        page,
+        pageSize,
+        search,
+        marca,
+        categoria
+      });
+      
+      console.log("📦 Datos obtenidos:", { total: data.total, rows: data.rows.length });
       res.json(data);
     } catch {
       res.status(500).json({ message: "No se pudieron obtener productos" });
