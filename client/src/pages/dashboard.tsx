@@ -49,10 +49,20 @@ export default function Dashboard() {
   });
 
 
-  const { data: monthlyData } = useQuery<Array<{ month: string; sales: number }>>({
-    queryKey: ["/api/dashboard/sales-by-month"],
+  // Quitamos el gráfico de ventas según las instrucciones del usuario
+  const { data: channelData } = useQuery<Array<{ channelCode: string; channelName: string; orders: number }>>({
+    queryKey: ["/api/dashboard/orders-by-channel"],
     queryFn: async () => {
-      const res = await apiRequest("GET", "/api/dashboard/sales-by-month");
+      const res = await apiRequest("GET", "/api/dashboard/orders-by-channel");
+      return res.json();
+    },
+    refetchInterval: 30000,
+  });
+
+  const { data: cancelledData } = useQuery<{ count: number; percentage: number }>({
+    queryKey: ["/api/dashboard/cancelled-orders"],
+    queryFn: async () => {
+      const res = await apiRequest("GET", "/api/dashboard/cancelled-orders");
       return res.json();
     },
     refetchInterval: 30000,
@@ -216,23 +226,65 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* Gráfico de ventas mensuales */}
-        <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200 mb-8">
-          <h3 className="text-lg font-semibold text-gray-800 mb-4">Ventas por Mes (Últimos 12 meses)</h3>
-          {monthlyData && monthlyData.length > 0 ? (
-            <div className="space-y-3">
-              {monthlyData.slice(-6).map((item) => (
-                <div key={item.month} className="flex justify-between items-center p-3 bg-gray-50 rounded">
-                  <span className="font-medium text-gray-700">{item.month}</span>
-                  <span className="font-bold text-green-600">
-                    ${item.sales.toLocaleString()} MXN
-                  </span>
+        {/* Gráficos de análisis */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+          {/* Gráfico de órdenes por canal */}
+          <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200">
+            <h3 className="text-lg font-semibold text-gray-800 mb-4 flex items-center">
+              <FaChartPie className="mr-2 text-blue-600" />
+              Órdenes por Canal de Venta
+            </h3>
+            {channelData && channelData.length > 0 ? (
+              <div className="space-y-3">
+                {channelData.map((item, index) => (
+                  <div key={item.channelCode} className="flex justify-between items-center p-3 bg-gray-50 rounded">
+                    <div className="flex items-center">
+                      <div 
+                        className="w-4 h-4 rounded mr-3"
+                        style={{ 
+                          backgroundColor: index === 0 ? '#3B82F6' : index === 1 ? '#10B981' : '#F59E0B'
+                        }}
+                      ></div>
+                      <span className="font-medium text-gray-700">{item.channelName}</span>
+                    </div>
+                    <span className="font-bold text-gray-800">{item.orders} órdenes</span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="text-center text-gray-500">Cargando datos de canales...</div>
+            )}
+          </div>
+
+          {/* Estadísticas adicionales */}
+          <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200">
+            <h3 className="text-lg font-semibold text-gray-800 mb-4">Resumen de Estados</h3>
+            <div className="space-y-4">
+              <div className="flex justify-between items-center p-3 bg-green-50 rounded">
+                <div className="flex items-center">
+                  <FaCheckCircle className="text-green-600 mr-3" />
+                  <span className="text-gray-700">Gestionadas</span>
                 </div>
-              ))}
+                <span className="font-bold text-green-600">{metrics?.managed || 0}</span>
+              </div>
+              
+              <div className="flex justify-between items-center p-3 bg-yellow-50 rounded">
+                <div className="flex items-center">
+                  <FaExclamationTriangle className="text-yellow-600 mr-3" />
+                  <span className="text-gray-700">Sin Gestionar</span>
+                </div>
+                <span className="font-bold text-yellow-600">{metrics?.unmanaged || 0}</span>
+              </div>
+              
+              <div className="flex justify-between items-center p-3 bg-red-50 rounded">
+                <div className="flex items-center">
+                  <RotateCcw className="text-red-600 mr-3" />
+                  <span className="text-gray-700">Canceladas/Restock</span>
+                </div>
+                <span className="font-bold text-red-600">{cancelledData?.count || 0}</span>
+              </div>
             </div>
-          ) : (
-            <div className="text-center text-gray-500">Cargando datos de ventas...</div>
-          )}
+          </div>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">

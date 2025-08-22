@@ -517,6 +517,32 @@ export class DatabaseStorage implements IStorage {
     }));
   }
 
+  /** Obtiene estadísticas de órdenes canceladas/reabastecidas */
+  async getCancelledOrdersStats(): Promise<{ count: number; percentage: number }> {
+    try {
+      const result = await baseDatos.execute<{
+        cancelled_count: number;
+        total_count: number;
+      }>(sql`
+        SELECT 
+          COUNT(CASE WHEN LOWER(COALESCE(fulfillment_status, '')) = 'restocked' THEN 1 END)::int as cancelled_count,
+          COUNT(*)::int as total_count
+        FROM orders
+        WHERE created_at >= NOW() - INTERVAL '30 days'
+      `);
+
+      const row = result.rows[0];
+      const count = row?.cancelled_count || 0;
+      const total = row?.total_count || 1;
+      const percentage = total > 0 ? Math.round((count / total) * 100) : 0;
+
+      return { count, percentage };
+    } catch (error) {
+      console.error("Error getting cancelled orders stats:", error);
+      return { count: 0, percentage: 0 };
+    }
+  }
+
   /** Obtiene una orden por ID de Shopify y tienda. */
   async getOrderByShopifyId(
     shopifyId: string,
@@ -1183,6 +1209,94 @@ export class DatabaseStorage implements IStorage {
     await baseDatos
       .delete(tablaProductos)
       .where(eq(tablaProductos.id, id));
+  }
+
+  /** Crea tickets masivos y actualiza fulfillment_status a fulfilled */
+  async createBulkTicketsAndUpdateStatus(orderIds: (string | number)[], notes?: string): Promise<{
+    tickets: Ticket[];
+    updated: number;
+  }> {
+    try {
+      const tickets: Ticket[] = [];
+      let updated = 0;
+
+      for (const orderId of orderIds) {
+        const numericOrderId = typeof orderId === 'string' ? parseInt(orderId) : orderId;
+        
+        // Crear ticket
+        const numeroTicket = await this.getNextTicketNumber();
+        const ticket = await this.createTicket({
+          orderId: numericOrderId,
+          ticketNumber: numeroTicket,
+          status: 'open',
+          notes: notes || `Ticket creado automáticamente para orden ${numericOrderId}`
+        });
+        
+        tickets.push(ticket);
+        
+        // Actualizar orden a fulfilled
+        await this.updateOrder(numericOrderId, {
+          fulfillmentStatus: 'fulfilled',
+          updatedAt: new Date()
+        });
+        
+        updated++;
+      }
+
+      return { tickets, updated };
+    } catch (error) {
+      console.error("Error en createBulkTicketsAndUpdateStatus:", error);
+      throw error;
+    }
+  }
+
+  /** Obtiene órdenes con items para exportación */
+  async getOrdersWithItemsForExport(filters: any): Promise<any[]> {
+    try {
+      const result = await baseDatos.execute(sql`
+        SELECT 
+          o.id,
+          o.order_id as "orderId",
+          o.customer_name as "customerName",
+          o.customer_email as "customerEmail", 
+          o.total_amount as "totalAmount",
+          o.financial_status as "financialStatus",
+          o.fulfillment_status as "fulfillmentStatus",
+          o.shopify_created_at as "shopifyCreatedAt",
+          o.shop_id as "shopId",
+          -- Agregar items como JSON
+          COALESCE(
+            JSON_AGG(
+              JSON_BUILD_OBJECT(
+                'id', oi.id,
+                'sku', oi.sku,
+                'title', oi.title,
+                'quantity', oi.quantity,
+                'price', oi.price
+              )
+            ) FILTER (WHERE oi.id IS NOT NULL),
+            '[]'::json
+          ) as items
+        FROM orders o
+        LEFT JOIN order_items oi ON o.id = oi.order_id
+        WHERE 1=1
+        ${filters?.statusFilter === 'managed' ? sql`AND LOWER(COALESCE(o.fulfillment_status, '')) = 'fulfilled'` : sql``}
+        ${filters?.statusFilter === 'unmanaged' ? sql`AND LOWER(COALESCE(o.fulfillment_status, '')) IN ('', 'unfulfilled')` : sql``}
+        ${filters?.channelId ? sql`AND o.shop_id = ${filters.channelId}` : sql``}
+        GROUP BY o.id, o.order_id, o.customer_name, o.customer_email, o.total_amount, 
+                 o.financial_status, o.fulfillment_status, o.shopify_created_at, o.shop_id
+        ORDER BY o.shopify_created_at DESC
+        LIMIT 1000
+      `);
+
+      return result.rows.map((row: any) => ({
+        ...row,
+        items: typeof row.items === 'string' ? JSON.parse(row.items) : row.items
+      }));
+    } catch (error) {
+      console.error("Error getting orders with items for export:", error);
+      return [];
+    }
   }
 
   // ==== ÓRDENES PAGINADAS ====
