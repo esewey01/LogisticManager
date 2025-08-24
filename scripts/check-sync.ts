@@ -1,22 +1,18 @@
 import "dotenv/config";
 import { Client } from "pg";
-import { OrderSyncService } from "../server/services/OrderSyncService";
+import { getOrdersCount } from "../server/syncShopifyOrders";
 
 async function shopifyCount(store: number) {
-  const svc = new OrderSyncService(String(store));
-  const { count } = await svc.getOrdersCount();
-  return count || 0;
+  const r = await getOrdersCount(store);
+  return r.count || 0;
 }
 
 async function dbStats(store: number) {
   const c = new Client({ connectionString: process.env.DATABASE_URL!, ssl: { rejectUnauthorized: false } });
   await c.connect();
-  const one = await c.query(
-    "SELECT COUNT(*)::int AS n FROM orders WHERE shop_id=$1",
-    [store]
-  );
+  const one = await c.query("SELECT COUNT(*)::int AS n FROM orders WHERE shop_id=$1", [store]);
   const two = await c.query(
-    "SELECT COUNT(DISTINCT id_shopify)::int AS n FROM orders WHERE shop_id=$1",
+    "SELECT COUNT(DISTINCT order_id)::int AS n FROM orders WHERE shop_id=$1",
     [store]
   );
   const three = await c.query(
@@ -28,7 +24,7 @@ async function dbStats(store: number) {
   await c.end();
   return {
     dbOrders: one.rows[0].n,
-    dbDistinctShopifyIds: two.rows[0].n,
+    dbDistinctOrderIds: two.rows[0].n,
     ordersWithoutItems: three.rows[0].n,
   };
 }
@@ -55,8 +51,8 @@ async function main() {
     console.table({
       shopifyCount: sc,
       dbOrders: db.dbOrders,
-      dbDistinctShopifyIds: db.dbDistinctShopifyIds,
-      duplicates: db.dbOrders - db.dbDistinctShopifyIds,
+      dbDistinctOrderIds: db.dbDistinctOrderIds,
+      duplicates: db.dbOrders - db.dbDistinctOrderIds,
       ordersWithoutItems: db.ordersWithoutItems,
     });
   }

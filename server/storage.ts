@@ -1165,44 +1165,7 @@ export class DatabaseStorage implements IStorage {
     }
   }
 
-  /** 
-   * Crea un nuevo producto Shopify (corregido para usar estructura real)
-   * NOTA: Esta función se mantiene para compatibilidad pero usa campos reales de products table
-   */
-  async createProduct(datos: InsertarProducto): Promise<Producto> {
-    const [producto] = await baseDatos
-      .insert(tablaProductos)
-      .values({
-        idShopify: datos.idShopify,
-        shopId: datos.shopId,
-        title: datos.title,
-        vendor: datos.vendor,
-        productType: datos.productType,
-        status: datos.status || 'active',
-        tags: datos.tags || [],
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      })
-      .returning();
 
-    return producto;
-  }
-
-  /** 
-   * Actualiza un producto Shopify (corregido para usar estructura real)
-   */
-  async updateProduct(id: number, updates: Partial<InsertarProducto>): Promise<Producto> {
-    const [producto] = await baseDatos
-      .update(tablaProductos)
-      .set({
-        ...updates,
-        updatedAt: new Date(),
-      })
-      .where(eq(tablaProductos.id, id))
-      .returning();
-
-    return producto;
-  }
 
   /** Elimina un producto Shopify. */
   async deleteProduct(id: number): Promise<void> {
@@ -1222,7 +1185,7 @@ export class DatabaseStorage implements IStorage {
 
       for (const orderId of orderIds) {
         const numericOrderId = typeof orderId === 'string' ? parseInt(orderId) : orderId;
-        
+
         // Crear ticket
         const numeroTicket = await this.getNextTicketNumber();
         const ticket = await this.createTicket({
@@ -1231,15 +1194,15 @@ export class DatabaseStorage implements IStorage {
           status: 'open',
           notes: notes || `Ticket creado automáticamente para orden ${numericOrderId}`
         });
-        
+
         tickets.push(ticket);
-        
+
         // Actualizar orden a fulfilled
         await this.updateOrder(numericOrderId, {
           fulfillmentStatus: 'fulfilled',
           updatedAt: new Date()
         });
-        
+
         updated++;
       }
 
@@ -1302,7 +1265,7 @@ export class DatabaseStorage implements IStorage {
   // ==== ÓRDENES PAGINADAS ====
   async getOrdersPaginated(params: {
     statusFilter: "unmanaged" | "managed" | "all";
-    channelId?: number;
+    channelId?: number; // ✅ Este nombre es correcto
     page: number;
     pageSize: number;
     search?: string;
@@ -1326,10 +1289,10 @@ export class DatabaseStorage implements IStorage {
         );
       }
 
-      // Filtro por canal (campo no existe en DB real, omitir por ahora)
-      // if (channelId !== undefined) {
-      //   conds.push(sql`o.channel_id = ${channelId}`);
-      // }
+      // ✅ FILTRO POR CANAL ACTIVADO Y CORREGIDO
+      if (channelId !== undefined && channelId !== null) {
+        conds.push(sql`o.shop_id = ${channelId}`); // ✅ Usar shop_id en lugar de channel_id
+      }
 
       // Búsqueda textual mejorada con soporte para tipos específicos
       if (search) {
@@ -1338,45 +1301,45 @@ export class DatabaseStorage implements IStorage {
         if (searchType === "sku") {
           conds.push(
             sql`EXISTS (
-              SELECT 1 FROM order_items oi2 
-              WHERE oi2.order_id = o.id 
-              AND LOWER(COALESCE(oi2.sku, '')) LIKE ${searchPattern}
-            )`
+            SELECT 1 FROM order_items oi2 
+            WHERE oi2.order_id = o.id 
+            AND LOWER(COALESCE(oi2.sku, '')) LIKE ${searchPattern}
+          )`
           );
         } else if (searchType === "customer") {
           conds.push(
             sql`(
-              LOWER(COALESCE(o.customer_name, '')) LIKE ${searchPattern} OR 
-              LOWER(COALESCE(o.customer_email, '')) LIKE ${searchPattern}
-            )`
+            LOWER(COALESCE(o.customer_name, '')) LIKE ${searchPattern} OR 
+            LOWER(COALESCE(o.customer_email, '')) LIKE ${searchPattern}
+          )`
           );
         } else if (searchType === "product") {
           conds.push(
             sql`EXISTS (
-              SELECT 1 FROM order_items oi2 
-              WHERE oi2.order_id = o.id 
-              AND (
-                LOWER(COALESCE(oi2.title, '')) LIKE ${searchPattern} OR
-                LOWER(COALESCE(oi2.variant_title, '')) LIKE ${searchPattern}
-              )
-            )`
+            SELECT 1 FROM order_items oi2 
+            WHERE oi2.order_id = o.id 
+            AND (
+              LOWER(COALESCE(oi2.title, '')) LIKE ${searchPattern} OR
+              LOWER(COALESCE(oi2.variant_title, '')) LIKE ${searchPattern}
+            )
+          )`
           );
         } else { // "all" or default
           conds.push(
             sql`(
-              LOWER(COALESCE(o.order_id, '')) LIKE ${searchPattern} OR 
-              LOWER(COALESCE(o.customer_name, '')) LIKE ${searchPattern} OR 
-              LOWER(COALESCE(o.customer_email, '')) LIKE ${searchPattern} OR
-              EXISTS (
-                SELECT 1 FROM order_items oi2 
-                WHERE oi2.order_id = o.id 
-                AND (
-                  LOWER(COALESCE(oi2.sku, '')) LIKE ${searchPattern} OR
-                  LOWER(COALESCE(oi2.title, '')) LIKE ${searchPattern} OR
-                  LOWER(COALESCE(oi2.variant_title, '')) LIKE ${searchPattern}
-                )
+            LOWER(COALESCE(o.order_id, '')) LIKE ${searchPattern} OR 
+            LOWER(COALESCE(o.customer_name, '')) LIKE ${searchPattern} OR 
+            LOWER(COALESCE(o.customer_email, '')) LIKE ${searchPattern} OR
+            EXISTS (
+              SELECT 1 FROM order_items oi2 
+              WHERE oi2.order_id = o.id 
+              AND (
+                LOWER(COALESCE(oi2.sku, '')) LIKE ${searchPattern} OR
+                LOWER(COALESCE(oi2.title, '')) LIKE ${searchPattern} OR
+                LOWER(COALESCE(oi2.variant_title, '')) LIKE ${searchPattern}
               )
-            )`
+            )
+          )`
           );
         }
       }
@@ -1390,47 +1353,47 @@ export class DatabaseStorage implements IStorage {
 
       // Query usando SOLO campos que existen en la estructura real de DB
       const baseQuery = sql`
-        SELECT 
-          o.id::text as id,
-          COALESCE(o.name, o.order_id, '') as name,
-          COALESCE(o.customer_name, '') as "customerName",
-          o.shop_id as "channelId",
-          CASE 
-            WHEN o.shop_id = 1 THEN 'Tienda 1'
-            WHEN o.shop_id = 2 THEN 'Tienda 2'
-            ELSE 'Tienda ' || o.shop_id::text
-          END as "channelName", 
-          COALESCE(o.total_amount, '0') as "totalAmount",
-          COALESCE(o.fulfillment_status, '') as "fulfillmentStatus",
-          COALESCE(o.shopify_created_at, o.created_at, NOW()) as "createdAt",
-          COALESCE(COUNT(oi.id), 0) as "itemsCount",
-          COALESCE(ARRAY_AGG(oi.sku) FILTER (WHERE oi.sku IS NOT NULL), ARRAY[]::text[]) as skus,
-          CASE
-            WHEN LOWER(COALESCE(o.fulfillment_status, '')) IN ('', 'unfulfilled') THEN 'SIN_GESTIONAR'
-            WHEN LOWER(COALESCE(o.fulfillment_status, '')) = 'fulfilled' THEN 'GESTIONADA'
-            WHEN LOWER(COALESCE(o.fulfillment_status, '')) = 'restocked' THEN 'DEVUELTO'
-            ELSE 'ERROR'
-          END as "uiStatus",
-          EXISTS(SELECT 1 FROM tickets t WHERE t.order_id = o.id) as "hasTicket",
-          CASE 
-            WHEN LOWER(COALESCE(o.fulfillment_status, '')) = 'fulfilled' THEN true
-            ELSE false
-          END as "isManaged"
-        FROM orders o
-        LEFT JOIN order_items oi ON oi.order_id = o.id
-        ${whereClause ? sql`WHERE ${whereClause}` : sql``}
-        GROUP BY o.id, o.order_id, o.name, o.customer_name, o.total_amount, 
-                 o.fulfillment_status, o.shopify_created_at, o.created_at, o.shop_id
-        ORDER BY COALESCE(o.shopify_created_at, o.created_at) DESC
-        LIMIT ${pageSize} OFFSET ${offset}
-      `;
+      SELECT 
+        o.id::text as id,
+        COALESCE(o.name, o.order_id, '') as name,
+        COALESCE(o.customer_name, '') as "customerName",
+        o.shop_id as "channelId",
+        CASE 
+          WHEN o.shop_id = 1 THEN 'Tienda 1'
+          WHEN o.shop_id = 2 THEN 'Tienda 2'
+          ELSE 'Tienda ' || o.shop_id::text
+        END as "channelName", 
+        COALESCE(o.total_amount, '0') as "totalAmount",
+        COALESCE(o.fulfillment_status, '') as "fulfillmentStatus",
+        COALESCE(o.shopify_created_at, o.created_at, NOW()) as "createdAt",
+        COALESCE(COUNT(oi.id), 0) as "itemsCount",
+        COALESCE(ARRAY_AGG(oi.sku) FILTER (WHERE oi.sku IS NOT NULL), ARRAY[]::text[]) as skus,
+        CASE
+          WHEN LOWER(COALESCE(o.fulfillment_status, '')) IN ('', 'unfulfilled') THEN 'SIN_GESTIONAR'
+          WHEN LOWER(COALESCE(o.fulfillment_status, '')) = 'fulfilled' THEN 'GESTIONADA'
+          WHEN LOWER(COALESCE(o.fulfillment_status, '')) = 'restocked' THEN 'DEVUELTO'
+          ELSE 'ERROR'
+        END as "uiStatus",
+        EXISTS(SELECT 1 FROM tickets t WHERE t.order_id = o.id) as "hasTicket",
+        CASE 
+          WHEN LOWER(COALESCE(o.fulfillment_status, '')) = 'fulfilled' THEN true
+          ELSE false
+        END as "isManaged"
+      FROM orders o
+      LEFT JOIN order_items oi ON oi.order_id = o.id
+      ${whereClause ? sql`WHERE ${whereClause}` : sql``}
+      GROUP BY o.id, o.order_id, o.name, o.customer_name, o.total_amount, 
+               o.fulfillment_status, o.shopify_created_at, o.created_at, o.shop_id
+      ORDER BY COALESCE(o.shopify_created_at, o.created_at) DESC
+      LIMIT ${pageSize} OFFSET ${offset}
+    `;
 
       // Query para contar total simplificado
       const countQuery = sql`
-        SELECT COUNT(DISTINCT o.id) as count
-        FROM orders o
-        ${whereClause ? sql`WHERE ${whereClause}` : sql``}
-      `;
+      SELECT COUNT(DISTINCT o.id) as count
+      FROM orders o
+      ${whereClause ? sql`WHERE ${whereClause}` : sql``}
+    `;
 
       console.log(`📊 Ejecutando queries...`);
 
@@ -1491,22 +1454,7 @@ export class DatabaseStorage implements IStorage {
     }
   }
 
-  // Productos paginados por tienda
-  async getProductsPaginated(shopId: number, page: number, pageSize: number) {
-    const offset = (page - 1) * pageSize;
-    const rows = await baseDatos
-      .select()
-      .from(tablaProductos)
-      .where(eq(tablaProductos.shopId, shopId))
-      .orderBy(asc(tablaProductos.title))
-      .limit(pageSize)
-      .offset(offset);
-    const totalRes = await baseDatos
-      .select({ count: count() })
-      .from(tablaProductos)
-      .where(eq(tablaProductos.shopId, shopId));
-    return { rows, total: Number(totalRes[0]?.count ?? 0), page, pageSize };
-  }
+  
 
   async getCatalogProductsPaginated(page: number, pageSize: number) {
     const offset = (page - 1) * pageSize;

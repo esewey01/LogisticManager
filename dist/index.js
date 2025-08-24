@@ -1,8 +1,1092 @@
 var __defProp = Object.defineProperty;
+var __getOwnPropNames = Object.getOwnPropertyNames;
+var __esm = (fn, res) => function __init() {
+  return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
+};
 var __export = (target, all) => {
   for (var name in all)
     __defProp(target, name, { get: all[name], enumerable: true });
 };
+
+// shared/schema.ts
+var schema_exports = {};
+__export(schema_exports, {
+  brands: () => brands,
+  canales: () => channels,
+  carriers: () => carriers,
+  catalogProducts: () => catalogProducts,
+  catalogoProductos: () => catalogoProductos,
+  channels: () => channels,
+  createBulkTicketsSchema: () => createBulkTicketsSchema,
+  externalProducts: () => externalProducts,
+  insertNoteSchema: () => insertNoteSchema,
+  insertOrderSchema: () => insertOrderSchema,
+  insertProductSchema: () => insertProductSchema,
+  insertTicketSchema: () => insertTicketSchema,
+  insertVariantSchema: () => insertVariantSchema,
+  marcas: () => brands,
+  notas: () => notes,
+  notes: () => notes,
+  ordenes: () => orders,
+  orderItems: () => orderItems,
+  orders: () => orders,
+  paqueterias: () => carriers,
+  productComboItems: () => productComboItems,
+  productLinks: () => productLinks,
+  productosCatalogo: () => catalogProducts,
+  products: () => products,
+  reglasEnvio: () => shippingRules,
+  shippingRules: () => shippingRules,
+  shopifyJobs: () => shopifyJobs,
+  tickets: () => tickets,
+  ticketsTabla: () => tickets,
+  users: () => users,
+  usuarios: () => users,
+  variants: () => variants
+});
+import { pgTable, serial, text, boolean, timestamp, integer, decimal, bigint, json, varchar, jsonb } from "drizzle-orm/pg-core";
+import { z } from "zod";
+var users, brands, catalogProducts, catalogoProductos, channels, carriers, orders, orderItems, tickets, shippingRules, notes, products, externalProducts, variants, productComboItems, insertOrderSchema, insertProductSchema, insertVariantSchema, insertTicketSchema, createBulkTicketsSchema, insertNoteSchema, productLinks, shopifyJobs;
+var init_schema = __esm({
+  "shared/schema.ts"() {
+    "use strict";
+    users = pgTable("users", {
+      id: serial("id").primaryKey(),
+      // ID autoincremental (PK)
+      email: text("email").notNull().unique(),
+      // correo único (login)
+      password: text("password").notNull(),
+      // hash de contraseña
+      firstName: text("first_name"),
+      // nombre (opcional)
+      lastName: text("last_name"),
+      // apellido (opcional)
+      role: text("role").notNull().default("user"),
+      // rol: user | admin
+      lastLogin: timestamp("last_login"),
+      // último acceso
+      createdAt: timestamp("created_at").defaultNow(),
+      updatedAt: timestamp("updated_at")
+    });
+    brands = pgTable("brands", {
+      id: serial("id").primaryKey(),
+      name: text("name").notNull(),
+      // nombre visible
+      code: text("code").notNull().unique(),
+      // código corto único
+      isActive: boolean("is_active").notNull().default(true),
+      createdAt: timestamp("created_at").defaultNow(),
+      updatedAt: timestamp("updated_at")
+    });
+    catalogProducts = pgTable("catalog_products", {
+      id: serial("id").primaryKey(),
+      sku: text("sku").notNull().unique(),
+      // SKU único
+      brandId: integer("brand_id").notNull(),
+      // referencia a brands.id (no FK explícita aquí)
+      nombreProducto: text("name").notNull(),
+      // nombre del producto
+      description: text("description"),
+      // descripción (opcional)
+      price: decimal("price"),
+      // precio de venta (opcional)
+      cost: decimal("cost"),
+      // costo (opcional)
+      weight: decimal("weight"),
+      // peso (opcional)
+      dimensions: text("dimensions"),
+      // dimensiones (opcional)
+      isActive: boolean("is_active").notNull().default(true),
+      createdAt: timestamp("created_at").defaultNow(),
+      updatedAt: timestamp("updated_at")
+    });
+    catalogoProductos = pgTable("catalogo_productos", {
+      skuInterno: text("sku_interno").primaryKey().unique(),
+      // SKU interno único
+      sku: text("sku"),
+      // SKU externo
+      nombreProducto: text("nombre_producto"),
+      // nombre del producto
+      marca: text("marca"),
+      // marca
+      modelo: text("modelo"),
+      // modelo
+      categoria: text("categoria"),
+      // categoría
+      marcaProducto: text("marca_producto"),
+      // marca del producto
+      variante: text("variante"),
+      // variante
+      codigoBarras: text("codigo_barras"),
+      // código de barras
+      foto: text("foto"),
+      // URL de la foto
+      peso: decimal("peso"),
+      // peso
+      alto: decimal("alto"),
+      // altura
+      ancho: decimal("ancho"),
+      // ancho
+      largo: decimal("largo"),
+      // largo
+      condicion: text("condicion"),
+      // condición
+      stock: integer("stock"),
+      // stock disponible
+      costo: decimal("costo"),
+      // costo
+      situacion: text("situacion")
+      // situación
+    });
+    channels = pgTable("channels", {
+      id: serial("id").primaryKey(),
+      code: text("code").notNull().unique(),
+      // código corto único del canal
+      name: text("name").notNull(),
+      // nombre del canal
+      color: text("color"),
+      // color para UI (hex)
+      icon: text("icon"),
+      // icono para UI (clase o nombre)
+      isActive: boolean("is_active").notNull().default(true),
+      createdAt: timestamp("created_at").defaultNow(),
+      updatedAt: timestamp("updated_at")
+    });
+    carriers = pgTable("carriers", {
+      id: serial("id").primaryKey(),
+      name: text("name").notNull(),
+      // nombre visible
+      code: text("code").notNull().unique(),
+      // código único (ej. DHL)
+      apiEndpoint: text("api_endpoint"),
+      // endpoint API (si aplica)
+      isActive: boolean("is_active").notNull().default(true),
+      createdAt: timestamp("created_at").defaultNow(),
+      updatedAt: timestamp("updated_at")
+    });
+    orders = pgTable("orders", {
+      id: bigint("id", { mode: "bigint" }).generatedAlwaysAsIdentity().primaryKey(),
+      // << AUTOGENERATED // BIGSERIAL PRIMARY KEY
+      shopId: integer("shop_id").notNull(),
+      // INT NOT NULL ← importante
+      orderId: text("order_id").notNull(),
+      // TEXT NOT NULL (ID externo de la plataforma)
+      name: text("name"),
+      orderNumber: text("order_number"),
+      customerName: text("customer_name"),
+      // TEXT
+      customerEmail: text("customer_email"),
+      // TEXT
+      subtotalPrice: decimal("subtotal_price"),
+      // NUMERIC
+      totalAmount: decimal("total_amount"),
+      // NUMERIC
+      currency: text("currency"),
+      // TEXT
+      financialStatus: text("financial_status"),
+      // TEXT
+      fulfillmentStatus: text("fulfillment_status"),
+      // TEXT
+      tags: text("tags").array(),
+      // TEXT[]
+      noteAttributes: json("note_attributes"),
+      // JSONB
+      createdAt: timestamp("created_at"),
+      // TIMESTAMP
+      shopifyCreatedAt: timestamp("shopify_created_at", { withTimezone: true }),
+      // TIMESTAMPTZ
+      shopifyUpdatedAt: timestamp("shopify_updated_at", { withTimezone: true }),
+      // TIMESTAMPTZ
+      shopifyProcessedAt: timestamp("shopify_processed_at", { withTimezone: true }),
+      // TIMESTAMPTZ
+      shopifyClosedAt: timestamp("shopify_closed_at", { withTimezone: true }),
+      // TIMESTAMPTZ
+      shopifyCancelledAt: timestamp("shopify_cancelled_at", { withTimezone: true })
+      // TIMESTAMPTZ
+    });
+    orderItems = pgTable("order_items", {
+      id: serial("id").primaryKey(),
+      // SERIAL PRIMARY KEY
+      orderId: bigint("order_id", { mode: "bigint" }).notNull(),
+      // BIGINT NOT NULL (FK a orders.id con ON DELETE CASCADE)
+      sku: text("sku"),
+      // TEXT
+      quantity: integer("quantity").notNull(),
+      // INT NOT NULL
+      price: decimal("price"),
+      // NUMERIC
+      shopifyProductId: text("shopify_product_id"),
+      // TEXT
+      shopifyVariantId: text("shopify_variant_id")
+      // TEXT
+    });
+    tickets = pgTable("tickets", {
+      id: serial("id").primaryKey(),
+      // SERIAL PRIMARY KEY
+      ticketNumber: text("ticket_number").unique().notNull(),
+      // TEXT UNIQUE NOT NULL
+      orderId: integer("order_id").notNull(),
+      // INTEGER NOT NULL (FK a orders.id con ON DELETE CASCADE)
+      status: text("status").notNull().default("open"),
+      // TEXT NOT NULL DEFAULT 'open'
+      notes: text("notes"),
+      // TEXT
+      createdAt: timestamp("created_at").defaultNow(),
+      // TIMESTAMP DEFAULT now()
+      updatedAt: timestamp("updated_at")
+      // TIMESTAMP
+    });
+    shippingRules = pgTable("shipping_rules", {
+      id: serial("id").primaryKey(),
+      name: text("name").notNull(),
+      // nombre de la regla
+      condition: text("condition").notNull(),
+      // expresión/condición (definición libre)
+      carrierId: integer("carrier_id").notNull(),
+      // referencia a carriers.id
+      service: text("service"),
+      // nombre del servicio (si aplica)
+      cost: decimal("cost"),
+      // costo estimado
+      estimatedDays: integer("estimated_days"),
+      // días estimados de entrega
+      isActive: boolean("is_active").notNull().default(true),
+      createdAt: timestamp("created_at").defaultNow(),
+      updatedAt: timestamp("updated_at")
+    });
+    notes = pgTable("notes", {
+      id: serial("id").primaryKey(),
+      userId: integer("user_id").notNull(),
+      // usuario propietario de la nota
+      content: text("content").notNull(),
+      // contenido de la nota
+      createdAt: timestamp("created_at").defaultNow(),
+      updatedAt: timestamp("updated_at").defaultNow()
+    });
+    products = pgTable("products", {
+      id: serial("id").primaryKey(),
+      idShopify: text("id_shopify").notNull(),
+      // ID de Shopify
+      shopId: integer("shop_id").notNull(),
+      // 1 o 2 (tienda)
+      title: text("title").notNull(),
+      // título del producto
+      vendor: text("vendor"),
+      // proveedor/marca
+      productType: text("product_type"),
+      // tipo de producto
+      status: text("status").notNull().default("active"),
+      // active, draft
+      tags: text("tags").array(),
+      // etiquetas (array)
+      createdAt: timestamp("created_at").defaultNow(),
+      updatedAt: timestamp("updated_at")
+    });
+    externalProducts = pgTable("external_products", {
+      id: serial("id").primaryKey(),
+      sku: text("sku").notNull().unique(),
+      prod: text("name").notNull(),
+      createdAt: timestamp("created_at").defaultNow()
+    });
+    variants = pgTable("variants", {
+      id: serial("id").primaryKey(),
+      productId: integer("product_id"),
+      // referencia a products.id
+      idShopify: text("id_shopify"),
+      // ID de variante en Shopify
+      sku: text("sku"),
+      // SKU de la variante
+      price: decimal("price"),
+      // precio de venta
+      compareAtPrice: decimal("compare_at_price"),
+      // precio de comparación
+      barcode: text("barcode"),
+      // código de barras
+      inventoryQty: integer("inventory_qty"),
+      // cantidad en inventario
+      createdAt: timestamp("created_at"),
+      updatedAt: timestamp("updated_at")
+    });
+    productComboItems = pgTable("product_combo_items", {
+      id: serial("id").primaryKey(),
+      productComboId: integer("product_combo_id").notNull(),
+      // producto que es combo
+      productSimpleId: integer("product_simple_id").notNull(),
+      // producto componente
+      qty: integer("qty").notNull().default(1),
+      // cantidad del componente
+      createdAt: timestamp("created_at").defaultNow()
+    });
+    insertOrderSchema = z.object({
+      // ID requerido (bigint)
+      id: z.union([z.bigint(), z.string(), z.number()]).optional(),
+      // Campos obligatorios según DB
+      shopId: z.number().int().min(1).max(2),
+      orderId: z.string().min(1, "Order ID es requerido"),
+      // Campos opcionales de cliente
+      customerName: z.string().optional(),
+      customerEmail: z.string().optional(),
+      // Campos de precio
+      subtotalPrice: z.string().optional(),
+      totalAmount: z.string().optional(),
+      currency: z.string().default("MXN"),
+      // Estados
+      financialStatus: z.string().optional(),
+      fulfillmentStatus: z.string().optional(),
+      // Metadatos
+      tags: z.array(z.string()).default([]),
+      noteAttributes: z.any().optional(),
+      // Timestamps Shopify
+      createdAt: z.date().optional(),
+      shopifyCreatedAt: z.date().optional(),
+      shopifyUpdatedAt: z.date().optional(),
+      shopifyProcessedAt: z.date().optional(),
+      shopifyClosedAt: z.date().optional(),
+      shopifyCancelledAt: z.date().optional()
+    }).transform((data) => {
+      if (data.id && typeof data.id !== "bigint") {
+        data.id = typeof data.id === "string" ? BigInt(data.id) : BigInt(data.id);
+      }
+      return data;
+    });
+    insertProductSchema = z.object({
+      idShopify: z.string().min(1, "ID de Shopify requerido"),
+      shopId: z.number().int().min(1).max(2, "Shop ID debe ser 1 o 2"),
+      title: z.string().min(1, "T\xEDtulo requerido"),
+      vendor: z.string().optional(),
+      productType: z.string().optional(),
+      status: z.enum(["active", "draft"]).default("active"),
+      tags: z.array(z.string()).optional().default([])
+    });
+    insertVariantSchema = z.object({
+      idShopify: z.string().min(1, "ID de Shopify requerido"),
+      productId: z.number().int().positive("Product ID requerido"),
+      sku: z.string().optional(),
+      price: z.string().optional(),
+      compareAtPrice: z.string().optional(),
+      barcode: z.string().optional(),
+      inventoryQty: z.number().int().optional()
+    });
+    insertTicketSchema = z.object({
+      ticketNumber: z.string().optional(),
+      orderId: z.number().int().positive("El ID de la orden debe ser un n\xFAmero positivo"),
+      status: z.string().default("open"),
+      notes: z.string().optional()
+    });
+    createBulkTicketsSchema = z.object({
+      orderIds: z.array(z.union([z.number().int().positive(), z.string().min(1)])).min(1, "Debe seleccionar al menos una orden"),
+      notes: z.string().optional()
+    });
+    insertNoteSchema = z.object({
+      text: z.string().min(1, "El contenido es obligatorio"),
+      date: z.string().optional()
+    });
+    productLinks = pgTable("product_links", {
+      id: serial("id").primaryKey(),
+      catalogoSku: varchar("catalogo_sku", { length: 100 }).notNull(),
+      shopifyVariantId: varchar("shopify_variant_id", { length: 100 }),
+      shopifyProductId: varchar("shopify_product_id", { length: 100 }),
+      variantId: integer("variant_id").references(() => variants.id),
+      productId: integer("product_id").references(() => products.id),
+      matchStatus: varchar("match_status", { length: 20 }).default("pending"),
+      // 'matched', 'conflict', 'missing'
+      syncStatus: varchar("sync_status", { length: 20 }).default("pending"),
+      // 'synced', 'error', 'pending'
+      errorMessage: text("error_message"),
+      lastSyncAt: timestamp("last_sync_at"),
+      createdAt: timestamp("created_at").defaultNow(),
+      updatedAt: timestamp("updated_at").defaultNow(),
+      createdBy: integer("created_by").references(() => users.id),
+      updatedBy: integer("updated_by").references(() => users.id)
+    });
+    shopifyJobs = pgTable("shopify_jobs", {
+      id: serial("id").primaryKey(),
+      shopId: integer("shop_id").notNull(),
+      jobType: varchar("job_type", { length: 50 }).notNull(),
+      // 'update_product', 'update_variant', 'create_product'
+      shopifyProductId: varchar("shopify_product_id", { length: 100 }),
+      shopifyVariantId: varchar("shopify_variant_id", { length: 100 }),
+      payload: jsonb("payload").notNull(),
+      status: varchar("status", { length: 20 }).default("pending"),
+      // 'pending', 'processing', 'completed', 'failed'
+      attempts: integer("attempts").default(0),
+      maxAttempts: integer("max_attempts").default(3),
+      errorMessage: text("error_message"),
+      processedAt: timestamp("processed_at"),
+      scheduledFor: timestamp("scheduled_for").defaultNow(),
+      createdAt: timestamp("created_at").defaultNow()
+    });
+  }
+});
+
+// server/db.ts
+import { Pool } from "pg";
+import { drizzle } from "drizzle-orm/node-postgres";
+import "dotenv/config";
+var pool, u, db;
+var init_db = __esm({
+  "server/db.ts"() {
+    "use strict";
+    init_schema();
+    if (!process.env.DATABASE_URL) {
+      throw new Error("DATABASE_URL no definida/encontrada");
+    }
+    pool = new Pool({
+      connectionString: process.env.DATABASE_URL,
+      ssl: { rejectUnauthorized: false }
+    });
+    u = new URL(process.env.DATABASE_URL);
+    console.log("[DB] Conectando a:", u.hostname);
+    db = drizzle(pool, { schema: schema_exports });
+  }
+});
+
+// server/catalogStorage.ts
+var catalogStorage_exports = {};
+__export(catalogStorage_exports, {
+  CatalogStorage: () => CatalogStorage,
+  catalogStorage: () => catalogStorage
+});
+import { sql as sql2 } from "drizzle-orm";
+var CatalogStorage, catalogStorage;
+var init_catalogStorage = __esm({
+  "server/catalogStorage.ts"() {
+    "use strict";
+    init_db();
+    CatalogStorage = class {
+      /** Obtiene productos del catálogo paginados con filtros. */
+      async getProductsPaginated(params) {
+        const { page, pageSize, search, categoria, activo } = params;
+        try {
+          const offset = Math.max(0, (page - 1) * pageSize);
+          let whereConditions = ["1=1"];
+          let params_array = [];
+          let paramIndex = 1;
+          if (search) {
+            whereConditions.push(`(
+          LOWER(COALESCE(nombre_producto, '')) LIKE LOWER($${paramIndex}) OR
+          LOWER(COALESCE(sku, '')) LIKE LOWER($${paramIndex + 1}) OR
+          LOWER(COALESCE(marca_producto, '')) LIKE LOWER($${paramIndex + 2})
+        )`);
+            const searchPattern = `%${search}%`;
+            params_array.push(searchPattern, searchPattern, searchPattern);
+            paramIndex += 3;
+          }
+          if (categoria) {
+            whereConditions.push(`categoria = $${paramIndex}`);
+            params_array.push(categoria);
+            paramIndex++;
+          }
+          if (activo !== void 0) {
+            whereConditions.push(`situacion = $${paramIndex}`);
+            params_array.push(activo ? "activo" : "inactivo");
+            paramIndex++;
+          }
+          const whereClause = whereConditions.join(" AND ");
+          const productos = await db.execute(sql2`
+        SELECT sku, marca, nombre_producto, categoria, marca_producto, 
+               stock, costo, situacion, sku_interno, codigo_barras
+        FROM catalogo_productos 
+        WHERE nombre_producto IS NOT NULL
+        ORDER BY nombre_producto
+        LIMIT ${pageSize} OFFSET ${offset}
+      `);
+          const totalResult = await db.execute(sql2`
+        SELECT COUNT(*) as total 
+        FROM catalogo_productos 
+        WHERE nombre_producto IS NOT NULL
+      `);
+          const total = Number(totalResult.rows[0]?.total ?? 0);
+          return {
+            rows: productos.rows.map((p) => ({
+              id: p.sku,
+              // Usar SKU como ID único
+              nombre: p.nombre_producto,
+              sku: p.sku,
+              categoria: p.categoria,
+              marca: p.marca_producto,
+              precio: p.costo ? Number(p.costo) : null,
+              inventario: p.stock || 0,
+              activo: p.situacion === "activo",
+              sku_interno: p.sku_interno,
+              codigo_barras: p.codigo_barras
+            })),
+            total,
+            page,
+            pageSize
+          };
+        } catch (error) {
+          console.error("Error getting products paginated:", error);
+          return { rows: [], total: 0, page, pageSize };
+        }
+      }
+      /** Obtiene las categorías únicas de productos del catálogo. */
+      async getProductCategories() {
+        try {
+          const result = await db.execute(sql2`
+        SELECT DISTINCT categoria 
+        FROM catalogo_productos 
+        WHERE categoria IS NOT NULL 
+        ORDER BY categoria
+      `);
+          return result.rows.map((r) => r.categoria).filter(Boolean);
+        } catch (error) {
+          console.error("Error getting product categories:", error);
+          return [];
+        }
+      }
+      /** Crea un nuevo producto en el catálogo. */
+      async createProduct(datos) {
+        try {
+          await db.execute(sql2`
+        INSERT INTO catalogo_productos (
+          sku, nombre_producto, categoria, marca_producto, stock, costo, situacion
+        ) VALUES (
+          ${datos.sku}, 
+          ${datos.nombre}, 
+          ${datos.categoria || null}, 
+          ${datos.marca || null}, 
+          ${datos.inventario || 0}, 
+          ${datos.precio || null}, 
+          ${datos.activo ? "activo" : "inactivo"}
+        )
+      `);
+          return {
+            id: datos.sku,
+            nombre: datos.nombre,
+            sku: datos.sku,
+            categoria: datos.categoria,
+            marca: datos.marca,
+            precio: datos.precio,
+            inventario: datos.inventario || 0,
+            activo: datos.activo ?? true
+          };
+        } catch (error) {
+          console.error("Error creating product:", error);
+          throw error;
+        }
+      }
+      /** Actualiza un producto del catálogo. */
+      async updateProduct(id, datos) {
+        try {
+          await db.execute(sql2`
+        UPDATE catalogo_productos 
+        SET 
+          nombre_producto = ${datos.nombre || null},
+          categoria = ${datos.categoria || null},
+          marca_producto = ${datos.marca || null},
+          stock = ${datos.inventario || 0},
+          costo = ${datos.precio || null},
+          situacion = ${datos.activo ? "activo" : "inactivo"}
+        WHERE sku = ${id}
+      `);
+          return {
+            id,
+            nombre: datos.nombre,
+            sku: id,
+            categoria: datos.categoria,
+            marca: datos.marca,
+            precio: datos.precio,
+            inventario: datos.inventario || 0,
+            activo: datos.activo ?? true
+          };
+        } catch (error) {
+          console.error("Error updating product:", error);
+          throw error;
+        }
+      }
+      /** Elimina un producto del catálogo. */
+      async deleteProduct(id) {
+        try {
+          await db.execute(sql2`
+        DELETE FROM catalogo_productos WHERE sku = ${id}
+      `);
+        } catch (error) {
+          console.error("Error deleting product:", error);
+          throw error;
+        }
+      }
+    };
+    catalogStorage = new CatalogStorage();
+  }
+});
+
+// server/productStorage.ts
+var productStorage_exports = {};
+__export(productStorage_exports, {
+  ProductStorage: () => ProductStorage,
+  productStorage: () => productStorage
+});
+import { sql as sql3 } from "drizzle-orm";
+import { eq as eq4 } from "drizzle-orm";
+var ProductStorage, productStorage;
+var init_productStorage = __esm({
+  "server/productStorage.ts"() {
+    "use strict";
+    init_db();
+    init_schema();
+    ProductStorage = class {
+      // ================== CATÁLOGO ==================
+      /** 
+       * Obtiene productos del catálogo con paginación y filtros avanzados
+       * Corrección: Implementa búsqueda y filtros dinámicos correctamente
+       */
+      async getCatalogProducts(params) {
+        const {
+          page,
+          pageSize,
+          search,
+          searchField,
+          marca,
+          categoria,
+          condicion,
+          marca_producto,
+          orderBy = "nombre_producto",
+          orderDir = "asc"
+        } = params;
+        if (page < 1 || pageSize < 1 || pageSize > 1e3) {
+          throw new Error("Par\xE1metros de paginaci\xF3n inv\xE1lidos");
+        }
+        const offset = Math.max(0, (page - 1) * pageSize);
+        try {
+          let sqlQuery = `
+        SELECT sku, marca, sku_interno, codigo_barras, nombre_producto, modelo, categoria, 
+               condicion, marca_producto, variante, largo, ancho, alto, peso, foto, costo, stock
+        FROM catalogo_productos
+        WHERE 1=1
+      `;
+          const queryParams = [];
+          let paramCount = 0;
+          if (search) {
+            if (searchField && ["sku", "sku_interno", "codigo_barras", "nombre_producto"].includes(searchField)) {
+              sqlQuery += ` AND LOWER(COALESCE(${searchField}, '')) LIKE LOWER($${++paramCount})`;
+              queryParams.push(`%${search.toLowerCase()}%`);
+            } else {
+              sqlQuery += ` AND (
+            LOWER(COALESCE(sku, '')) LIKE LOWER($${++paramCount}) OR
+            LOWER(COALESCE(sku_interno, '')) LIKE LOWER($${paramCount + 1}) OR
+            LOWER(COALESCE(codigo_barras, '')) LIKE LOWER($${paramCount + 2}) OR
+            LOWER(COALESCE(nombre_producto, '')) LIKE LOWER($${paramCount + 3})
+          )`;
+              const searchTerm = `%${search.toLowerCase()}%`;
+              queryParams.push(searchTerm, searchTerm, searchTerm, searchTerm);
+              paramCount += 4;
+            }
+          }
+          if (marca) {
+            sqlQuery += ` AND marca = $${++paramCount}`;
+            queryParams.push(marca);
+          }
+          if (categoria) {
+            sqlQuery += ` AND categoria = $${++paramCount}`;
+            queryParams.push(categoria);
+          }
+          if (condicion) {
+            sqlQuery += ` AND condicion = $${++paramCount}`;
+            queryParams.push(condicion);
+          }
+          if (marca_producto) {
+            sqlQuery += ` AND marca_producto = $${++paramCount}`;
+            queryParams.push(marca_producto);
+          }
+          const validColumns = ["sku", "nombre_producto", "categoria", "marca", "marca_producto"];
+          const orderColumn = validColumns.includes(orderBy) ? orderBy : "nombre_producto";
+          const orderDirection = orderDir === "desc" ? "DESC" : "ASC";
+          sqlQuery += ` ORDER BY ${orderColumn} ${orderDirection}`;
+          sqlQuery += ` LIMIT $${++paramCount} OFFSET $${++paramCount}`;
+          queryParams.push(pageSize, offset);
+          const productos = await db.execute(sql3.raw(sqlQuery, queryParams));
+          let countQuery = "SELECT COUNT(*) as total FROM catalogo_productos WHERE 1=1";
+          const countParams = [];
+          let countParamCount = 0;
+          if (search) {
+            if (searchField && ["sku", "sku_interno", "codigo_barras", "nombre_producto"].includes(searchField)) {
+              countQuery += ` AND LOWER(COALESCE(${searchField}, '')) LIKE LOWER($${++countParamCount})`;
+              countParams.push(`%${search.toLowerCase()}%`);
+            } else {
+              countQuery += ` AND (
+            LOWER(COALESCE(sku, '')) LIKE LOWER($${++countParamCount}) OR
+            LOWER(COALESCE(sku_interno, '')) LIKE LOWER($${countParamCount + 1}) OR
+            LOWER(COALESCE(codigo_barras, '')) LIKE LOWER($${countParamCount + 2}) OR
+            LOWER(COALESCE(nombre_producto, '')) LIKE LOWER($${countParamCount + 3})
+          )`;
+              const searchTerm = `%${search.toLowerCase()}%`;
+              countParams.push(searchTerm, searchTerm, searchTerm, searchTerm);
+              countParamCount += 4;
+            }
+          }
+          if (marca) {
+            countQuery += ` AND marca = $${++countParamCount}`;
+            countParams.push(marca);
+          }
+          if (categoria) {
+            countQuery += ` AND categoria = $${++countParamCount}`;
+            countParams.push(categoria);
+          }
+          if (condicion) {
+            countQuery += ` AND condicion = $${++countParamCount}`;
+            countParams.push(condicion);
+          }
+          if (marca_producto) {
+            countQuery += ` AND marca_producto = $${++countParamCount}`;
+            countParams.push(marca_producto);
+          }
+          const totalResult = await db.execute(sql3.raw(countQuery, countParams));
+          const total = Number(totalResult.rows[0]?.total ?? 0);
+          return {
+            rows: productos.rows.map((p) => ({
+              sku: p.sku,
+              marca: p.marca,
+              sku_interno: p.sku_interno,
+              codigo_barras: p.codigo_barras,
+              nombre_producto: p.nombre_producto,
+              modelo: p.modelo,
+              categoria: p.categoria,
+              condicion: p.condicion,
+              marca_producto: p.marca_producto,
+              variante: p.variante,
+              largo: p.largo ? Number(p.largo) : null,
+              ancho: p.ancho ? Number(p.ancho) : null,
+              alto: p.alto ? Number(p.alto) : null,
+              peso: p.peso ? Number(p.peso) : null,
+              foto: p.foto,
+              costo: p.costo ? Number(p.costo) : null,
+              stock: p.stock ? Number(p.stock) : 0
+            })),
+            total,
+            page,
+            pageSize,
+            // Metadatos útiles para debugging
+            debug: process.env.NODE_ENV === "development" ? {
+              appliedFilters: { search, searchField, marca, categoria, condicion, marca_producto },
+              orderBy: orderColumn,
+              orderDir
+            } : void 0
+          };
+        } catch (error) {
+          console.error("Error getting catalog products:", error);
+          if (error.message?.includes("column") && error.message?.includes("does not exist")) {
+            throw new Error(`Campo de ordenamiento inv\xE1lido: ${orderBy}`);
+          }
+          throw new Error(`Error al obtener productos del cat\xE1logo: ${error.message}`);
+        }
+      }
+      /** Actualiza un producto del catálogo */
+      async updateCatalogProduct(sku, updates) {
+        try {
+          const updateFields = Object.keys(updates);
+          if (updateFields.length === 0) return { success: true };
+          await db.execute(sql3`
+        UPDATE catalogo_productos 
+        SET nombre_producto = ${updates.nombre_producto || null}
+        WHERE sku = ${sku}
+      `);
+          return { success: true };
+        } catch (error) {
+          console.error("Error updating catalog product:", error);
+          throw error;
+        }
+      }
+      /** Obtiene facetas únicas para filtros */
+      async getCatalogFacets() {
+        try {
+          const [marcas, categorias, condiciones, marcasProducto] = await Promise.all([
+            db.execute(sql3`SELECT DISTINCT marca FROM catalogo_productos WHERE marca IS NOT NULL ORDER BY marca`),
+            db.execute(sql3`SELECT DISTINCT categoria FROM catalogo_productos WHERE categoria IS NOT NULL ORDER BY categoria`),
+            db.execute(sql3`SELECT DISTINCT condicion FROM catalogo_productos WHERE condicion IS NOT NULL ORDER BY condicion`),
+            db.execute(sql3`SELECT DISTINCT marca_producto FROM catalogo_productos WHERE marca_producto IS NOT NULL ORDER BY marca_producto`)
+          ]);
+          return {
+            marcas: marcas.rows.map((r) => r.marca),
+            categorias: categorias.rows.map((r) => r.categoria),
+            condiciones: condiciones.rows.map((r) => r.condicion),
+            marcasProducto: marcasProducto.rows.map((r) => r.marca_producto)
+          };
+        } catch (error) {
+          console.error("Error getting catalog facets:", error);
+          return { marcas: [], categorias: [], condiciones: [], marcasProducto: [] };
+        }
+      }
+      // ================== SHOPIFY ==================
+      /** Obtiene productos Shopify con variantes paginados */
+      async getShopifyProducts(params) {
+        const { page, pageSize, search, shopId, status, vendor, productType, syncStatus } = params;
+        const offset = Math.max(0, (page - 1) * pageSize);
+        try {
+          let whereConditions = ["1=1"];
+          let queryParams = [];
+          let paramIndex = 1;
+          if (search) {
+            whereConditions.push(`(
+          LOWER(COALESCE(p.title, '')) LIKE LOWER($${paramIndex}) OR
+          LOWER(COALESCE(v.sku, '')) LIKE LOWER($${paramIndex + 1}) OR
+          LOWER(COALESCE(v.barcode, '')) LIKE LOWER($${paramIndex + 2})
+        )`);
+            const searchPattern = `%${search}%`;
+            queryParams.push(searchPattern, searchPattern, searchPattern);
+            paramIndex += 3;
+          }
+          if (shopId) {
+            whereConditions.push(`p.shop_id = $${paramIndex}`);
+            queryParams.push(shopId);
+            paramIndex++;
+          }
+          if (status) {
+            whereConditions.push(`p.status = $${paramIndex}`);
+            queryParams.push(status);
+            paramIndex++;
+          }
+          if (vendor) {
+            whereConditions.push(`p.vendor = $${paramIndex}`);
+            queryParams.push(vendor);
+            paramIndex++;
+          }
+          if (productType) {
+            whereConditions.push(`p.product_type = $${paramIndex}`);
+            queryParams.push(productType);
+            paramIndex++;
+          }
+          const whereClause = whereConditions.join(" AND ");
+          const productos = await db.execute(sql3`
+        SELECT 
+          p.id as product_id,
+          p.id_shopify as shopify_product_id,
+          p.shop_id,
+          p.title,
+          p.vendor,
+          p.product_type,
+          p.status as product_status,
+          v.id as variant_id,
+          v.id_shopify as shopify_variant_id,
+          v.sku,
+          v.price,
+          v.compare_at_price,
+          v.barcode,
+          v.inventory_qty,
+          CASE 
+            WHEN p.shop_id = 1 THEN 'WordWide'
+            WHEN p.shop_id = 2 THEN 'CrediTienda'
+            ELSE 'Tienda ' || p.shop_id::text
+          END as shop_name
+        FROM products p
+        LEFT JOIN variants v ON v.product_id = p.id
+        ORDER BY p.title, v.sku
+        LIMIT ${pageSize} OFFSET ${offset}
+      `);
+          const totalResult = await db.execute(sql3`
+        SELECT COUNT(DISTINCT p.id) as total 
+        FROM products p
+        LEFT JOIN variants v ON v.product_id = p.id
+      `);
+          const total = Number(totalResult.rows[0]?.total ?? 0);
+          return {
+            rows: productos.rows.map((row) => ({
+              product_id: row.product_id,
+              shopify_product_id: row.shopify_product_id,
+              shop_id: row.shop_id,
+              shop_name: row.shop_name,
+              title: row.title,
+              vendor: row.vendor,
+              product_type: row.product_type,
+              product_status: row.product_status,
+              variant_id: row.variant_id,
+              shopify_variant_id: row.shopify_variant_id,
+              sku: row.sku,
+              price: row.price ? Number(row.price) : null,
+              compare_at_price: row.compare_at_price ? Number(row.compare_at_price) : null,
+              barcode: row.barcode,
+              inventory_qty: row.inventory_qty || 0
+            })),
+            total,
+            page,
+            pageSize
+          };
+        } catch (error) {
+          console.error("Error getting Shopify products:", error);
+          return { rows: [], total: 0, page, pageSize };
+        }
+      }
+      /** Actualiza una variante Shopify */
+      async updateShopifyVariant(variantId, updates, userId) {
+        try {
+          const [variant] = await db.update(variants).set({
+            ...updates,
+            updatedAt: /* @__PURE__ */ new Date()
+          }).where(eq4(variants.id, variantId)).returning();
+          if (variant) {
+            await this.enqueueShopifyJob({
+              shopId: await this.getShopIdByVariant(variantId),
+              jobType: "update_variant",
+              shopifyVariantId: variant.idShopify,
+              payload: updates
+            });
+          }
+          return variant;
+        } catch (error) {
+          console.error("Error updating Shopify variant:", error);
+          throw error;
+        }
+      }
+      // ================== CONCILIACIÓN ==================
+      /** Obtiene estadísticas de conciliación */
+      async getReconciliationStats() {
+        try {
+          const [emparejados, faltantes, conflictos] = await Promise.all([
+            db.execute(sql3`
+          SELECT COUNT(*) as count 
+          FROM product_links 
+          WHERE match_status = 'matched'
+        `),
+            db.execute(sql3`
+          SELECT COUNT(*) as count 
+          FROM catalogo_productos cp
+          LEFT JOIN product_links pl ON cp.sku = pl.catalogo_sku
+          WHERE pl.id IS NULL
+        `),
+            db.execute(sql3`
+          SELECT COUNT(*) as count 
+          FROM product_links 
+          WHERE match_status = 'conflict'
+        `)
+          ]);
+          return {
+            emparejados: Number(emparejados.rows[0]?.count ?? 0),
+            faltantes: Number(faltantes.rows[0]?.count ?? 0),
+            conflictos: Number(conflictos.rows[0]?.count ?? 0)
+          };
+        } catch (error) {
+          console.error("Error getting reconciliation stats:", error);
+          return { emparejados: 0, faltantes: 0, conflictos: 0 };
+        }
+      }
+      /** Obtiene productos sin vincular */
+      async getUnlinkedProducts(type, params) {
+        const { page, pageSize } = params;
+        const offset = Math.max(0, (page - 1) * pageSize);
+        try {
+          if (type === "catalog") {
+            const result = await db.execute(sql3`
+          SELECT cp.sku, cp.nombre_producto, cp.marca_producto, cp.categoria
+          FROM catalogo_productos cp
+          LEFT JOIN product_links pl ON cp.sku = pl.catalogo_sku
+          WHERE pl.id IS NULL
+          ORDER BY cp.nombre_producto
+          LIMIT ${pageSize} OFFSET ${offset}
+        `);
+            const totalResult = await db.execute(sql3`
+          SELECT COUNT(*) as total
+          FROM catalogo_productos cp
+          LEFT JOIN product_links pl ON cp.sku = pl.catalogo_sku
+          WHERE pl.id IS NULL
+        `);
+            return {
+              rows: result.rows,
+              total: Number(totalResult.rows[0]?.total ?? 0),
+              page,
+              pageSize
+            };
+          } else {
+            const result = await db.execute(sql3`
+          SELECT 
+            v.id as variant_id,
+            v.sku,
+            v.barcode,
+            p.title,
+            p.shop_id,
+            CASE 
+              WHEN p.shop_id = 1 THEN 'WordWide'
+              WHEN p.shop_id = 2 THEN 'CrediTienda'
+              ELSE 'Tienda ' || p.shop_id::text
+            END as shop_name
+          FROM variants v
+          JOIN products p ON v.product_id = p.id
+          LEFT JOIN product_links pl ON v.id = pl.variant_id
+          WHERE pl.id IS NULL AND v.sku IS NOT NULL
+          ORDER BY p.title, v.sku
+          LIMIT ${pageSize} OFFSET ${offset}
+        `);
+            const totalResult = await db.execute(sql3`
+          SELECT COUNT(*) as total
+          FROM variants v
+          JOIN products p ON v.product_id = p.id
+          LEFT JOIN product_links pl ON v.id = pl.variant_id
+          WHERE pl.id IS NULL AND v.sku IS NOT NULL
+        `);
+            return {
+              rows: result.rows,
+              total: Number(totalResult.rows[0]?.total ?? 0),
+              page,
+              pageSize
+            };
+          }
+        } catch (error) {
+          console.error(`Error getting unlinked ${type} products:`, error);
+          return { rows: [], total: 0, page, pageSize };
+        }
+      }
+      /** Crea vínculo entre catálogo y Shopify */
+      async createProductLink(link) {
+        try {
+          const [productLink] = await db.insert(productLinks).values({
+            ...link,
+            createdAt: /* @__PURE__ */ new Date(),
+            updatedAt: /* @__PURE__ */ new Date()
+          }).returning();
+          return productLink;
+        } catch (error) {
+          console.error("Error creating product link:", error);
+          throw error;
+        }
+      }
+      /** Elimina vínculo */
+      async deleteProductLink(id) {
+        try {
+          await db.delete(productLinks).where(eq4(productLinks.id, id));
+          return { success: true };
+        } catch (error) {
+          console.error("Error deleting product link:", error);
+          throw error;
+        }
+      }
+      // ================== JOBS DE SHOPIFY ==================
+      /** Encola job para Shopify */
+      async enqueueShopifyJob(job) {
+        try {
+          const [shopifyJob] = await db.insert(shopifyJobs).values({
+            ...job,
+            createdAt: /* @__PURE__ */ new Date()
+          }).returning();
+          return shopifyJob;
+        } catch (error) {
+          console.error("Error enqueuing Shopify job:", error);
+          throw error;
+        }
+      }
+      // ================== UTILIDADES ==================
+      /** Obtiene shop_id por variant_id */
+      async getShopIdByVariant(variantId) {
+        try {
+          const result = await db.execute(sql3`
+        SELECT p.shop_id 
+        FROM variants v 
+        JOIN products p ON v.product_id = p.id 
+        WHERE v.id = ${variantId}
+      `);
+          return Number(result.rows[0]?.shop_id ?? 1);
+        } catch (error) {
+          console.error("Error getting shop_id by variant:", error);
+          return 1;
+        }
+      }
+    };
+    productStorage = new ProductStorage();
+  }
+});
+
+// server/syncShopifyOrders.ts
+init_db();
+init_schema();
+import { eq } from "drizzle-orm";
 
 // server/shopifyEnv.ts
 function getShopifyCredentials(storeParam) {
@@ -27,6 +1111,223 @@ function getShopifyCredentials(storeParam) {
     storeNumber,
     shopDomain: shop
   };
+}
+
+// server/syncShopifyOrders.ts
+function parseLinkHeader(link) {
+  const out = {};
+  if (!link) return out;
+  for (const part of link.split(",")) {
+    const m = part.match(/<([^>]+)>\s*;\s*rel="([^"]+)"/);
+    if (m) out[m[2]] = m[1];
+  }
+  return out;
+}
+function extractPageInfoFromUrl(url) {
+  if (!url) return void 0;
+  const u2 = new URL(url);
+  const pi = u2.searchParams.get("page_info");
+  return pi ?? void 0;
+}
+async function shopifyRestGetRaw(storeNumber, path3) {
+  const { shop, token, apiVersion } = getShopifyCredentials(String(storeNumber));
+  const base = `https://${shop}/admin/api/${apiVersion}`;
+  const r = await fetch(`${base}${path3}`, {
+    headers: {
+      "X-Shopify-Access-Token": token,
+      "User-Agent": "LogisticManager/1.0 (+node)"
+    }
+  });
+  const text2 = await r.text();
+  return { ok: r.ok, status: r.status, statusText: r.statusText, headers: r.headers, text: text2, shop };
+}
+async function shopifyRestGet(storeNumber, path3) {
+  const { shop, token, apiVersion } = getShopifyCredentials(String(storeNumber));
+  console.log(`[SYNC DEBUG] store=${storeNumber} shop=${shop} ver=${apiVersion} tokenLen=${token?.length}`);
+  const base = `https://${shop}/admin/api/${apiVersion}`;
+  const r = await fetch(`${base}${path3}`, {
+    headers: {
+      "X-Shopify-Access-Token": token,
+      "User-Agent": "LogisticManager/1.0 (+node)"
+    }
+  });
+  const text2 = await r.text();
+  if (!r.ok) {
+    throw new Error(`Shopify ${storeNumber} ${r.status} ${r.statusText} :: ${text2.slice(0, 500)}`);
+  }
+  return JSON.parse(text2);
+}
+async function upsertOneOrderTx(tx, storeNumber, o) {
+  const orderIdStr = String(o.id);
+  const tagsArr = typeof o.tags === "string" ? o.tags.split(",").map((s) => s.trim()).filter(Boolean) : [];
+  const first = o.customer?.first_name ?? null;
+  const last = o.customer?.last_name ?? null;
+  const customerName = first || last ? `${first ?? ""} ${last ?? ""}`.trim() : o.email ?? o.name ?? null;
+  const toStrOrNull = (v) => v == null ? null : String(v);
+  const toDateOrNull = (v) => v ? new Date(v) : null;
+  const insertData = {
+    shopId: Number(storeNumber),
+    orderId: orderIdStr,
+    name: o.name ?? null,
+    orderNumber: toStrOrNull(o.order_number),
+    customerName,
+    customerEmail: o.email ?? o.customer?.email ?? null,
+    subtotalPrice: toStrOrNull(o.subtotal_price),
+    totalAmount: toStrOrNull(o.total_price),
+    currency: o.currency ?? null,
+    financialStatus: o.financial_status ?? null,
+    fulfillmentStatus: o.fulfillment_status ?? null,
+    tags: tagsArr.length ? tagsArr : null,
+    noteAttributes: null,
+    createdAt: toDateOrNull(o.created_at),
+    shopifyCreatedAt: toDateOrNull(o.created_at),
+    shopifyUpdatedAt: toDateOrNull(o.updated_at),
+    shopifyProcessedAt: toDateOrNull(o.processed_at),
+    shopifyClosedAt: toDateOrNull(o.closed_at),
+    shopifyCancelledAt: toDateOrNull(o.cancelled_at)
+  };
+  const upsertedOrder = await tx.insert(orders).values(insertData).onConflictDoUpdate({
+    target: [orders.shopId, orders.orderId],
+    set: insertData
+  }).returning({ id: orders.id });
+  const orderPk = upsertedOrder[0]?.id;
+  if (!orderPk) throw new Error("No se obtuvo ID de la orden tras UPSERT.");
+  await tx.delete(orderItems).where(eq(orderItems.orderId, orderPk));
+  const items = o.line_items ?? [];
+  if (items.length > 0) {
+    const values = items.map((li) => ({
+      orderId: orderPk,
+      sku: li.sku ?? null,
+      quantity: Number(li.quantity ?? 0),
+      price: toStrOrNull(li.price),
+      shopifyProductId: li.product_id != null ? String(li.product_id) : null,
+      shopifyVariantId: li.variant_id != null ? String(li.variant_id) : null
+    }));
+    await tx.insert(orderItems).values(values);
+  }
+}
+function listStoreNumbersFromEnv() {
+  const nums = /* @__PURE__ */ new Set();
+  for (const k of Object.keys(process.env)) {
+    const m = k.match(/^SHOPIFY_SHOP_NAME_(\d+)$/);
+    if (m) nums.add(parseInt(m[1], 10));
+  }
+  return Array.from(nums).sort((a, b) => a - b);
+}
+async function getOrdersCount(storeParam) {
+  const storeNumber = parseInt(String(storeParam), 10);
+  const { shop } = getShopifyCredentials(String(storeNumber));
+  const { ok, status, statusText, text: text2 } = await shopifyRestGetRaw(
+    storeNumber,
+    `/orders/count.json?status=any`
+  );
+  if (!ok) throw new Error(`Shopify count ${status} ${statusText} :: ${text2.slice(0, 200)}`);
+  const body = JSON.parse(text2);
+  return { ok: true, store: storeNumber, shop, count: body.count ?? 0 };
+}
+async function syncShopifyOrdersBackfill(opts) {
+  const storeNumber = parseInt(String(opts.store), 10);
+  const limit = Math.min(opts.limit ?? 50, 250);
+  const params = [`status=any`, `limit=${limit}`];
+  if (opts.pageInfo) {
+    params.push(`page_info=${encodeURIComponent(String(opts.pageInfo))}`);
+  } else {
+    if (opts.since) params.push(`created_at_min=${encodeURIComponent(opts.since)}`);
+    params.push(`order=created_at+asc`);
+  }
+  const { ok, status, statusText, text: text2, headers } = await shopifyRestGetRaw(
+    storeNumber,
+    `/orders.json?${params.join("&")}`
+  );
+  if (!ok) throw new Error(`Shopify backfill ${status} ${statusText} :: ${text2.slice(0, 200)}`);
+  const body = JSON.parse(text2);
+  let upserted = 0, inserted = 0;
+  for (const o of body.orders ?? []) {
+    await db.transaction(async (tx) => {
+      await upsertOneOrderTx(tx, storeNumber, o);
+      upserted++;
+    });
+  }
+  const link = headers.get("link");
+  const parsed = parseLinkHeader(link);
+  const nextPageInfo = extractPageInfoFromUrl(parsed["next"]);
+  const hasNextPage = !!nextPageInfo;
+  const { shop } = getShopifyCredentials(String(storeNumber));
+  return {
+    ok: true,
+    summary: [{ store: storeNumber, shop, inserted, upserted }],
+    hasNextPage,
+    nextPageInfo
+  };
+}
+async function syncShopifyOrdersIncremental(opts) {
+  const storeNumber = parseInt(String(opts.store), 10);
+  const limit = Math.min(opts.limit ?? 100, 250);
+  const params = [`status=any`, `limit=${limit}`];
+  if (opts.pageInfo) {
+    params.push(`page_info=${encodeURIComponent(String(opts.pageInfo))}`);
+  } else {
+    params.push(`updated_at_min=${encodeURIComponent(opts.updatedSince)}`);
+    params.push(`order=updated_at+asc`);
+  }
+  const { ok, status, statusText, text: text2, headers } = await shopifyRestGetRaw(
+    storeNumber,
+    `/orders.json?${params.join("&")}`
+  );
+  if (!ok) throw new Error(`Shopify incremental ${status} ${statusText} :: ${text2.slice(0, 200)}`);
+  const body = JSON.parse(text2);
+  let upserted = 0, inserted = 0;
+  for (const o of body.orders ?? []) {
+    await db.transaction(async (tx) => {
+      await upsertOneOrderTx(tx, storeNumber, o);
+      upserted++;
+    });
+  }
+  const link = headers.get("link");
+  const parsed = parseLinkHeader(link);
+  const nextPageInfo = extractPageInfoFromUrl(parsed["next"]);
+  const hasNextPage = !!nextPageInfo;
+  const { shop } = getShopifyCredentials(String(storeNumber));
+  return {
+    ok: true,
+    summary: [{ store: storeNumber, shop, inserted, upserted }],
+    hasNextPage,
+    nextPageInfo
+  };
+}
+async function syncShopifyOrders(opts = {}) {
+  const limit = opts.limit ?? 50;
+  let targets;
+  if (opts.store && String(opts.store).toLowerCase() !== "all") {
+    targets = [parseInt(String(opts.store), 10)];
+  } else {
+    targets = listStoreNumbersFromEnv();
+  }
+  if (targets.length === 0) {
+    throw new Error("No se encontraron tiendas (SHOPIFY_SHOP_NAME_N) en .env");
+  }
+  const summary = [];
+  for (const storeNumber of targets) {
+    const { shop } = getShopifyCredentials(String(storeNumber));
+    let inserted = 0;
+    let upserted = 0;
+    try {
+      const data = await shopifyRestGet(
+        storeNumber,
+        `/orders.json?limit=${limit}&status=any&order=created_at+desc`
+      );
+      for (const o of data.orders ?? []) {
+        await db.transaction(async (tx) => {
+          await upsertOneOrderTx(tx, storeNumber, o);
+          upserted++;
+        });
+      }
+    } catch (e) {
+      console.error(`Sync tienda ${storeNumber} fall\xF3:`, e?.message || e);
+    }
+    summary.push({ store: storeNumber, shop, inserted, upserted });
+  }
+  return { ok: true, summary };
 }
 
 // server/services/ShopifyAdminClient.ts
@@ -248,395 +1549,14 @@ var ShopifyAdminClient = class {
   }
 };
 
-// shared/schema.ts
-var schema_exports = {};
-__export(schema_exports, {
-  brands: () => brands,
-  canales: () => channels,
-  carriers: () => carriers,
-  catalogProducts: () => catalogProducts,
-  catalogoProductos: () => catalogoProductos,
-  channels: () => channels,
-  createBulkTicketsSchema: () => createBulkTicketsSchema,
-  externalProducts: () => externalProducts,
-  insertNoteSchema: () => insertNoteSchema,
-  insertOrderSchema: () => insertOrderSchema,
-  insertProductSchema: () => insertProductSchema,
-  insertTicketSchema: () => insertTicketSchema,
-  insertVariantSchema: () => insertVariantSchema,
-  marcas: () => brands,
-  notas: () => notes,
-  notes: () => notes,
-  ordenes: () => orders,
-  orderItems: () => orderItems,
-  orders: () => orders,
-  paqueterias: () => carriers,
-  productComboItems: () => productComboItems,
-  productosCatalogo: () => catalogProducts,
-  products: () => products,
-  reglasEnvio: () => shippingRules,
-  shippingRules: () => shippingRules,
-  tickets: () => tickets,
-  ticketsTabla: () => tickets,
-  users: () => users,
-  usuarios: () => users,
-  variants: () => variants
-});
-import { pgTable, serial, text, boolean, timestamp, integer, decimal, bigint, json } from "drizzle-orm/pg-core";
-import { z } from "zod";
-var users = pgTable("users", {
-  id: serial("id").primaryKey(),
-  // ID autoincremental (PK)
-  email: text("email").notNull().unique(),
-  // correo único (login)
-  password: text("password").notNull(),
-  // hash de contraseña
-  firstName: text("first_name"),
-  // nombre (opcional)
-  lastName: text("last_name"),
-  // apellido (opcional)
-  role: text("role").notNull().default("user"),
-  // rol: user | admin
-  lastLogin: timestamp("last_login"),
-  // último acceso
-  createdAt: timestamp("created_at").defaultNow(),
-  updatedAt: timestamp("updated_at")
-});
-var brands = pgTable("brands", {
-  id: serial("id").primaryKey(),
-  name: text("name").notNull(),
-  // nombre visible
-  code: text("code").notNull().unique(),
-  // código corto único
-  isActive: boolean("is_active").notNull().default(true),
-  createdAt: timestamp("created_at").defaultNow(),
-  updatedAt: timestamp("updated_at")
-});
-var catalogProducts = pgTable("catalog_products", {
-  id: serial("id").primaryKey(),
-  sku: text("sku").notNull().unique(),
-  // SKU único
-  brandId: integer("brand_id").notNull(),
-  // referencia a brands.id (no FK explícita aquí)
-  nombreProducto: text("name").notNull(),
-  // nombre del producto
-  description: text("description"),
-  // descripción (opcional)
-  price: decimal("price"),
-  // precio de venta (opcional)
-  cost: decimal("cost"),
-  // costo (opcional)
-  weight: decimal("weight"),
-  // peso (opcional)
-  dimensions: text("dimensions"),
-  // dimensiones (opcional)
-  isActive: boolean("is_active").notNull().default(true),
-  createdAt: timestamp("created_at").defaultNow(),
-  updatedAt: timestamp("updated_at")
-});
-var catalogoProductos = pgTable("catalogo_productos", {
-  skuInterno: text("sku_interno").primaryKey().unique(),
-  // SKU interno único
-  sku: text("sku"),
-  // SKU externo
-  nombreProducto: text("nombre_producto"),
-  // nombre del producto
-  marca: text("marca"),
-  // marca
-  modelo: text("modelo"),
-  // modelo
-  categoria: text("categoria"),
-  // categoría
-  marcaProducto: text("marca_producto"),
-  // marca del producto
-  variante: text("variante"),
-  // variante
-  codigoBarras: text("codigo_barras"),
-  // código de barras
-  foto: text("foto"),
-  // URL de la foto
-  peso: decimal("peso"),
-  // peso
-  alto: decimal("alto"),
-  // altura
-  ancho: decimal("ancho"),
-  // ancho
-  largo: decimal("largo"),
-  // largo
-  condicion: text("condicion"),
-  // condición
-  stock: integer("stock"),
-  // stock disponible
-  costo: decimal("costo"),
-  // costo
-  situacion: text("situacion")
-  // situación
-});
-var channels = pgTable("channels", {
-  id: serial("id").primaryKey(),
-  code: text("code").notNull().unique(),
-  // código corto único del canal
-  name: text("name").notNull(),
-  // nombre del canal
-  color: text("color"),
-  // color para UI (hex)
-  icon: text("icon"),
-  // icono para UI (clase o nombre)
-  isActive: boolean("is_active").notNull().default(true),
-  createdAt: timestamp("created_at").defaultNow(),
-  updatedAt: timestamp("updated_at")
-});
-var carriers = pgTable("carriers", {
-  id: serial("id").primaryKey(),
-  name: text("name").notNull(),
-  // nombre visible
-  code: text("code").notNull().unique(),
-  // código único (ej. DHL)
-  apiEndpoint: text("api_endpoint"),
-  // endpoint API (si aplica)
-  isActive: boolean("is_active").notNull().default(true),
-  createdAt: timestamp("created_at").defaultNow(),
-  updatedAt: timestamp("updated_at")
-});
-var orders = pgTable("orders", {
-  id: bigint("id", { mode: "bigint" }).primaryKey(),
-  // BIGSERIAL PRIMARY KEY
-  shopId: integer("shop_id").notNull(),
-  // INT NOT NULL ← importante
-  orderId: text("order_id").notNull(),
-  // TEXT NOT NULL (ID externo de la plataforma)
-  // UNIQUE (shop_id, order_id) ← se maneja en la DB
-  // channelId: integer("channel_id"),                      // No existe en la DB real, se usa shop_id
-  customerName: text("customer_name"),
-  // TEXT
-  customerEmail: text("customer_email"),
-  // TEXT
-  subtotalPrice: decimal("subtotal_price"),
-  // NUMERIC
-  totalAmount: decimal("total_amount"),
-  // NUMERIC
-  currency: text("currency"),
-  // TEXT
-  financialStatus: text("financial_status"),
-  // TEXT
-  fulfillmentStatus: text("fulfillment_status"),
-  // TEXT
-  tags: text("tags").array(),
-  // TEXT[]
-  noteAttributes: json("note_attributes"),
-  // JSONB
-  createdAt: timestamp("created_at"),
-  // TIMESTAMP
-  shopifyCreatedAt: timestamp("shopify_created_at", { withTimezone: true }),
-  // TIMESTAMPTZ
-  shopifyUpdatedAt: timestamp("shopify_updated_at", { withTimezone: true }),
-  // TIMESTAMPTZ
-  shopifyProcessedAt: timestamp("shopify_processed_at", { withTimezone: true }),
-  // TIMESTAMPTZ
-  shopifyClosedAt: timestamp("shopify_closed_at", { withTimezone: true }),
-  // TIMESTAMPTZ
-  shopifyCancelledAt: timestamp("shopify_cancelled_at", { withTimezone: true })
-  // TIMESTAMPTZ
-});
-var orderItems = pgTable("order_items", {
-  id: serial("id").primaryKey(),
-  // SERIAL PRIMARY KEY
-  orderId: bigint("order_id", { mode: "bigint" }).notNull(),
-  // BIGINT NOT NULL (FK a orders.id con ON DELETE CASCADE)
-  sku: text("sku"),
-  // TEXT
-  quantity: integer("quantity").notNull(),
-  // INT NOT NULL
-  price: decimal("price"),
-  // NUMERIC
-  shopifyProductId: text("shopify_product_id"),
-  // TEXT
-  shopifyVariantId: text("shopify_variant_id")
-  // TEXT
-});
-var tickets = pgTable("tickets", {
-  id: serial("id").primaryKey(),
-  // SERIAL PRIMARY KEY
-  ticketNumber: text("ticket_number").unique().notNull(),
-  // TEXT UNIQUE NOT NULL
-  orderId: integer("order_id").notNull(),
-  // INTEGER NOT NULL (FK a orders.id con ON DELETE CASCADE)
-  status: text("status").notNull().default("open"),
-  // TEXT NOT NULL DEFAULT 'open'
-  notes: text("notes"),
-  // TEXT
-  createdAt: timestamp("created_at").defaultNow(),
-  // TIMESTAMP DEFAULT now()
-  updatedAt: timestamp("updated_at")
-  // TIMESTAMP
-});
-var shippingRules = pgTable("shipping_rules", {
-  id: serial("id").primaryKey(),
-  name: text("name").notNull(),
-  // nombre de la regla
-  condition: text("condition").notNull(),
-  // expresión/condición (definición libre)
-  carrierId: integer("carrier_id").notNull(),
-  // referencia a carriers.id
-  service: text("service"),
-  // nombre del servicio (si aplica)
-  cost: decimal("cost"),
-  // costo estimado
-  estimatedDays: integer("estimated_days"),
-  // días estimados de entrega
-  isActive: boolean("is_active").notNull().default(true),
-  createdAt: timestamp("created_at").defaultNow(),
-  updatedAt: timestamp("updated_at")
-});
-var notes = pgTable("notes", {
-  id: serial("id").primaryKey(),
-  userId: integer("user_id").notNull(),
-  // usuario propietario de la nota
-  content: text("content").notNull(),
-  // contenido de la nota
-  createdAt: timestamp("created_at").defaultNow(),
-  updatedAt: timestamp("updated_at").defaultNow()
-});
-var products = pgTable("products", {
-  id: serial("id").primaryKey(),
-  idShopify: text("id_shopify").notNull(),
-  // ID de Shopify
-  shopId: integer("shop_id").notNull(),
-  // 1 o 2 (tienda)
-  title: text("title").notNull(),
-  // título del producto
-  vendor: text("vendor"),
-  // proveedor/marca
-  productType: text("product_type"),
-  // tipo de producto
-  status: text("status").notNull().default("active"),
-  // active, draft
-  tags: text("tags").array(),
-  // etiquetas (array)
-  createdAt: timestamp("created_at").defaultNow(),
-  updatedAt: timestamp("updated_at")
-});
-var externalProducts = pgTable("external_products", {
-  id: serial("id").primaryKey(),
-  sku: text("sku").notNull().unique(),
-  prod: text("name").notNull(),
-  createdAt: timestamp("created_at").defaultNow()
-});
-var variants = pgTable("variants", {
-  id: serial("id").primaryKey(),
-  productId: integer("product_id"),
-  // referencia a products.id
-  idShopify: text("id_shopify"),
-  // ID de variante en Shopify
-  sku: text("sku"),
-  // SKU de la variante
-  price: decimal("price"),
-  // precio de venta
-  compareAtPrice: decimal("compare_at_price"),
-  // precio de comparación
-  barcode: text("barcode"),
-  // código de barras
-  inventoryQty: integer("inventory_qty"),
-  // cantidad en inventario
-  createdAt: timestamp("created_at"),
-  updatedAt: timestamp("updated_at")
-});
-var productComboItems = pgTable("product_combo_items", {
-  id: serial("id").primaryKey(),
-  productComboId: integer("product_combo_id").notNull(),
-  // producto que es combo
-  productSimpleId: integer("product_simple_id").notNull(),
-  // producto componente
-  qty: integer("qty").notNull().default(1),
-  // cantidad del componente
-  createdAt: timestamp("created_at").defaultNow()
-});
-var insertOrderSchema = z.object({
-  // Campos originales (más flexibles)
-  orderId: z.string().optional(),
-  channelId: z.number().int().optional(),
-  customerName: z.string().optional(),
-  totalAmount: z.string().optional(),
-  isManaged: z.boolean().optional().default(false),
-  hasTicket: z.boolean().optional().default(false),
-  status: z.string().optional().default("pending"),
-  // Campos Shopify (más flexibles)
-  idShopify: z.string().optional(),
-  shopId: z.number().int().optional(),
-  name: z.string().optional(),
-  orderNumber: z.string().optional(),
-  financialStatus: z.string().optional(),
-  fulfillmentStatus: z.string().optional(),
-  currency: z.string().optional().default("MXN"),
-  subtotalPrice: z.string().optional(),
-  customerEmail: z.string().optional(),
-  customerFirstName: z.string().optional(),
-  customerLastName: z.string().optional(),
-  contactPhone: z.string().optional(),
-  shipName: z.string().optional(),
-  shipPhone: z.string().optional(),
-  shipAddress1: z.string().optional(),
-  shipCity: z.string().optional(),
-  shipProvince: z.string().optional(),
-  shipCountry: z.string().optional(),
-  shipZip: z.string().optional(),
-  tags: z.array(z.string()).optional().default([]),
-  orderNote: z.string().optional(),
-  cancelReason: z.string().optional()
-});
-var insertProductSchema = z.object({
-  idShopify: z.string().min(1, "ID de Shopify requerido"),
-  shopId: z.number().int().min(1).max(2, "Shop ID debe ser 1 o 2"),
-  title: z.string().min(1, "T\xEDtulo requerido"),
-  vendor: z.string().optional(),
-  productType: z.string().optional(),
-  status: z.enum(["active", "draft"]).default("active"),
-  tags: z.array(z.string()).optional().default([])
-});
-var insertVariantSchema = z.object({
-  idShopify: z.string().min(1, "ID de Shopify requerido"),
-  productId: z.number().int().positive("Product ID requerido"),
-  sku: z.string().optional(),
-  price: z.string().optional(),
-  compareAtPrice: z.string().optional(),
-  barcode: z.string().optional(),
-  inventoryQty: z.number().int().optional()
-});
-var insertTicketSchema = z.object({
-  ticketNumber: z.string().optional(),
-  orderId: z.number().int().positive("El ID de la orden debe ser un n\xFAmero positivo"),
-  status: z.string().default("open"),
-  notes: z.string().optional()
-});
-var createBulkTicketsSchema = z.object({
-  orderIds: z.array(z.union([z.number().int().positive(), z.string().min(1)])).min(1, "Debe seleccionar al menos una orden"),
-  notes: z.string().optional()
-});
-var insertNoteSchema = z.object({
-  text: z.string().min(1, "El contenido es obligatorio"),
-  date: z.string().optional()
-});
-
-// server/db.ts
-import { Pool } from "pg";
-import { drizzle } from "drizzle-orm/node-postgres";
-import "dotenv/config";
-if (!process.env.DATABASE_URL) {
-  throw new Error("DATABASE_URL no definida/encontrada");
-}
-var pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false }
-});
-var u = new URL(process.env.DATABASE_URL);
-console.log("[DB] Conectando a:", u.hostname);
-var db = drizzle(pool, { schema: schema_exports });
-
 // server/storage.ts
+init_schema();
+init_db();
 import {
-  eq,
+  eq as eq2,
   and,
   isNull,
+  isNotNull,
   desc,
   asc,
   sql,
@@ -649,12 +1569,12 @@ var DatabaseStorage = class {
   // ==== USUARIOS ====
   /** Obtiene un usuario por su ID. */
   async getUser(id) {
-    const [usuario] = await db.select().from(users).where(eq(users.id, id));
+    const [usuario] = await db.select().from(users).where(eq2(users.id, id));
     return usuario;
   }
   /** Busca un usuario por correo electrónico. */
   async getUserByEmail(email) {
-    const [usuario] = await db.select().from(users).where(eq(users.email, email));
+    const [usuario] = await db.select().from(users).where(eq2(users.email, email));
     return usuario;
   }
   /** Crea un nuevo usuario. */
@@ -664,7 +1584,7 @@ var DatabaseStorage = class {
   }
   /** Actualiza campos de un usuario existente. */
   async updateUser(id, updates) {
-    const [usuario] = await db.update(users).set({ ...updates, updatedAt: /* @__PURE__ */ new Date() }).where(eq(users.id, id)).returning();
+    const [usuario] = await db.update(users).set({ ...updates, updatedAt: /* @__PURE__ */ new Date() }).where(eq2(users.id, id)).returning();
     return usuario;
   }
   /** Lista todos los usuarios ordenados por correo. */
@@ -674,11 +1594,11 @@ var DatabaseStorage = class {
   // ==== MARCAS ====
   /** Devuelve las marcas activas ordenadas por nombre. */
   async getBrands() {
-    return await db.select().from(brands).where(eq(brands.isActive, true)).orderBy(asc(brands.name));
+    return await db.select().from(brands).where(eq2(brands.isActive, true)).orderBy(asc(brands.name));
   }
   /** Obtiene una marca por ID. */
   async getBrand(id) {
-    const [marca] = await db.select().from(brands).where(eq(brands.id, id));
+    const [marca] = await db.select().from(brands).where(eq2(brands.id, id));
     return marca;
   }
   /** Crea una nueva marca. */
@@ -688,7 +1608,7 @@ var DatabaseStorage = class {
   }
   /** Actualiza una marca. */
   async updateBrand(id, updates) {
-    const [marca] = await db.update(brands).set(updates).where(eq(brands.id, id)).returning();
+    const [marca] = await db.update(brands).set(updates).where(eq2(brands.id, id)).returning();
     return marca;
   }
   // ==== CATÁLOGO ====
@@ -696,7 +1616,7 @@ var DatabaseStorage = class {
   async getCatalogProducts(brandId) {
     const consulta = db.select().from(catalogProducts);
     if (brandId) {
-      return await consulta.where(eq(catalogProducts.brandId, brandId)).orderBy(asc(catalogProducts.sku));
+      return await consulta.where(eq2(catalogProducts.brandId, brandId)).orderBy(asc(catalogProducts.sku));
     }
     return await consulta.orderBy(asc(catalogProducts.sku));
   }
@@ -707,17 +1627,17 @@ var DatabaseStorage = class {
   }
   /** Actualiza un producto de catálogo. */
   async updateCatalogProduct(id, updates) {
-    const [producto] = await db.update(catalogProducts).set({ ...updates, updatedAt: /* @__PURE__ */ new Date() }).where(eq(catalogProducts.id, id)).returning();
+    const [producto] = await db.update(catalogProducts).set({ ...updates, updatedAt: /* @__PURE__ */ new Date() }).where(eq2(catalogProducts.id, id)).returning();
     return producto;
   }
   // ==== CANALES ====
   /** Devuelve canales activos ordenados por nombre. */
   async getChannels() {
-    return await db.select().from(channels).where(eq(channels.isActive, true)).orderBy(asc(channels.name));
+    return await db.select().from(channels).where(eq2(channels.isActive, true)).orderBy(asc(channels.name));
   }
   /** Obtiene un canal por ID. */
   async getChannel(id) {
-    const [canal] = await db.select().from(channels).where(eq(channels.id, id));
+    const [canal] = await db.select().from(channels).where(eq2(channels.id, id));
     return canal;
   }
   /** Crea un canal. */
@@ -728,11 +1648,11 @@ var DatabaseStorage = class {
   // ==== PAQUETERÍAS ====
   /** Devuelve paqueterías activas ordenadas por nombre. */
   async getCarriers() {
-    return await db.select().from(carriers).where(eq(carriers.isActive, true)).orderBy(asc(carriers.name));
+    return await db.select().from(carriers).where(eq2(carriers.isActive, true)).orderBy(asc(carriers.name));
   }
   /** Obtiene una paquetería por ID. */
   async getCarrier(id) {
-    const [paq] = await db.select().from(carriers).where(eq(carriers.id, id));
+    const [paq] = await db.select().from(carriers).where(eq2(carriers.id, id));
     return paq;
   }
   /** Crea una paquetería. */
@@ -745,7 +1665,7 @@ var DatabaseStorage = class {
   async getOrders(filtros) {
     const condiciones = [];
     if (filtros?.channelId !== void 0)
-      condiciones.push(eq(orders.channelId, filtros.channelId));
+      condiciones.push(eq2(orders.shopId, filtros.channelId));
     if (filtros?.managed !== void 0) {
       if (filtros.managed) {
         condiciones.push(sql`LOWER(COALESCE(${orders.fulfillmentStatus}, '')) = 'fulfilled'`);
@@ -765,39 +1685,18 @@ var DatabaseStorage = class {
     }
     return await db.select().from(orders).orderBy(desc(createdAtEff(orders)));
   }
-  /** Obtiene una orden por ID con detalles completos. */
+  /** 
+   * Obtiene una orden por ID con detalles completos 
+   * Corrección: Manejo correcto de bigint IDs y campos de la DB real
+   */
   async getOrder(id) {
     try {
       console.log(`[Storage] getOrder called with ID: ${id}`);
-      const [orden] = await db.select().from(orders).where(eq(orders.id, BigInt(id)));
+      const [orden] = await db.select().from(orders).where(eq2(orders.id, BigInt(id)));
       console.log(`[Storage] Raw order found:`, !!orden);
       if (!orden) return void 0;
-      const result = {
-        id: String(orden.id),
-        orderId: orden.orderId,
-        name: orden.name || "",
-        customerName: orden.customerName || "",
-        customerEmail: orden.customerEmail || "",
-        totalAmount: String(orden.totalAmount || 0),
-        subtotalPrice: String(orden.subtotalPrice || 0),
-        fulfillmentStatus: orden.fulfillmentStatus || "",
-        financialStatus: orden.financialStatus || "",
-        createdAt: orden.shopifyCreatedAt || orden.createdAt,
-        shopifyCreatedAt: orden.shopifyCreatedAt || orden.createdAt,
-        shopId: orden.shopId || 0,
-        shipName: orden.shipName || "",
-        shipPhone: orden.shipPhone || "",
-        shipAddress1: orden.shipAddress1 || "",
-        shipCity: orden.shipCity || "",
-        shipProvince: orden.shipProvince || "",
-        shipCountry: orden.shipCountry || "",
-        shipZip: orden.shipZip || "",
-        currency: orden.currency || "MXN",
-        tags: [],
-        orderNote: orden.note || ""
-      };
-      console.log(`[Storage] Formatted order result:`, result);
-      return result;
+      console.log(`[Storage] Returning order with ID: ${orden.id}`);
+      return orden;
     } catch (error) {
       console.error("[Storage] Error getting order:", error);
       return void 0;
@@ -810,23 +1709,30 @@ var DatabaseStorage = class {
   }
   /** Actualiza una orden. */
   async updateOrder(id, updates) {
-    const [orden] = await db.update(orders).set(updates).where(eq(orders.id, BigInt(id))).returning();
+    const [orden] = await db.update(orders).set(updates).where(eq2(orders.id, BigInt(id))).returning();
     return orden;
   }
   /** Lista órdenes por nombre de cliente. */
   async getOrdersByCustomer(nombreCliente) {
-    return await db.select().from(orders).where(eq(orders.customerName, nombreCliente)).orderBy(desc(orders.createdAt));
+    return await db.select().from(orders).where(eq2(orders.customerName, nombreCliente)).orderBy(desc(orders.createdAt));
   }
   async getOrdersByChannel() {
     const result = await db.execute(sql`
     SELECT 
-      c.code as channel_code,
-      c.name as channel_name,
+      CASE 
+        WHEN o.shop_id = 1 THEN 'WW'
+        WHEN o.shop_id = 2 THEN 'CT'
+        ELSE 'OTHER'
+      END as channel_code,
+      CASE 
+        WHEN o.shop_id = 1 THEN 'WordWide'
+        WHEN o.shop_id = 2 THEN 'CrediTienda'
+        ELSE 'Otra Tienda'
+      END as channel_name,
       COUNT(o.id)::int as orders
     FROM orders o
-    JOIN channels c ON o.channel_id = c.id
     WHERE o.created_at >= NOW() - INTERVAL '30 days'
-    GROUP BY c.code, c.name
+    GROUP BY o.shop_id
     ORDER BY orders DESC
   `);
     return result.rows.map((row) => ({
@@ -835,12 +1741,32 @@ var DatabaseStorage = class {
       orders: row.orders
     }));
   }
+  /** Obtiene estadísticas de órdenes canceladas/reabastecidas */
+  async getCancelledOrdersStats() {
+    try {
+      const result = await db.execute(sql`
+        SELECT 
+          COUNT(CASE WHEN LOWER(COALESCE(fulfillment_status, '')) = 'restocked' THEN 1 END)::int as cancelled_count,
+          COUNT(*)::int as total_count
+        FROM orders
+        WHERE created_at >= NOW() - INTERVAL '30 days'
+      `);
+      const row = result.rows[0];
+      const count3 = row?.cancelled_count || 0;
+      const total = row?.total_count || 1;
+      const percentage = total > 0 ? Math.round(count3 / total * 100) : 0;
+      return { count: count3, percentage };
+    } catch (error) {
+      console.error("Error getting cancelled orders stats:", error);
+      return { count: 0, percentage: 0 };
+    }
+  }
   /** Obtiene una orden por ID de Shopify y tienda. */
   async getOrderByShopifyId(shopifyId, shopId) {
     const [orden] = await db.select().from(orders).where(
       and(
-        eq(orders.orderId, shopifyId),
-        eq(orders.shopId, shopId)
+        eq2(orders.orderId, shopifyId),
+        eq2(orders.shopId, shopId)
       )
     );
     return orden;
@@ -852,7 +1778,7 @@ var DatabaseStorage = class {
   }
   /** Obtiene un ticket por ID. */
   async getTicket(id) {
-    const [ticket] = await db.select().from(tickets).where(eq(tickets.id, id));
+    const [ticket] = await db.select().from(tickets).where(eq2(tickets.id, id));
     return ticket;
   }
   /** Crea un ticket. */
@@ -862,7 +1788,7 @@ var DatabaseStorage = class {
   }
   /** Actualiza un ticket. */
   async updateTicket(id, updates) {
-    const [ticket] = await db.update(tickets).set({ ...updates, updatedAt: /* @__PURE__ */ new Date() }).where(eq(tickets.id, id)).returning();
+    const [ticket] = await db.update(tickets).set({ ...updates, updatedAt: /* @__PURE__ */ new Date() }).where(eq2(tickets.id, id)).returning();
     return ticket;
   }
   /** Obtiene el siguiente número de ticket secuencial empezando en 30000. */
@@ -916,7 +1842,7 @@ var DatabaseStorage = class {
   // ==== REGLAS DE ENVÍO ====
   /** Devuelve reglas de envío activas. */
   async getShippingRules() {
-    return await db.select().from(shippingRules).where(eq(shippingRules.isActive, true));
+    return await db.select().from(shippingRules).where(eq2(shippingRules.isActive, true));
   }
   /** Crea una regla de envío. */
   async createShippingRule(regla) {
@@ -926,7 +1852,7 @@ var DatabaseStorage = class {
   // ==== NOTAS ====
   /** Lista notas por usuario. */
   async getUserNotes(userId) {
-    return await db.select().from(notes).where(eq(notes.userId, userId)).orderBy(desc(notes.createdAt));
+    return await db.select().from(notes).where(eq2(notes.userId, userId)).orderBy(desc(notes.createdAt));
   }
   /** Lista notas; si se pasa userId, filtra por usuario. */
   async getNotesRange(from, to) {
@@ -941,12 +1867,12 @@ var DatabaseStorage = class {
   }
   /** Actualiza una nota. */
   async updateNote(id, updates) {
-    const [nota] = await db.update(notes).set({ ...updates, updatedAt: /* @__PURE__ */ new Date() }).where(eq(notes.id, id)).returning();
+    const [nota] = await db.update(notes).set({ ...updates, updatedAt: /* @__PURE__ */ new Date() }).where(eq2(notes.id, id)).returning();
     return nota;
   }
   /** Elimina una nota por ID. */
   async deleteNote(id) {
-    await db.delete(notes).where(eq(notes.id, id));
+    await db.delete(notes).where(eq2(notes.id, id));
   }
   // ==== NUEVOS MÉTODOS SHOPIFY ====
   /** Crea un item de orden. */
@@ -957,21 +1883,21 @@ var DatabaseStorage = class {
   /** Lista productos por tienda (opcional). */
   async getProducts(shopId) {
     if (shopId !== void 0) {
-      return await db.select().from(products).where(eq(products.shopId, shopId)).orderBy(asc(products.title));
+      return await db.select().from(products).where(eq2(products.shopId, shopId)).orderBy(asc(products.title));
     }
     return await db.select().from(products).orderBy(asc(products.title));
   }
   /** Obtiene un producto por ID. */
   async getProduct(id) {
-    const [producto] = await db.select().from(products).where(eq(products.id, id));
+    const [producto] = await db.select().from(products).where(eq2(products.id, id));
     return producto;
   }
   /** Obtiene un producto por ID de Shopify y tienda. */
   async getProductByShopifyId(shopifyId, shopId) {
     const [producto] = await db.select().from(products).where(
       and(
-        eq(products.idShopify, shopifyId),
-        eq(products.shopId, shopId)
+        eq2(products.idShopify, shopifyId),
+        eq2(products.shopId, shopId)
       )
     );
     return producto;
@@ -983,19 +1909,19 @@ var DatabaseStorage = class {
   }
   /** Actualiza un producto. */
   async updateProduct(id, updates) {
-    const [producto] = await db.update(products).set({ ...updates, updatedAt: /* @__PURE__ */ new Date() }).where(eq(products.id, id)).returning();
+    const [producto] = await db.update(products).set({ ...updates, updatedAt: /* @__PURE__ */ new Date() }).where(eq2(products.id, id)).returning();
     return producto;
   }
   /** Lista variantes por producto (opcional). */
   async getVariants(productId) {
     if (productId !== void 0) {
-      return await db.select().from(variants).where(eq(variants.productId, productId)).orderBy(asc(variants.sku));
+      return await db.select().from(variants).where(eq2(variants.productId, productId)).orderBy(asc(variants.sku));
     }
     return await db.select().from(variants).orderBy(asc(variants.sku));
   }
   /** Obtiene una variante por ID. */
   async getVariant(id) {
-    const [variante] = await db.select().from(variants).where(eq(variants.id, id));
+    const [variante] = await db.select().from(variants).where(eq2(variants.id, id));
     return variante;
   }
   /** Crea una variante. */
@@ -1005,7 +1931,7 @@ var DatabaseStorage = class {
   }
   /** Actualiza una variante. */
   async updateVariant(id, updates) {
-    const [variante] = await db.update(variants).set({ ...updates, updatedAt: /* @__PURE__ */ new Date() }).where(eq(variants.id, id)).returning();
+    const [variante] = await db.update(variants).set({ ...updates, updatedAt: /* @__PURE__ */ new Date() }).where(eq2(variants.id, id)).returning();
     return variante;
   }
   // ==== MÉTRICAS DE DASHBOARD ====
@@ -1014,8 +1940,10 @@ var DatabaseStorage = class {
    */
   async getDashboardMetricsRange(from, to) {
     const range = and(
-      gte(orders.createdAt, from),
-      lte(orders.createdAt, to)
+      gte(orders.shopifyCreatedAt, from),
+      lte(orders.shopifyCreatedAt, to),
+      isNotNull(orders.shopifyCreatedAt),
+      isNull(orders.shopifyCancelledAt)
     );
     const totalOrdersRes = await db.select({ count: count() }).from(orders).where(range);
     const totalSalesRes = await db.select({
@@ -1032,8 +1960,8 @@ var DatabaseStorage = class {
     const byChannelRes = await db.select({
       channelId: orders.shopId,
       channelName: sql`CASE 
-          WHEN ${orders.shopId} = 1 THEN 'Tienda 1'
-          WHEN ${orders.shopId} = 2 THEN 'Tienda 2'
+          WHEN ${orders.shopId} = 1 THEN 'WordWide'
+          WHEN ${orders.shopId} = 2 THEN 'CrediTienda'
           ELSE 'Tienda ' || ${orders.shopId}::text
         END`,
       count: sql`COUNT(*)`
@@ -1085,31 +2013,49 @@ var DatabaseStorage = class {
     }
   }
   /** Obtiene datos de órdenes por día de la semana para gráfico. */
+  // storage.ts
   async getOrdersByWeekday(weekOffset = 0) {
     try {
-      const startDate = /* @__PURE__ */ new Date();
-      startDate.setDate(startDate.getDate() - 7 * weekOffset - 6);
-      startDate.setHours(0, 0, 0, 0);
-      const endDate = new Date(startDate);
-      endDate.setDate(endDate.getDate() + 6);
-      endDate.setHours(23, 59, 59, 999);
       const result = await db.execute(sql`
-        SELECT 
-          EXTRACT(DOW FROM shopify_created_at) as dow,
-          COUNT(*) as count
-        FROM orders 
-        WHERE shopify_created_at >= ${startDate.toISOString()}
-          AND shopify_created_at <= ${endDate.toISOString()}
-        GROUP BY EXTRACT(DOW FROM shopify_created_at)
-        ORDER BY dow
-      `);
+      WITH base AS (
+        SELECT (now() AT TIME ZONE 'America/Mexico_City') AS now_cdmx
+      ),
+      limites AS (
+        SELECT
+          -- Semana que inicia en DOMINGO:
+          -- Truco: mueve +1 día para usar date_trunc('week') (que es lunes),
+          -- luego resta 1 día para quedar en domingo.
+          (date_trunc('week', (now_cdmx + INTERVAL '1 day')) - INTERVAL '1 day')
+            - (${weekOffset}::int * INTERVAL '7 day') AS ini,
+          CASE
+            -- Semana actual: corta en hoy+1d para no mostrar días futuros
+            WHEN ${weekOffset}::int = 0 THEN LEAST(
+              (date_trunc('week', (now_cdmx + INTERVAL '1 day')) - INTERVAL '1 day') + INTERVAL '7 day',
+              date_trunc('day', now_cdmx) + INTERVAL '1 day'
+            )
+            -- Semanas pasadas: rango completo domingo→domingo
+            ELSE (
+              (date_trunc('week', (now_cdmx + INTERVAL '1 day')) - INTERVAL '1 day')
+                - (${weekOffset}::int * INTERVAL '7 day')
+              + INTERVAL '7 day'
+            )
+          END AS fin
+        FROM base
+      )
+      SELECT
+        EXTRACT(DOW FROM (shopify_created_at AT TIME ZONE 'America/Mexico_City'))::int AS dow,
+        COUNT(*)::bigint AS count
+      FROM orders, limites
+      WHERE shopify_created_at IS NOT NULL
+        AND (shopify_created_at AT TIME ZONE 'America/Mexico_City') >= limites.ini
+        AND (shopify_created_at AT TIME ZONE 'America/Mexico_City') <  limites.fin
+      GROUP BY 1
+      ORDER BY 1;
+    `);
       const dayNames = ["Dom", "Lun", "Mar", "Mi\xE9", "Jue", "Vie", "S\xE1b"];
       const data = dayNames.map((day, index) => {
         const found = result.rows.find((row) => Number(row.dow) === index);
-        return {
-          day,
-          count: found ? Number(found.count) : 0
-        };
+        return { day, count: found ? Number(found.count) : 0 };
       });
       return data;
     } catch (error) {
@@ -1148,17 +2094,11 @@ var DatabaseStorage = class {
         const searchPattern = `%${search.toLowerCase()}%`;
         conds.push(
           sql`(
-            LOWER(COALESCE(nombre, '')) LIKE ${searchPattern} OR
-            LOWER(COALESCE(sku, '')) LIKE ${searchPattern} OR
-            LOWER(COALESCE(descripcion, '')) LIKE ${searchPattern}
+            LOWER(COALESCE(title, '')) LIKE ${searchPattern} OR
+            LOWER(COALESCE(vendor, '')) LIKE ${searchPattern} OR
+            LOWER(COALESCE(product_type, '')) LIKE ${searchPattern}
           )`
         );
-      }
-      if (categoria) {
-        conds.push(eq(products.categoria, categoria));
-      }
-      if (activo !== void 0) {
-        conds.push(eq(products.activo, activo));
       }
       const whereClause = conds.length > 0 ? and(...conds) : void 0;
       const offset = Math.max(0, (page - 1) * pageSize);
@@ -1169,8 +2109,8 @@ var DatabaseStorage = class {
         rows: productos.map((p) => ({
           ...p,
           id: Number(p.id),
-          precio: p.precio ? Number(p.precio) : null,
-          inventario: p.inventario || 0,
+          // precio: p.precio ? Number(p.precio) : null, // Campo no existe
+          // inventario: p.inventario || 0, // Campo no existe
           fechaCreacion: p.createdAt,
           fechaActualizacion: p.updatedAt
         })),
@@ -1186,53 +2126,90 @@ var DatabaseStorage = class {
   /** Obtiene las categorías únicas de productos. */
   async getProductCategories() {
     try {
-      const result = await db.selectDistinct({ categoria: products.categoria }).from(products).where(isNotNull(products.categoria));
-      return result.map((r) => r.categoria).filter(Boolean).sort();
+      const result = await db.selectDistinct({ productType: products.productType }).from(products).where(isNotNull(products.productType));
+      return result.map((r) => r.productType).filter(Boolean).sort();
     } catch (error) {
       console.error("Error getting product categories:", error);
       return [];
     }
   }
-  /** Crea un nuevo producto en el catálogo. */
-  async createProduct(datos) {
-    const [producto] = await db.insert(products).values({
-      nombre: datos.nombre,
-      sku: datos.sku,
-      descripcion: datos.descripcion,
-      precio: datos.precio ? String(datos.precio) : null,
-      categoria: datos.categoria,
-      marca: datos.marca,
-      activo: datos.activo ?? true,
-      inventario: datos.inventario ?? 0,
-      createdAt: /* @__PURE__ */ new Date(),
-      updatedAt: /* @__PURE__ */ new Date()
-    }).returning();
-    return {
-      ...producto,
-      id: Number(producto.id),
-      precio: producto.precio ? Number(producto.precio) : null,
-      fechaCreacion: producto.createdAt,
-      fechaActualizacion: producto.updatedAt
-    };
-  }
-  /** Actualiza un producto del catálogo. */
-  async updateProduct(id, datos) {
-    const [producto] = await db.update(products).set({
-      ...datos,
-      precio: datos.precio ? String(datos.precio) : void 0,
-      updatedAt: /* @__PURE__ */ new Date()
-    }).where(eq(products.id, id)).returning();
-    return {
-      ...producto,
-      id: Number(producto.id),
-      precio: producto.precio ? Number(producto.precio) : null,
-      fechaCreacion: producto.createdAt,
-      fechaActualizacion: producto.updatedAt
-    };
-  }
-  /** Elimina un producto del catálogo. */
+  /** Elimina un producto Shopify. */
   async deleteProduct(id) {
-    await db.delete(products).where(eq(products.id, id));
+    await db.delete(products).where(eq2(products.id, id));
+  }
+  /** Crea tickets masivos y actualiza fulfillment_status a fulfilled */
+  async createBulkTicketsAndUpdateStatus(orderIds, notes2) {
+    try {
+      const tickets2 = [];
+      let updated = 0;
+      for (const orderId of orderIds) {
+        const numericOrderId = typeof orderId === "string" ? parseInt(orderId) : orderId;
+        const numeroTicket = await this.getNextTicketNumber();
+        const ticket = await this.createTicket({
+          orderId: numericOrderId,
+          ticketNumber: numeroTicket,
+          status: "open",
+          notes: notes2 || `Ticket creado autom\xE1ticamente para orden ${numericOrderId}`
+        });
+        tickets2.push(ticket);
+        await this.updateOrder(numericOrderId, {
+          fulfillmentStatus: "fulfilled",
+          updatedAt: /* @__PURE__ */ new Date()
+        });
+        updated++;
+      }
+      return { tickets: tickets2, updated };
+    } catch (error) {
+      console.error("Error en createBulkTicketsAndUpdateStatus:", error);
+      throw error;
+    }
+  }
+  /** Obtiene órdenes con items para exportación */
+  async getOrdersWithItemsForExport(filters) {
+    try {
+      const result = await db.execute(sql`
+        SELECT 
+          o.id,
+          o.order_id as "orderId",
+          o.customer_name as "customerName",
+          o.customer_email as "customerEmail", 
+          o.total_amount as "totalAmount",
+          o.financial_status as "financialStatus",
+          o.fulfillment_status as "fulfillmentStatus",
+          o.shopify_created_at as "shopifyCreatedAt",
+          o.shop_id as "shopId",
+          -- Agregar items como JSON
+          COALESCE(
+            JSON_AGG(
+              JSON_BUILD_OBJECT(
+                'id', oi.id,
+                'sku', oi.sku,
+                'title', oi.title,
+                'quantity', oi.quantity,
+                'price', oi.price
+              )
+            ) FILTER (WHERE oi.id IS NOT NULL),
+            '[]'::json
+          ) as items
+        FROM orders o
+        LEFT JOIN order_items oi ON o.id = oi.order_id
+        WHERE 1=1
+        ${filters?.statusFilter === "managed" ? sql`AND LOWER(COALESCE(o.fulfillment_status, '')) = 'fulfilled'` : sql``}
+        ${filters?.statusFilter === "unmanaged" ? sql`AND LOWER(COALESCE(o.fulfillment_status, '')) IN ('', 'unfulfilled')` : sql``}
+        ${filters?.channelId ? sql`AND o.shop_id = ${filters.channelId}` : sql``}
+        GROUP BY o.id, o.order_id, o.customer_name, o.customer_email, o.total_amount, 
+                 o.financial_status, o.fulfillment_status, o.shopify_created_at, o.shop_id
+        ORDER BY o.shopify_created_at DESC
+        LIMIT 1000
+      `);
+      return result.rows.map((row) => ({
+        ...row,
+        items: typeof row.items === "string" ? JSON.parse(row.items) : row.items
+      }));
+    } catch (error) {
+      console.error("Error getting orders with items for export:", error);
+      return [];
+    }
   }
   // ==== ÓRDENES PAGINADAS ====
   async getOrdersPaginated(params) {
@@ -1249,50 +2226,53 @@ var DatabaseStorage = class {
           sql`LOWER(COALESCE(o.fulfillment_status, '')) = 'fulfilled'`
         );
       }
+      if (channelId !== void 0 && channelId !== null) {
+        conds.push(sql`o.shop_id = ${channelId}`);
+      }
       if (search) {
         const searchPattern = `%${search.toLowerCase()}%`;
         if (searchType === "sku") {
           conds.push(
             sql`EXISTS (
-              SELECT 1 FROM order_items oi2 
-              WHERE oi2.order_id = o.id 
-              AND LOWER(COALESCE(oi2.sku, '')) LIKE ${searchPattern}
-            )`
+            SELECT 1 FROM order_items oi2 
+            WHERE oi2.order_id = o.id 
+            AND LOWER(COALESCE(oi2.sku, '')) LIKE ${searchPattern}
+          )`
           );
         } else if (searchType === "customer") {
           conds.push(
             sql`(
-              LOWER(COALESCE(o.customer_name, '')) LIKE ${searchPattern} OR 
-              LOWER(COALESCE(o.customer_email, '')) LIKE ${searchPattern}
-            )`
+            LOWER(COALESCE(o.customer_name, '')) LIKE ${searchPattern} OR 
+            LOWER(COALESCE(o.customer_email, '')) LIKE ${searchPattern}
+          )`
           );
         } else if (searchType === "product") {
           conds.push(
             sql`EXISTS (
-              SELECT 1 FROM order_items oi2 
-              WHERE oi2.order_id = o.id 
-              AND (
-                LOWER(COALESCE(oi2.title, '')) LIKE ${searchPattern} OR
-                LOWER(COALESCE(oi2.variant_title, '')) LIKE ${searchPattern}
-              )
-            )`
+            SELECT 1 FROM order_items oi2 
+            WHERE oi2.order_id = o.id 
+            AND (
+              LOWER(COALESCE(oi2.title, '')) LIKE ${searchPattern} OR
+              LOWER(COALESCE(oi2.variant_title, '')) LIKE ${searchPattern}
+            )
+          )`
           );
         } else {
           conds.push(
             sql`(
-              LOWER(COALESCE(o.order_id, '')) LIKE ${searchPattern} OR 
-              LOWER(COALESCE(o.customer_name, '')) LIKE ${searchPattern} OR 
-              LOWER(COALESCE(o.customer_email, '')) LIKE ${searchPattern} OR
-              EXISTS (
-                SELECT 1 FROM order_items oi2 
-                WHERE oi2.order_id = o.id 
-                AND (
-                  LOWER(COALESCE(oi2.sku, '')) LIKE ${searchPattern} OR
-                  LOWER(COALESCE(oi2.title, '')) LIKE ${searchPattern} OR
-                  LOWER(COALESCE(oi2.variant_title, '')) LIKE ${searchPattern}
-                )
+            LOWER(COALESCE(o.order_id, '')) LIKE ${searchPattern} OR 
+            LOWER(COALESCE(o.customer_name, '')) LIKE ${searchPattern} OR 
+            LOWER(COALESCE(o.customer_email, '')) LIKE ${searchPattern} OR
+            EXISTS (
+              SELECT 1 FROM order_items oi2 
+              WHERE oi2.order_id = o.id 
+              AND (
+                LOWER(COALESCE(oi2.sku, '')) LIKE ${searchPattern} OR
+                LOWER(COALESCE(oi2.title, '')) LIKE ${searchPattern} OR
+                LOWER(COALESCE(oi2.variant_title, '')) LIKE ${searchPattern}
               )
-            )`
+            )
+          )`
           );
         }
       }
@@ -1301,45 +2281,45 @@ var DatabaseStorage = class {
       )}` : void 0;
       const offset = Math.max(0, (page - 1) * pageSize);
       const baseQuery = sql`
-        SELECT 
-          o.id::text as id,
-          COALESCE(o.name, o.order_id, '') as name,
-          COALESCE(o.customer_name, '') as "customerName",
-          o.shop_id as "channelId",
-          CASE 
-            WHEN o.shop_id = 1 THEN 'Tienda 1'
-            WHEN o.shop_id = 2 THEN 'Tienda 2'
-            ELSE 'Tienda ' || o.shop_id::text
-          END as "channelName", 
-          COALESCE(o.total_amount, '0') as "totalAmount",
-          COALESCE(o.fulfillment_status, '') as "fulfillmentStatus",
-          COALESCE(o.shopify_created_at, o.created_at, NOW()) as "createdAt",
-          COALESCE(COUNT(oi.id), 0) as "itemsCount",
-          COALESCE(ARRAY_AGG(oi.sku) FILTER (WHERE oi.sku IS NOT NULL), ARRAY[]::text[]) as skus,
-          CASE
-            WHEN LOWER(COALESCE(o.fulfillment_status, '')) IN ('', 'unfulfilled') THEN 'SIN_GESTIONAR'
-            WHEN LOWER(COALESCE(o.fulfillment_status, '')) = 'fulfilled' THEN 'GESTIONADA'
-            WHEN LOWER(COALESCE(o.fulfillment_status, '')) = 'restocked' THEN 'DEVUELTO'
-            ELSE 'ERROR'
-          END as "uiStatus",
-          EXISTS(SELECT 1 FROM tickets t WHERE t.order_id = o.id) as "hasTicket",
-          CASE 
-            WHEN LOWER(COALESCE(o.fulfillment_status, '')) = 'fulfilled' THEN true
-            ELSE false
-          END as "isManaged"
-        FROM orders o
-        LEFT JOIN order_items oi ON oi.order_id = o.id
-        ${whereClause ? sql`WHERE ${whereClause}` : sql``}
-        GROUP BY o.id, o.order_id, o.name, o.customer_name, o.total_amount, 
-                 o.fulfillment_status, o.shopify_created_at, o.created_at, o.shop_id
-        ORDER BY COALESCE(o.shopify_created_at, o.created_at) DESC
-        LIMIT ${pageSize} OFFSET ${offset}
-      `;
+      SELECT 
+        o.id::text as id,
+        COALESCE(o.name, o.order_id, '') as name,
+        COALESCE(o.customer_name, '') as "customerName",
+        o.shop_id as "channelId",
+        CASE 
+          WHEN o.shop_id = 1 THEN 'Tienda 1'
+          WHEN o.shop_id = 2 THEN 'Tienda 2'
+          ELSE 'Tienda ' || o.shop_id::text
+        END as "channelName", 
+        COALESCE(o.total_amount, '0') as "totalAmount",
+        COALESCE(o.fulfillment_status, '') as "fulfillmentStatus",
+        COALESCE(o.shopify_created_at, o.created_at, NOW()) as "createdAt",
+        COALESCE(COUNT(oi.id), 0) as "itemsCount",
+        COALESCE(ARRAY_AGG(oi.sku) FILTER (WHERE oi.sku IS NOT NULL), ARRAY[]::text[]) as skus,
+        CASE
+          WHEN LOWER(COALESCE(o.fulfillment_status, '')) IN ('', 'unfulfilled') THEN 'SIN_GESTIONAR'
+          WHEN LOWER(COALESCE(o.fulfillment_status, '')) = 'fulfilled' THEN 'GESTIONADA'
+          WHEN LOWER(COALESCE(o.fulfillment_status, '')) = 'restocked' THEN 'DEVUELTO'
+          ELSE 'ERROR'
+        END as "uiStatus",
+        EXISTS(SELECT 1 FROM tickets t WHERE t.order_id = o.id) as "hasTicket",
+        CASE 
+          WHEN LOWER(COALESCE(o.fulfillment_status, '')) = 'fulfilled' THEN true
+          ELSE false
+        END as "isManaged"
+      FROM orders o
+      LEFT JOIN order_items oi ON oi.order_id = o.id
+      ${whereClause ? sql`WHERE ${whereClause}` : sql``}
+      GROUP BY o.id, o.order_id, o.name, o.customer_name, o.total_amount, 
+               o.fulfillment_status, o.shopify_created_at, o.created_at, o.shop_id
+      ORDER BY COALESCE(o.shopify_created_at, o.created_at) DESC
+      LIMIT ${pageSize} OFFSET ${offset}
+    `;
       const countQuery = sql`
-        SELECT COUNT(DISTINCT o.id) as count
-        FROM orders o
-        ${whereClause ? sql`WHERE ${whereClause}` : sql``}
-      `;
+      SELECT COUNT(DISTINCT o.id) as count
+      FROM orders o
+      ${whereClause ? sql`WHERE ${whereClause}` : sql``}
+    `;
       console.log(`\u{1F4CA} Ejecutando queries...`);
       const [rows, totalRes] = await Promise.all([
         db.execute(baseQuery),
@@ -1376,8 +2356,8 @@ var DatabaseStorage = class {
         // SKU externo (mismo por ahora)
       }).from(orderItems).leftJoin(
         products,
-        eq(products.idShopify, orderItems.shopifyProductId)
-      ).where(eq(orderItems.orderId, BigInt(orderId))).orderBy(asc(orderItems.id));
+        eq2(products.idShopify, orderItems.shopifyProductId)
+      ).where(eq2(orderItems.orderId, BigInt(orderId))).orderBy(asc(orderItems.id));
       const uniqueItems = items.filter(
         (item, index, self) => index === self.findIndex((t) => t.id === item.id)
       );
@@ -1386,13 +2366,6 @@ var DatabaseStorage = class {
       console.error("Error getting order items:", error);
       return [];
     }
-  }
-  // Productos paginados por tienda
-  async getProductsPaginated(shopId, page, pageSize) {
-    const offset = (page - 1) * pageSize;
-    const rows = await db.select().from(products).where(eq(products.shopId, shopId)).orderBy(asc(products.title)).limit(pageSize).offset(offset);
-    const totalRes = await db.select({ count: count() }).from(products).where(eq(products.shopId, shopId));
-    return { rows, total: Number(totalRes[0]?.count ?? 0), page, pageSize };
   }
   async getCatalogProductsPaginated(page, pageSize) {
     const offset = (page - 1) * pageSize;
@@ -1409,229 +2382,10 @@ var DatabaseStorage = class {
 };
 var storage = new DatabaseStorage();
 
-// server/services/OrderSyncService.ts
-function toTextArrayFromTags(tags) {
-  if (!tags) return void 0;
-  const arr = tags.split(",").map((s) => s.trim()).filter(Boolean);
-  return arr.length ? arr : [];
-}
-function pickPhone(o) {
-  return o.phone ?? o?.shipping_address?.phone ?? o?.billing_address?.phone ?? o?.customer?.phone ?? null;
-}
-var OrderSyncService = class {
-  client;
-  storeNumber;
-  channelId;
-  constructor(storeParam = "1") {
-    this.client = new ShopifyAdminClient(storeParam);
-    this.storeNumber = parseInt(storeParam, 10);
-    this.channelId = this.storeNumber;
-  }
-  /** Mapea orden REST de Shopify → InsertOrder (tu schema) */
-  convertShopifyOrder(o) {
-    const idStr = String(o.id);
-    const first = o.customer?.first_name ?? null;
-    const last = o.customer?.last_name ?? null;
-    const ship = o.shipping_address ?? void 0;
-    const contactPhone = pickPhone(o);
-    const customerEmail = o.email ?? o.customer?.email ?? null;
-    return {
-      // Identificadores básicos
-      orderId: idStr,
-      // si lo usas aparte de idShopify
-      idShopify: idStr,
-      shopId: this.storeNumber,
-      channelId: this.channelId,
-      // Nombres / UI
-      name: o.name ?? null,
-      orderNumber: o.order_number != null ? String(o.order_number) : null,
-      customerFirstName: first,
-      customerLastName: last,
-      customerName: first || last ? `${first ?? ""} ${last ?? ""}`.trim() : customerEmail || "Sin nombre",
-      // Estados & dinero
-      financialStatus: o.financial_status ?? null,
-      fulfillmentStatus: o.fulfillment_status ?? null,
-      currency: o.currency ?? null,
-      subtotalPrice: o.subtotal_price ?? null,
-      totalAmount: o.total_price ?? null,
-      // Fechas nativas Shopify
-      shopifyCreatedAt: o.created_at ? new Date(o.created_at) : null,
-      shopifyUpdatedAt: o.updated_at ? new Date(o.updated_at) : null,
-      shopifyProcessedAt: o.processed_at ? new Date(o.processed_at) : null,
-      shopifyClosedAt: o.closed_at ? new Date(o.closed_at) : null,
-      shopifyCancelledAt: o.cancelled_at ? new Date(o.cancelled_at) : null,
-      // Cancelación / notas / contacto
-      cancelReason: o.cancel_reason ?? null,
-      orderNote: o.note ?? null,
-      contactPhone,
-      customerEmail,
-      tags: toTextArrayFromTags(o.tags),
-      // Envío (útil en tu UI)
-      shipName: ship?.name ?? null,
-      shipPhone: ship?.phone ?? null,
-      shipAddress1: ship?.address1 ?? null,
-      shipCity: ship?.city ?? null,
-      shipProvince: ship?.province ?? null,
-      shipCountry: ship?.country ?? null,
-      shipZip: ship?.zip ?? null,
-      // Flags internos
-      isManaged: false,
-      hasTicket: false,
-      status: "pending"
-    };
-  }
-  /** Convierte line items Shopify → InsertOrderItem[] (tu schema) */
-  convertOrderItems(shopifyOrder, localOrderId) {
-    return (shopifyOrder.line_items || []).map((item) => ({
-      orderId: localOrderId,
-      // FK local a orders.id
-      productId: null,
-      // resolverás luego vs tu catálogo
-      variantId: null,
-      sku: item.sku,
-      quantity: item.quantity,
-      price: item.price,
-      shopifyProductId: item.product_id != null ? String(item.product_id) : null,
-      shopifyVariantId: item.variant_id != null ? String(item.variant_id) : null,
-      title: item.title ?? null
-    }));
-  }
-  /** Upsert sin tocar storage: busca por (shopId, idShopify) y actualiza o crea */
-  async upsertOrder(orderData, items) {
-    const existing = await storage.getOrderByShopifyId(orderData.idShopify, this.storeNumber);
-    if (existing) {
-      await storage.updateOrder(existing.id, orderData);
-      return existing.id;
-    } else {
-      const newOrder = await storage.createOrder(orderData);
-      if (items.length > 0) {
-        for (const it of items) {
-          await storage.createOrderItem({ ...it, orderId: newOrder.id });
-        }
-      }
-      return newOrder.id;
-    }
-  }
-  /** Backfill de órdenes (histórico) */
-  async backfillOrders(sinceDate, cursor, limit = 50) {
-    console.log(`Iniciando backfill tienda ${this.storeNumber}${sinceDate ? ` desde ${sinceDate}` : ""}`);
-    const result = {
-      success: false,
-      ordersProcessed: 0,
-      errors: [],
-      hasNextPage: false,
-      lastCursor: void 0
-    };
-    try {
-      const firstPage = !cursor;
-      let params;
-      if (firstPage) {
-        params = {
-          limit: Math.min(limit, 250),
-          status: "any",
-          // Campos REST que necesitamos para mapear todo:
-          fields: "id,name,order_number,email,phone,created_at,updated_at,processed_at,closed_at,financial_status,fulfillment_status,currency,total_price,subtotal_price,tags,note,line_items,customer,shipping_address,billing_address,cancel_reason,cancelled_at"
-        };
-        if (sinceDate) params.created_at_min = sinceDate;
-      } else {
-        params = {
-          limit: Math.min(limit, 250),
-          page_info: cursor,
-          // puedes incluir 'fields' igual que arriba; si algún store falla, quítalo aquí
-          fields: "id,name,order_number,email,phone,created_at,updated_at,processed_at,closed_at,financial_status,fulfillment_status,currency,total_price,subtotal_price,tags,note,line_items,customer,shipping_address,billing_address,cancel_reason,cancelled_at"
-        };
-      }
-      const response = await this.client.getOrders(params);
-      const list = response.orders || [];
-      console.log(`\xD3rdenes obtenidas: ${list.length} (tienda ${this.storeNumber})`);
-      for (const shopifyOrder of list) {
-        try {
-          const orderData = this.convertShopifyOrder(shopifyOrder);
-          const items = this.convertOrderItems(
-            shopifyOrder,
-            0
-            /* se reemplaza al crear */
-          );
-          await this.upsertOrder(orderData, items);
-          result.ordersProcessed++;
-        } catch (e) {
-          const msg = `Error procesando ${shopifyOrder.name ?? shopifyOrder.id}: ${e}`;
-          console.log("error", msg);
-          result.errors.push(msg);
-        }
-      }
-      result.hasNextPage = !!response.hasNextPage;
-      result.lastCursor = response.nextPageInfo || void 0;
-      result.success = result.errors.length === 0;
-      console.log(`\u2705 Backfill tienda ${this.storeNumber}: ${result.ordersProcessed} \xF3rdenes`);
-      if (result.errors.length) console.log(`\u26A0\uFE0F ${result.errors.length} errores`);
-      return result;
-    } catch (e) {
-      const msg = `Error en backfill tienda ${this.storeNumber}: ${e}`;
-      console.log("\u274C", msg);
-      result.errors.push(msg);
-      return result;
-    }
-  }
-  /** Sync incremental (actualizadas desde X fecha/hora) */
-  async incrementalSync(updatedSince) {
-    console.log(`\u{1F504} Sync incremental tienda ${this.storeNumber} desde ${updatedSince}`);
-    const result = {
-      success: false,
-      ordersProcessed: 0,
-      errors: [],
-      hasNextPage: false,
-      lastCursor: void 0
-    };
-    try {
-      const params = {
-        updated_at_min: updatedSince,
-        status: "any",
-        limit: 100,
-        fields: "id,name,order_number,email,phone,created_at,updated_at,processed_at,closed_at,financial_status,fulfillment_status,currency,total_price,subtotal_price,tags,note,line_items,customer,shipping_address,billing_address,cancel_reason,cancelled_at"
-      };
-      const response = await this.client.getOrders(params);
-      const list = response.orders || [];
-      console.log(`\u{1F4E6} Sync incremental: ${list.length} \xF3rdenes`);
-      for (const shopifyOrder of list) {
-        try {
-          const orderData = this.convertShopifyOrder(shopifyOrder);
-          const items = this.convertOrderItems(shopifyOrder, 0);
-          await this.upsertOrder(orderData, items);
-          result.ordersProcessed++;
-        } catch (e) {
-          const msg = `Error incremental ${shopifyOrder.name ?? shopifyOrder.id}: ${e}`;
-          console.log("error", msg);
-          result.errors.push(msg);
-        }
-      }
-      result.hasNextPage = !!response.hasNextPage;
-      result.lastCursor = response.nextPageInfo || void 0;
-      result.success = result.errors.length === 0;
-      console.log(`Sync incremental ok: ${result.ordersProcessed}`);
-      return result;
-    } catch (e) {
-      const msg = `Error incremental tienda ${this.storeNumber}: ${e}`;
-      console.log("error", msg);
-      result.errors.push(msg);
-      return result;
-    }
-  }
-  async getOrdersCount() {
-    try {
-      const response = await this.client.getOrdersCount();
-      return { count: response.count || 0 };
-    } catch (e) {
-      return { count: 0, error: String(e) };
-    }
-  }
-  getStoreInfo() {
-    return this.client.getStoreInfo();
-  }
-};
-
 // server/services/ProductService.ts
-import { eq as eq2 } from "drizzle-orm";
+init_db();
+init_schema();
+import { eq as eq3 } from "drizzle-orm";
 var ProductService = class {
   client;
   storeNumber;
@@ -1676,7 +2430,7 @@ var ProductService = class {
     if (sp.variants && sp.variants.length > 0) {
       for (const sv of sp.variants) {
         const vData = this.convertShopifyVariant(sv, local.id);
-        const [vExisting] = await db.select().from(variants).where(eq2(variants.idShopify, String(sv.id))).limit(1);
+        const [vExisting] = await db.select().from(variants).where(eq3(variants.idShopify, String(sv.id))).limit(1);
         if (vExisting) {
           await storage.updateVariant(vExisting.id, vData);
         } else {
@@ -1825,7 +2579,7 @@ var ProductService = class {
 };
 
 // server/scheduler.ts
-function listStoreNumbersFromEnv() {
+function listStoreNumbersFromEnv2() {
   const nums = /* @__PURE__ */ new Set();
   for (const k of Object.keys(process.env)) {
     const m = k.match(/^SHOPIFY_SHOP_NAME_(\d+)$/);
@@ -1846,12 +2600,23 @@ async function runOrderIncremental(store) {
   try {
     const windowMin = parseInt(process.env.SYNC_WINDOW_MIN ?? "10", 10);
     const since = new Date(Date.now() - windowMin * 6e4).toISOString();
-    const svc = new OrderSyncService(String(store));
-    const res = await svc.incrementalSync(since);
-    console.log(
-      `[CRON][${nowISO()}] Orders store ${store}: processed=${res.ordersProcessed} errors=${res.errors.length}`
-    );
-    if (res.errors.length) console.log(res.errors.slice(0, 3));
+    let cursor = void 0;
+    let pages = 0;
+    const maxPages = parseInt(process.env.SYNC_MAX_PAGES ?? "5", 10);
+    do {
+      const res = await syncShopifyOrdersIncremental({
+        store,
+        updatedSince: since,
+        pageInfo: cursor,
+        limit: 100
+      });
+      const processed = res.summary?.[0]?.upserted ?? 0;
+      console.log(
+        `[CRON][${nowISO()}] Orders store ${store}: processed=${processed} next=${res.hasNextPage ? "yes" : "no"}`
+      );
+      cursor = res.nextPageInfo;
+      pages++;
+    } while (cursor && pages < maxPages);
   } catch (e) {
     console.error(`[CRON][${nowISO()}] Orders store ${store} ERROR:`, e.message || e);
   } finally {
@@ -1859,7 +2624,7 @@ async function runOrderIncremental(store) {
   }
 }
 function startSchedulers() {
-  const stores = listStoreNumbersFromEnv();
+  const stores = listStoreNumbersFromEnv2();
   if (stores.length === 0) {
     console.warn("[CRON] No se encontraron tiendas en envs (SHOPIFY_SHOP_NAME_N).");
     return;
@@ -1880,128 +2645,15 @@ function startSchedulers() {
 // server/index.ts
 import express2 from "express";
 import cors from "cors";
+import fileUpload from "express-fileupload";
 
 // server/routes.ts
 import { createServer } from "http";
+init_schema();
 import bcrypt from "bcrypt";
 import session from "express-session";
 import MemoryStore from "memorystore";
 import { z as z2 } from "zod";
-
-// server/syncShopifyOrders.ts
-import { eq as eq3 } from "drizzle-orm";
-function listStoreNumbersFromEnv2() {
-  const nums = /* @__PURE__ */ new Set();
-  for (const k of Object.keys(process.env)) {
-    const m = k.match(/^SHOPIFY_SHOP_NAME_(\d+)$/);
-    if (m) nums.add(parseInt(m[1], 10));
-  }
-  return Array.from(nums).sort((a, b) => a - b);
-}
-async function getChannelIdForStore(storeNumber) {
-  const code = process.env[`SHOPIFY_CHANNEL_CODE_${storeNumber}`] || // fallback simples (ajusta si quieres)
-  (storeNumber === 1 ? "CT" : storeNumber === 2 ? "WW" : "WW");
-  const [ch] = await db.select().from(channels).where(eq3(channels.code, code));
-  if (ch?.id) return ch.id;
-  const all = await db.select().from(channels).limit(1);
-  return all[0]?.id ?? 1;
-}
-async function shopifyRestGet(storeNumber, path3) {
-  const { shop, token, apiVersion } = getShopifyCredentials(String(storeNumber));
-  console.log(`[SYNC DEBUG] store=${storeNumber} shop=${shop} ver=${apiVersion} tokenLen=${token?.length}`);
-  const base = `https://${shop}/admin/api/${apiVersion}`;
-  const r = await fetch(`${base}${path3}`, {
-    headers: {
-      "X-Shopify-Access-Token": token,
-      "User-Agent": "LogisticManager/1.0 (+node)"
-    }
-  });
-  const text2 = await r.text();
-  if (!r.ok) {
-    throw new Error(
-      `Shopify ${storeNumber} ${r.status} ${r.statusText} :: ${text2.slice(0, 500)}`
-    );
-  }
-  return JSON.parse(text2);
-}
-async function syncShopifyOrders(opts = {}) {
-  const limit = opts.limit ?? 50;
-  let targets;
-  if (opts.store && String(opts.store).toLowerCase() !== "all") {
-    targets = [parseInt(String(opts.store), 10)];
-  } else {
-    targets = listStoreNumbersFromEnv2();
-  }
-  if (targets.length === 0) {
-    throw new Error("No se encontraron tiendas (SHOPIFY_SHOP_NAME_N) en .env");
-  }
-  const summary = [];
-  for (const storeNumber of targets) {
-    try {
-      const { shop } = getShopifyCredentials(String(storeNumber));
-      const channelId = await getChannelIdForStore(storeNumber);
-      const data = await shopifyRestGet(
-        storeNumber,
-        `/orders.json?limit=${limit}&status=any&order=created_at+desc`
-      );
-      let inserted = 0, upserted = 0;
-      for (const o of data.orders ?? []) {
-        const orderIdStr = String(o.id);
-        const tagsArr = typeof o.tags === "string" ? o.tags.split(",").map((s) => s.trim()).filter(Boolean) : [];
-        const customerName = o.customer?.first_name ? `${o.customer.first_name} ${o.customer.last_name || ""}`.trim() : o.email || o.name || null;
-        const baseRow = {
-          orderId: orderIdStr,
-          // UNIQUE externo
-          idShopify: orderIdStr,
-          // ✅ NOT NULL
-          shopId: storeNumber,
-          // ✅ NOT NULL (1 o 2)
-          channelId,
-          // FK a channels
-          // Campos “básicos” que ya tenías:
-          customerName,
-          totalAmount: o.total_price || null,
-          isManaged: false,
-          hasTicket: false,
-          status: o.financial_status || "pending",
-          // puede mapearse a un estado interno
-          // Extras de Shopify (opcionales pero útiles):
-          name: o.name || null,
-          orderNumber: o.order_number != null ? String(o.order_number) : null,
-          financialStatus: o.financial_status || null,
-          fulfillmentStatus: o.fulfillment_status || null,
-          currency: o.currency || null,
-          subtotalPrice: o.subtotal_price || null,
-          customerEmail: o.email || null,
-          tags: tagsArr,
-          // Timestamps
-          createdAt: o.created_at ? new Date(o.created_at) : void 0,
-          updatedAt: /* @__PURE__ */ new Date()
-        };
-        const existing = await db.select().from(orders).where(eq3(orders.orderId, orderIdStr)).limit(1);
-        if (existing[0]) {
-          await db.update(orders).set(baseRow).where(eq3(orders.id, existing[0].id));
-          upserted++;
-        } else {
-          await db.insert(orders).values(baseRow);
-          inserted++;
-        }
-      }
-      summary.push({ store: storeNumber, shop, inserted, upserted });
-    } catch (e) {
-      summary.push({
-        store: storeNumber,
-        shop: "unknown",
-        inserted: 0,
-        upserted: 0
-      });
-      console.error(`Sync tienda ${storeNumber} fall\xF3:`, e.message);
-    }
-  }
-  return { ok: true, summary };
-}
-
-// server/routes.ts
 var AlmacenSesionesMemoria = MemoryStore(session);
 var esquemaLogin = z2.object({
   email: z2.string().email(),
@@ -2233,8 +2885,8 @@ async function registerRoutes(app) {
   });
   app.get("/api/dashboard/orders-by-weekday", requiereAutenticacion, async (req, res) => {
     try {
-      const weekOffset = req.query.week ? Number(req.query.week) : 0;
-      const data = await storage.getOrdersByWeekday(weekOffset);
+      const week = Number(req.query.week ?? 0);
+      const data = await storage.getOrdersByWeekday(week);
       res.json(data);
     } catch {
       res.status(500).json({ message: "No se pudieron obtener \xF3rdenes por d\xEDa" });
@@ -2250,12 +2902,13 @@ async function registerRoutes(app) {
   });
   app.get("/api/products", requiereAutenticacion, async (req, res) => {
     try {
+      const { catalogStorage: catalogStorage2 } = await Promise.resolve().then(() => (init_catalogStorage(), catalogStorage_exports));
       const page = Number(req.query.page) || 1;
       const pageSize = Number(req.query.pageSize) || 25;
       const search = req.query.search;
       const categoria = req.query.categoria;
       const activo = req.query.activo;
-      const productos = await storage.getProductsPaginated({
+      const productos = await catalogStorage2.getProductsPaginated({
         page,
         pageSize,
         search,
@@ -2263,42 +2916,191 @@ async function registerRoutes(app) {
         activo: activo !== "all" ? activo === "true" : void 0
       });
       res.json(productos);
-    } catch {
+    } catch (error) {
+      console.error("Error en /api/products:", error);
       res.status(500).json({ message: "No se pudieron obtener productos" });
     }
   });
   app.get("/api/products/categories", requiereAutenticacion, async (req, res) => {
     try {
-      const categorias = await storage.getProductCategories();
+      const { catalogStorage: catalogStorage2 } = await Promise.resolve().then(() => (init_catalogStorage(), catalogStorage_exports));
+      const categorias = await catalogStorage2.getProductCategories();
       res.json(categorias);
-    } catch {
+    } catch (error) {
+      console.error("Error en /api/products/categories:", error);
       res.status(500).json({ message: "No se pudieron obtener categor\xEDas" });
     }
   });
   app.post("/api/products", requiereAutenticacion, async (req, res) => {
     try {
-      const producto = await storage.createProduct(req.body);
+      const { catalogStorage: catalogStorage2 } = await Promise.resolve().then(() => (init_catalogStorage(), catalogStorage_exports));
+      const producto = await catalogStorage2.createProduct(req.body);
       res.status(201).json(producto);
-    } catch {
+    } catch (error) {
+      console.error("Error en POST /api/products:", error);
       res.status(500).json({ message: "No se pudo crear el producto" });
     }
   });
   app.patch("/api/products/:id", requiereAutenticacion, async (req, res) => {
     try {
-      const id = Number(req.params.id);
-      const producto = await storage.updateProduct(id, req.body);
+      const { catalogStorage: catalogStorage2 } = await Promise.resolve().then(() => (init_catalogStorage(), catalogStorage_exports));
+      const id = req.params.id;
+      const producto = await catalogStorage2.updateProduct(id, req.body);
       res.json(producto);
-    } catch {
+    } catch (error) {
+      console.error("Error en PATCH /api/products:", error);
       res.status(500).json({ message: "No se pudo actualizar el producto" });
     }
   });
   app.delete("/api/products/:id", requiereAutenticacion, async (req, res) => {
     try {
-      const id = Number(req.params.id);
-      await storage.deleteProduct(id);
+      const { catalogStorage: catalogStorage2 } = await Promise.resolve().then(() => (init_catalogStorage(), catalogStorage_exports));
+      const id = req.params.id;
+      await catalogStorage2.deleteProduct(id);
       res.status(204).send();
-    } catch {
+    } catch (error) {
+      console.error("Error en DELETE /api/products:", error);
       res.status(500).json({ message: "No se pudo eliminar el producto" });
+    }
+  });
+  app.get("/api/unified-products/catalog", requiereAutenticacion, async (req, res) => {
+    try {
+      const { productStorage: productStorage2 } = await Promise.resolve().then(() => (init_productStorage(), productStorage_exports));
+      const page = Number(req.query.page) || 1;
+      const pageSize = Number(req.query.pageSize) || 300;
+      const search = req.query.search;
+      const searchField = req.query.searchField;
+      const marca = req.query.marca;
+      const categoria = req.query.categoria;
+      const condicion = req.query.condicion;
+      const marca_producto = req.query.marca_producto;
+      const orderBy = req.query.orderBy;
+      const orderDir = req.query.orderDir;
+      const result = await productStorage2.getCatalogProducts({
+        page,
+        pageSize,
+        search,
+        searchField,
+        marca,
+        categoria,
+        condicion,
+        marca_producto,
+        orderBy,
+        orderDir
+      });
+      res.json(result);
+    } catch (error) {
+      console.error("Error en /api/unified-products/catalog:", error);
+      res.status(500).json({ message: "Error al obtener productos del cat\xE1logo" });
+    }
+  });
+  app.get("/api/unified-products/catalog/facets", requiereAutenticacion, async (req, res) => {
+    try {
+      const { productStorage: productStorage2 } = await Promise.resolve().then(() => (init_productStorage(), productStorage_exports));
+      const facets = await productStorage2.getCatalogFacets();
+      res.json(facets);
+    } catch (error) {
+      console.error("Error en /api/unified-products/catalog/facets:", error);
+      res.status(500).json({ message: "Error al obtener facetas del cat\xE1logo" });
+    }
+  });
+  app.patch("/api/unified-products/catalog/:sku", requiereAutenticacion, async (req, res) => {
+    try {
+      const { productStorage: productStorage2 } = await Promise.resolve().then(() => (init_productStorage(), productStorage_exports));
+      const sku = req.params.sku;
+      const result = await productStorage2.updateCatalogProduct(sku, req.body);
+      res.json(result);
+    } catch (error) {
+      console.error("Error en PATCH /api/unified-products/catalog:", error);
+      res.status(500).json({ message: "Error al actualizar producto del cat\xE1logo" });
+    }
+  });
+  app.get("/api/unified-products/shopify", requiereAutenticacion, async (req, res) => {
+    try {
+      const { productStorage: productStorage2 } = await Promise.resolve().then(() => (init_productStorage(), productStorage_exports));
+      const page = Number(req.query.page) || 1;
+      const pageSize = Number(req.query.pageSize) || 300;
+      const search = req.query.search;
+      const shopId = req.query.shopId ? Number(req.query.shopId) : void 0;
+      const status = req.query.status;
+      const vendor = req.query.vendor;
+      const productType = req.query.productType;
+      const syncStatus = req.query.syncStatus;
+      const result = await productStorage2.getShopifyProducts({
+        page,
+        pageSize,
+        search,
+        shopId,
+        status,
+        vendor,
+        productType,
+        syncStatus
+      });
+      res.json(result);
+    } catch (error) {
+      console.error("Error en /api/unified-products/shopify:", error);
+      res.status(500).json({ message: "Error al obtener productos de Shopify" });
+    }
+  });
+  app.patch("/api/unified-products/shopify/variant/:id", requiereAutenticacion, async (req, res) => {
+    try {
+      const { productStorage: productStorage2 } = await Promise.resolve().then(() => (init_productStorage(), productStorage_exports));
+      const variantId = Number(req.params.id);
+      const userId = req.user?.id || 1;
+      const result = await productStorage2.updateShopifyVariant(variantId, req.body, userId);
+      res.json(result);
+    } catch (error) {
+      console.error("Error en PATCH /api/unified-products/shopify/variant:", error);
+      res.status(500).json({ message: "Error al actualizar variante de Shopify" });
+    }
+  });
+  app.get("/api/unified-products/reconciliation/stats", requiereAutenticacion, async (req, res) => {
+    try {
+      const { productStorage: productStorage2 } = await Promise.resolve().then(() => (init_productStorage(), productStorage_exports));
+      const stats = await productStorage2.getReconciliationStats();
+      res.json(stats);
+    } catch (error) {
+      console.error("Error en /api/unified-products/reconciliation/stats:", error);
+      res.status(500).json({ message: "Error al obtener estad\xEDsticas de conciliaci\xF3n" });
+    }
+  });
+  app.get("/api/unified-products/reconciliation/unlinked/:type", requiereAutenticacion, async (req, res) => {
+    try {
+      const { productStorage: productStorage2 } = await Promise.resolve().then(() => (init_productStorage(), productStorage_exports));
+      const type = req.params.type;
+      const page = Number(req.query.page) || 1;
+      const pageSize = Number(req.query.pageSize) || 300;
+      const result = await productStorage2.getUnlinkedProducts(type, { page, pageSize });
+      res.json(result);
+    } catch (error) {
+      console.error("Error en /api/unified-products/reconciliation/unlinked:", error);
+      res.status(500).json({ message: "Error al obtener productos sin vincular" });
+    }
+  });
+  app.post("/api/unified-products/reconciliation/link", requiereAutenticacion, async (req, res) => {
+    try {
+      const { productStorage: productStorage2 } = await Promise.resolve().then(() => (init_productStorage(), productStorage_exports));
+      const userId = req.user?.id || 1;
+      const link = await productStorage2.createProductLink({
+        ...req.body,
+        createdBy: userId,
+        updatedBy: userId
+      });
+      res.status(201).json(link);
+    } catch (error) {
+      console.error("Error en POST /api/unified-products/reconciliation/link:", error);
+      res.status(500).json({ message: "Error al crear v\xEDnculo de producto" });
+    }
+  });
+  app.delete("/api/unified-products/reconciliation/link/:id", requiereAutenticacion, async (req, res) => {
+    try {
+      const { productStorage: productStorage2 } = await Promise.resolve().then(() => (init_productStorage(), productStorage_exports));
+      const id = Number(req.params.id);
+      const result = await productStorage2.deleteProductLink(id);
+      res.json(result);
+    } catch (error) {
+      console.error("Error en DELETE /api/unified-products/reconciliation/link:", error);
+      res.status(500).json({ message: "Error al eliminar v\xEDnculo de producto" });
     }
   });
   app.get("/api/orders", requiereAutenticacion, async (req, res) => {
@@ -2601,63 +3403,45 @@ async function registerRoutes(app) {
   app.get("/api/integrations/shopify/ping-count", requiereAutenticacion, async (req, res) => {
     try {
       const storeParam = req.query.store || "1";
-      console.log(`\u{1F4CA} Shopify ping count para tienda ${storeParam}`);
-      const orderSync = new OrderSyncService(storeParam);
-      const countResult = await orderSync.getOrdersCount();
-      const storeInfo = orderSync.getStoreInfo();
-      if (countResult.error) {
-        return res.status(500).json({
-          ok: false,
-          store: storeInfo.storeNumber,
-          error: countResult.error
-        });
-      }
+      const result = await getOrdersCount(storeParam);
       return res.json({
         ok: true,
-        store: storeInfo.storeNumber,
-        shop: storeInfo.shopDomain,
-        count: countResult.count,
-        apiVersion: storeInfo.apiVersion
+        store: result.store,
+        shop: result.shop,
+        count: result.count,
+        apiVersion: getShopifyCredentials(String(storeParam)).apiVersion
       });
     } catch (e) {
       console.log(`\u274C Error en ping count: ${e.message}`);
-      res.status(500).json({
-        ok: false,
-        error: e.message
-      });
+      res.status(500).json({ ok: false, error: e.message });
     }
   });
   app.post("/api/integrations/shopify/orders/backfill", requiereAutenticacion, async (req, res) => {
     try {
       const storeParam = req.query.store || "1";
       const since = req.query.since;
-      const cursor = req.query.cursor;
+      const cursor = req.query.cursor || void 0;
       const limit = parseInt(req.query.limit) || 50;
-      console.log(`\u{1F504} Backfill iniciado para tienda ${storeParam}, since: ${since}, limit: ${limit}`);
-      const orderSync = new OrderSyncService(storeParam);
-      const result = await orderSync.backfillOrders(since, cursor, limit);
-      if (result.success) {
+      const result = await syncShopifyOrdersBackfill({
+        store: storeParam,
+        since,
+        pageInfo: cursor,
+        limit
+      });
+      if (result.ok) {
         res.json({
           ok: true,
           message: `Backfill completado para tienda ${storeParam}`,
-          ordersProcessed: result.ordersProcessed,
+          summary: result.summary,
           hasNextPage: result.hasNextPage,
-          errors: result.errors
+          nextPageInfo: result.nextPageInfo
         });
       } else {
-        res.status(500).json({
-          ok: false,
-          message: `Backfill fall\xF3 para tienda ${storeParam}`,
-          ordersProcessed: result.ordersProcessed,
-          errors: result.errors
-        });
+        res.status(500).json({ ok: false, message: `Backfill fall\xF3 para tienda ${storeParam}` });
       }
     } catch (e) {
       console.log(`\u274C Error en backfill: ${e.message}`);
-      res.status(500).json({
-        ok: false,
-        error: e.message
-      });
+      res.status(500).json({ ok: false, error: e.message });
     }
   });
   app.post("/api/integrations/shopify/sync-now", requiereAutenticacion, async (req, res) => {
@@ -2684,36 +3468,30 @@ async function registerRoutes(app) {
     try {
       const storeParam = req.query.store || "1";
       const updatedSince = req.query.updatedSince;
-      if (!updatedSince) {
+      const cursor = req.query.cursor || void 0;
+      const limit = parseInt(req.query.limit) || 100;
+      if (!updatedSince && !cursor) {
         return res.status(400).json({
           ok: false,
-          error: "Par\xE1metro updatedSince es requerido (formato ISO8601)"
+          error: "Par\xE1metro updatedSince es requerido cuando no hay cursor"
         });
       }
-      console.log(`\u{1F504} Sync incremental para tienda ${storeParam}, desde: ${updatedSince}`);
-      const orderSync = new OrderSyncService(storeParam);
-      const result = await orderSync.incrementalSync(updatedSince);
-      if (result.success) {
-        res.json({
-          ok: true,
-          message: `Sync incremental completado para tienda ${storeParam}`,
-          ordersProcessed: result.ordersProcessed,
-          errors: result.errors
-        });
-      } else {
-        res.status(500).json({
-          ok: false,
-          message: `Sync incremental fall\xF3 para tienda ${storeParam}`,
-          ordersProcessed: result.ordersProcessed,
-          errors: result.errors
-        });
-      }
+      const result = await syncShopifyOrdersIncremental({
+        store: storeParam,
+        updatedSince: updatedSince || new Date(Date.now() - 10 * 6e4).toISOString(),
+        pageInfo: cursor,
+        limit
+      });
+      res.json({
+        ok: true,
+        message: `Sync incremental para tienda ${storeParam}`,
+        summary: result.summary,
+        hasNextPage: result.hasNextPage,
+        nextPageInfo: result.nextPageInfo
+      });
     } catch (e) {
       console.log(`\u274C Error en sync incremental: ${e.message}`);
-      res.status(500).json({
-        ok: false,
-        error: e.message
-      });
+      res.status(500).json({ ok: false, error: e.message });
     }
   });
   app.get("/api/integrations/shopify/products", requiereAutenticacion, async (req, res) => {
@@ -2722,12 +3500,12 @@ async function registerRoutes(app) {
       const storeId = parseInt(storeParam);
       console.log(`\u{1F4E6} Listando productos para tienda ${storeParam}`);
       const productService = new ProductService(storeParam);
-      const products2 = await productService.getProductsForStore(storeId);
+      const products3 = await productService.getProductsForStore(storeId);
       res.json({
         ok: true,
         store: storeParam,
-        products: products2,
-        count: products2.length
+        products: products3,
+        count: products3.length
       });
     } catch (e) {
       console.log(`\u274C Error listando productos: ${e.message}`);
@@ -3013,6 +3791,11 @@ aplicacion.use(
 );
 aplicacion.use(express2.json());
 aplicacion.use(express2.urlencoded({ extended: true }));
+aplicacion.use(fileUpload({
+  limits: { fileSize: 50 * 1024 * 1024 },
+  // 50MB max
+  abortOnLimit: true
+}));
 aplicacion.use((req, res, next) => {
   const inicio = Date.now();
   const ruta = req.path;

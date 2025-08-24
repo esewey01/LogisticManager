@@ -1,5 +1,5 @@
 // server/scheduler.ts
-import { OrderSyncService } from "./services/OrderSyncService";
+import { syncShopifyOrdersIncremental } from "./syncShopifyOrders";
 import { ProductService } from "./services/ProductService";
 
 // Descubre tiendas de las envs: SHOPIFY_SHOP_NAME_1, _2, ...
@@ -27,21 +27,37 @@ async function runOrderIncremental(store: number) {
   }
   orderLock[store] = true;
   try {
-    const windowMin = parseInt(process.env.SYNC_WINDOW_MIN ?? "10", 10); // búfer > intervalo
+    const windowMin = parseInt(process.env.SYNC_WINDOW_MIN ?? "10", 10);
     const since = new Date(Date.now() - windowMin * 60_000).toISOString();
 
-    const svc = new OrderSyncService(String(store));
-    const res = await svc.incrementalSync(since);
-    console.log(
-      `[CRON][${nowISO()}] Orders store ${store}: processed=${res.ordersProcessed} errors=${res.errors.length}`
-    );
-    if (res.errors.length) console.log(res.errors.slice(0, 3));
+    let cursor: string | undefined = undefined;
+    let pages = 0;
+    const maxPages = parseInt(process.env.SYNC_MAX_PAGES ?? "5", 10);
+
+    do {
+      const res = await syncShopifyOrdersIncremental({
+        store,
+        updatedSince: since,
+        pageInfo: cursor,
+        limit: 100,
+      });
+
+      const processed = res.summary?.[0]?.upserted ?? 0;
+      console.log(
+        `[CRON][${nowISO()}] Orders store ${store}: processed=${processed} next=${res.hasNextPage ? "yes" : "no"}`
+      );
+
+      cursor = res.nextPageInfo;
+      pages++;
+    } while (cursor && pages < maxPages);
+
   } catch (e: any) {
     console.error(`[CRON][${nowISO()}] Orders store ${store} ERROR:`, e.message || e);
   } finally {
     orderLock[store] = false;
   }
 }
+
 
 async function runProductSync(store: number) {
   if (productLock[store]) {
