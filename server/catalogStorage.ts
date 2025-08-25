@@ -37,18 +37,20 @@ export class CatalogStorage {
         paramIndex++;
       }
 
-      if (activo !== undefined) {
-        whereConditions.push(`situacion = $${paramIndex}`);
-        params_array.push(activo ? 'activo' : 'inactivo');
-        paramIndex++;
-      }
+      // Nota: La columna 'situacion' no existe en la tabla real
+      // Removemos este filtro temporalmente para evitar errores
+      // if (activo !== undefined) {
+      //   whereConditions.push(`situacion = $${paramIndex}`);
+      //   params_array.push(activo ? 'activo' : 'inactivo');
+      //   paramIndex++;
+      // }
 
       const whereClause = whereConditions.join(' AND ');
 
       // Obtener productos usando SQL directo
       const productos = await baseDatos.execute(sql`
         SELECT sku, marca, nombre_producto, categoria, marca_producto, 
-               stock, costo, situacion, sku_interno, codigo_barras
+               stock, costo, sku_interno, codigo_barras
         FROM catalogo_productos 
         WHERE nombre_producto IS NOT NULL
         ORDER BY nombre_producto
@@ -73,7 +75,7 @@ export class CatalogStorage {
           marca: p.marca_producto,
           precio: p.costo ? Number(p.costo) : null,
           inventario: p.stock || 0,
-          activo: p.situacion === 'activo',
+          activo: true, // Por defecto activo ya que no tenemos columna situacion
           sku_interno: p.sku_interno,
           codigo_barras: p.codigo_barras,
         })),
@@ -111,15 +113,14 @@ export class CatalogStorage {
     try {
       await baseDatos.execute(sql`
         INSERT INTO catalogo_productos (
-          sku, nombre_producto, categoria, marca_producto, stock, costo, situacion
+          sku, nombre_producto, categoria, marca_producto, stock, costo
         ) VALUES (
           ${datos.sku}, 
           ${datos.nombre}, 
           ${datos.categoria || null}, 
           ${datos.marca || null}, 
           ${datos.inventario || 0}, 
-          ${datos.precio || null}, 
-          ${datos.activo ? 'activo' : 'inactivo'}
+          ${datos.precio || null}
         )
       `);
 
@@ -149,8 +150,7 @@ export class CatalogStorage {
           categoria = ${datos.categoria || null},
           marca_producto = ${datos.marca || null},
           stock = ${datos.inventario || 0},
-          costo = ${datos.precio || null},
-          situacion = ${datos.activo ? 'activo' : 'inactivo'}
+          costo = ${datos.precio || null}
         WHERE sku = ${id}
       `);
 

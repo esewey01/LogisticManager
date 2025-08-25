@@ -1138,7 +1138,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const shopId = Number(req.query.shopId);
       const page = req.query.page ? Number(req.query.page) : 1;
       const pageSize = req.query.pageSize ? Number(req.query.pageSize) : 15;
-      const data = await almacenamiento.getProductsPaginated(shopId, page, pageSize);
+      const data = await almacenamiento.getProductsPaginated({ page, pageSize });
       res.json(data);
     } catch {
       res.status(500).json({ message: "No se pudieron obtener productos" });

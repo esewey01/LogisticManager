@@ -345,7 +345,7 @@ export default function Pedidos() {
       const response = await apiRequest("POST", "/api/orders/export", filters);
       return response.blob();
     },
-    onSuccess: (blob) => {
+    onSuccess: (blob: Blob) => {
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -380,7 +380,7 @@ export default function Pedidos() {
 
       return response.json();
     },
-    onSuccess: (data) => {
+    onSuccess: (data: any) => {
       queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
       queryClient.invalidateQueries({ queryKey: ["/api/dashboard/metrics"] });
       toast({
@@ -638,7 +638,7 @@ export default function Pedidos() {
                 )}
                 {channelFilter !== "all" && (
                   <Badge variant="secondary" className="flex items-center gap-1">
-                    Canal: {channels.find(c => String(c.id) === String(channelFilter))?.name ?? channelFilter}
+                    Canal: {channels.find((c: Channel) => String(c.id) === String(channelFilter))?.name ?? channelFilter}
                     <button
                       aria-label="Quitar canal"
                       onClick={() => setChannelFilter("all")}
