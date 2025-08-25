@@ -170,11 +170,11 @@ const Pagination = ({
 export default function Pedidos() {
   const [search, setSearch] = useState("");
   const [searchType, setSearchType] = useState<"all" | "sku" | "customer" | "product">("all");
-  const [statusFilter, setStatusFilter] = useState<"unmanaged" | "managed" | "all">("all");
+  const [statusFilter, setStatusFilter] = useState<"unmanaged" | "managed" | "all">("unmanaged");
   const [channelFilter, setChannelFilter] = useState<string>("all");
   const [selectedOrders, setSelectedOrders] = useState<Array<number | string>>([]);
   const [selectedOrder, setSelectedOrder] = useState<OrderRow | null>(null);
-  const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
+  const [selectedOrderId, setSelectedOrderId] = useState<number | null>(null);
   const [cancelOrderId, setCancelOrderId] = useState<number | string | null>(null);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
@@ -194,15 +194,16 @@ export default function Pedidos() {
   const { data: ordersResp, isLoading } = useQuery<OrdersResp>({
     queryKey: ["/api/orders", { page, pageSize, search, searchType, statusFilter, channelFilter, sortField, sortOrder }],
     queryFn: async () => {
-      // ⚠️ Usa los nombres que espera tu backend (restauramos 'channelFilter')
       const params = new URLSearchParams({
         page: page.toString(),
         pageSize: pageSize.toString(),
         ...(search && { search }),
         ...(searchType !== 'all' && { searchType }),
-        ...(statusFilter !== 'all' && { statusFilter }),
-        ...(channelFilter !== 'all' && { channelFilter }), // <- importante
-        ...(sortField && { sortField: String(sortField), sortOrder })
+        // ✅ siempre envía el statusFilter para que no haya ambigüedad
+        ...(statusFilter && { statusFilter }),
+        // ✅ enviar 'channelId' que es lo que el backend espera
+        ...(channelFilter !== 'all' && { channelId: String(channelFilter) }),
+        ...(sortField && { sortField: String(sortField), sortOrder }),
       });
 
       const res = await apiRequest("GET", `/api/orders?${params}`);
@@ -262,19 +263,19 @@ export default function Pedidos() {
     mutationFn: async (orderIds: (number | string)[]) => {
       const response = await apiRequest("POST", "/api/tickets/bulk", {
         orderIds,
-        notes: `Tickets creados masivamente el ${new Date().toLocaleDateString()}`
+        notes: `Tickets creados masivamente el ${new Date().toLocaleDateString()}`,
       });
       return response.json();
     },
     onSuccess: (data: any) => {
       toast({
-        title: "Tickets creados exitosamente",
-        description: `Se crearon ${data.tickets?.length || selectedOrders.length} tickets`,
+        title: "Resultado de tickets masivos",
+        description: data?.message || `Se crearon ${data?.tickets?.length ?? 0} tickets`,
       });
       setSelectedOrders([]);
       queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/dashboard/metrics"] });
       queryClient.invalidateQueries({ queryKey: ["/api/tickets"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/dashboard/metrics"] });
     },
     onError: (error: any) => {
       toast({
@@ -336,9 +337,10 @@ export default function Pedidos() {
   const exportMutation = useMutation({
     mutationFn: async () => {
       const filters = {
-        statusFilter,
-        channelFilter: channelFilter !== 'all' ? String(channelFilter) : undefined, // unificar nombre
-        search: search.trim() || undefined
+        statusFilter, // ✅ explícito
+        channelId: channelFilter !== 'all' ? String(channelFilter) : undefined, // ✅ unificado
+        search: search.trim() || undefined,
+        searchType: searchType !== 'all' ? searchType : undefined,
       };
       const response = await apiRequest("POST", "/api/orders/export", filters);
       return response.blob();
@@ -457,12 +459,13 @@ export default function Pedidos() {
                           size="sm"
                           onClick={() => {
                             setSearchType("all");
-                            setStatusFilter("all");
+                            setStatusFilter("unmanaged");  // ✅ respeta “sin gestionar” por defecto
                             setChannelFilter("all");
                           }}
                         >
                           Limpiar
                         </Button>
+
                       </div>
 
                       <Separator className="my-2" />
@@ -654,12 +657,13 @@ export default function Pedidos() {
                     onClick={() => {
                       setSearch("");
                       setSearchType("all");
-                      setStatusFilter("all");
+                      setStatusFilter("unmanaged");  // ✅
                       setChannelFilter("all");
                     }}
                   >
                     Limpiar todo
                   </Button>
+
                 )}
               </div>
             </div>
@@ -790,7 +794,7 @@ export default function Pedidos() {
                               <Button
                                 variant="ghost"
                                 size="icon"
-                                onClick={() => setSelectedOrderId(String(order.id))}
+                                onClick={() => setSelectedOrderId(Number(order.id))}
                                 aria-label="Ver pedido"
                                 data-testid={`button-view-order-${order.id}`}
                               >
@@ -807,14 +811,15 @@ export default function Pedidos() {
                               <Button
                                 variant="outline"
                                 size="icon"
-                                onClick={() => createTicketMutation.mutate({ orderId: order.id })}
-                                disabled={createTicketMutation.isPending}
+                                onClick={() =>
+                                  createTicketMutation.mutate({ orderId: Number(order.id) })}
+                                disabled={createTicketMutation.isPending || order.isManaged || order.hasTicket}
                                 aria-label="Crear ticket"
-                                data-testid={`button-create-ticket-${order.id}`}
                               >
                                 <Ticket className="h-4 w-4" />
                                 <span className="sr-only">Crear ticket</span>
                               </Button>
+
                             </TooltipTrigger>
                             <TooltipContent>Crear ticket</TooltipContent>
                           </Tooltip>
@@ -876,10 +881,10 @@ export default function Pedidos() {
           />
         )}
 
-        {selectedOrderId && (
+        {selectedOrderId != null && (
           <OrderDetailsModalNew
-            orderId={selectedOrderId}
-            isOpen={!!selectedOrderId}
+            orderId={selectedOrderId}      // ✅ ahora es number
+            isOpen={selectedOrderId != null}
             onClose={() => setSelectedOrderId(null)}
           />
         )}

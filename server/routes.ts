@@ -16,9 +16,28 @@ import {
 import { syncShopifyOrders, getOrdersCount, syncShopifyOrdersBackfill, syncShopifyOrdersIncremental } from "./syncShopifyOrders"; // archivo de sincrinizacion
 import { getShopifyCredentials } from "./shopifyEnv"; // Helper para múltiples tiendas
 import { ProductService } from "./services/ProductService"; // Servicio de productos
+import multer, { type FileFilterCallback } from "multer";
+import type { Request, Response } from "express";
+import xlsx from "xlsx";
 
 
 
+// helper al comienzo de routes.ts (o en un util compartido)
+function jsonSafe<T>(value: T): T {
+  if (value === null || value === undefined) return value;
+  const t = typeof value;
+  if (t === "bigint") return (value as unknown as bigint).toString() as unknown as T;
+  if (t !== "object") return value;
+
+  if (Array.isArray(value)) {
+    return (value as unknown as any[]).map(jsonSafe) as unknown as T;
+  }
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+    out[k] = jsonSafe(v);
+  }
+  return out as T;
+}
 
 // Adaptador de store en memoria para sesiones (con limpieza automática)
 const AlmacenSesionesMemoria = MemoryStore(session);
@@ -476,6 +495,32 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Crear producto
+  app.post("/api/unified-products/catalog", requiereAutenticacion, async (req, res) => {
+    try {
+      const { productStorage } = await import("./productStorage");
+      const result = await productStorage.createCatalogProduct(req.body);
+      res.status(201).json(result);
+    } catch (error) {
+      console.error("Error en POST /api/unified-products/catalog:", error);
+      res.status(500).json({ message: "Error al crear producto del catálogo" });
+    }
+  });
+
+  // Eliminar producto
+  app.delete("/api/unified-products/catalog/:sku", requiereAutenticacion, async (req, res) => {
+    try {
+      const { productStorage } = await import("./productStorage");
+      const sku = req.params.sku;
+      const result = await productStorage.deleteCatalogProduct(sku);
+      res.json(result);
+    } catch (error) {
+      console.error("Error en DELETE /api/unified-products/catalog:", error);
+      res.status(500).json({ message: "Error al eliminar producto del catálogo" });
+    }
+  });
+
+
   // Pestaña 2: Shopify
   app.get("/api/unified-products/shopify", requiereAutenticacion, async (req, res) => {
     try {
@@ -583,11 +628,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/orders", requiereAutenticacion, async (req, res) => {
     try {
       const statusFilter = (req.query.statusFilter as string) || "unmanaged";
-      const channelId = req.query.channelId && req.query.channelId !== "all" ? Number(req.query.channelId) : undefined;
+
+      // ✅ acepta channelId o channelFilter
+      const rawChannel = (req.query.channelId ?? req.query.channelFilter) as string | undefined;
+      const channelId = rawChannel && rawChannel !== "all" ? Number(rawChannel) : undefined;
+
       const page = req.query.page ? Number(req.query.page) : 1;
-      const pageSize = req.query.pageSize ? Number(req.query.pageSize) : 15;
+      const pageSize = req.query.pageSize ? Number(req.query.pageSize) : 50; // opcional: alinea con el FE
       const search = req.query.search as string | undefined;
       const searchType = req.query.searchType as "all" | "sku" | "customer" | "product" | undefined;
+
+      // ✅ ordenamiento opcional (whitelist)
+      const sortField = (req.query.sortField as string | undefined) || undefined;
+      const sortOrder = ((req.query.sortOrder as string) || "desc").toLowerCase() === "asc" ? "asc" : "desc";
+
       const data = await almacenamiento.getOrdersPaginated({
         statusFilter: statusFilter as any,
         channelId,
@@ -595,25 +649,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
         pageSize,
         search,
         searchType,
+        sortField,
+        sortOrder,
       });
       res.json(data);
-    } catch {
+    } catch (e) {
       res.status(500).json({ message: "No se pudieron obtener órdenes" });
     }
   });
 
 
-  app.get("/api/orders/:orderId/items", requiereAutenticacion, async (req, res) => {
-    const orderId = Number(req.params.orderId);
-    if (!Number.isFinite(orderId)) return res.status(400).json({ message: "orderId inválido" });
-    try {
-      const items = await almacenamiento.getOrderItems(orderId);
-      res.json({ items });
-    } catch (e: any) {
-      console.error("[items]", e?.message);
-      res.status(500).json({ message: "No se pudieron obtener items" });
-    }
-  });
 
 
   app.get("/api/orders/:id", requiereAutenticacion, async (req, res) => {
@@ -621,18 +666,39 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const id = Number(req.params.id);
       console.log(`[GET /api/orders/:id] Solicitando orden ID: ${id}`);
 
-      if (Number.isNaN(id))
+      if (Number.isNaN(id)) {
         return res.status(400).json({ message: "ID de orden inválido" });
+      }
 
       const orden = await almacenamiento.getOrder(id);
       console.log(`[GET /api/orders/:id] Orden encontrada:`, !!orden);
 
-      if (!orden)
+      if (!orden) {
         return res.status(404).json({ message: "Orden no encontrada" });
-      res.json(orden);
+      }
+      res.json(jsonSafe(orden));
     } catch (error) {
       console.error(`[GET /api/orders/:id] Error:`, error);
       res.status(500).json({ message: "No se pudo obtener la orden" });
+    }
+  });
+
+  app.get("/api/orders/:orderId/items", requiereAutenticacion, async (req, res) => {
+    const orderId = Number(req.params.orderId);
+    console.log(`[DEBUG] Solicitando items para order ID: ${orderId}`);
+
+    if (!Number.isFinite(orderId)) {
+      console.log(`[DEBUG] Order ID inválido: ${req.params.orderId}`);
+      return res.status(400).json({ message: "orderId inválido" });
+    }
+
+    try {
+      const items = await almacenamiento.getOrderItems(orderId);
+      console.log(`[DEBUG] Items retornados:`, items);
+      res.json(jsonSafe({ items }));
+    } catch (e: any) {
+      console.error("[items] Error:", e?.message);
+      res.status(500).json({ message: "No se pudieron obtener items" });
     }
   });
 
@@ -714,32 +780,184 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
 
+  //ORDENES IMPORTACION Y EXPORTACION VIA EXCEL
+  // Body: { selectedIds?: (number|string)[], statusFilter?, channelId?, search?, searchType? }
+  // Si no hay selectedIds, usa los filtros actuales para exportar lo visible (page/pageSize opcional).
+  // ———————————————————————————————————
+  const upload = multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: 5 * 1024 * 1024 },
+    fileFilter: (_req: Request, file: Express.Multer.File, cb: FileFilterCallback) => {
+      const ok =
+        file.mimetype === "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" ||
+        file.mimetype === "application/vnd.ms-excel";
+      if (!ok) return cb(new Error("Formato de archivo no permitido. Sube un .xlsx/.xls"));
+      cb(null, true);
+    },
+  });
 
-  // ---------- Tickets ----------
-  app.get("/api/tickets", requiereAutenticacion, async (_req, res) => {
+  app.post(
+    "/api/orders/import",
+    requiereAutenticacion,
+    upload.single("file"),
+    async (req: Request & { file?: Express.Multer.File }, res: Response) => {
+      try {
+        // gracias a @types/multer, req.file existe:
+        if (!req.file?.buffer) {
+          return res.status(400).json({ message: "No se recibió archivo" });
+        }
+
+        const wb = xlsx.read(req.file.buffer, { type: "buffer" });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        if (!ws) return res.status(400).json({ message: "El Excel no tiene hojas" });
+
+        const rawRows = xlsx.utils.sheet_to_json<Record<string, unknown>>(ws, { defval: null, raw: true });
+
+        // Validar columnas mínimas
+        const requiredColumns = ["shopId", "orderId"];
+        const firstRow = rawRows[0] ?? {};
+        const missing = requiredColumns.filter((c) => !(c in firstRow));
+        if (missing.length) {
+          return res.status(400).json({
+            message: "Faltan columnas obligatorias",
+            missing,
+            requiredTemplate: requiredColumns.concat([
+              "name", "orderNumber", "customerName", "customerEmail",
+              "subtotalPrice", "totalAmount", "currency", "financialStatus", "fulfillmentStatus",
+              "tags", "createdAt", "shopifyCreatedAt", "items", "skus"
+            ]),
+          });
+        }
+
+        const { results, summary } = await almacenamiento.importOrdersFromRows(rawRows);
+        return res.json({
+          ...summary,
+          errors: results
+            .filter((r) => r.status === "error")
+            .map((r) => ({ rowIndex: r.rowIndex, message: r.message, field: r.field, value: r.value })),
+        });
+      } catch (err: any) {
+        console.error("❌ Import error:", err);
+        res.status(500).json({ message: err?.message || "Error en la importación" });
+      }
+    }
+  );
+
+
+  app.post("/api/orders/export", requiereAutenticacion, async (req: Request, res: Response) => {
     try {
-      const tickets = await almacenamiento.getTickets();
-      res.json(tickets);
-    } catch {
-      res.status(500).json({ message: "No se pudieron obtener tickets" });
+      const {
+        selectedIds,
+        statusFilter = "unmanaged",
+        channelId,
+        search,
+        searchType,
+        page,
+        pageSize,
+        sortField,
+        sortOrder,
+      } = (req.body ?? {}) as {
+        selectedIds?: (number | string)[];
+        statusFilter?: "unmanaged" | "managed" | "all";
+        channelId?: number | string;
+        search?: string;
+        searchType?: "all" | "sku" | "customer" | "product";
+        page?: number;
+        pageSize?: number;
+        sortField?: string;
+        sortOrder?: "asc" | "desc";
+      };
+
+      const rows = await almacenamiento.getOrdersForExport({
+        selectedIds,
+        statusFilter,
+        channelId: channelId ? Number(channelId) : undefined,
+        search,
+        searchType,
+        page,
+        pageSize,
+        sortField,
+        sortOrder,
+      });
+
+      const data = rows.map((o: any) => ({
+        shopId: o.shopId,
+        orderId: o.orderId,
+        name: o.name,
+        orderNumber: o.orderNumber ?? null,
+        customerName: o.customerName,
+        customerEmail: o.customerEmail,
+        subtotalPrice: o.subtotalPrice ?? null,
+        totalAmount: o.totalAmount ?? null,
+        currency: o.currency ?? null,
+        financialStatus: o.financialStatus ?? null,
+        fulfillmentStatus: o.fulfillmentStatus ?? null,
+        tags: Array.isArray(o.tags) ? o.tags.join(",") : o.tags ?? "",
+        createdAt: o.createdAt ? new Date(o.createdAt) : null,
+        shopifyCreatedAt: o.shopifyCreatedAt ? new Date(o.shopifyCreatedAt) : null,
+        itemsCount: o.itemsCount ?? 0,
+        skus: Array.isArray(o.skus) ? o.skus.join(",") : "",
+      }));
+
+      const wb = xlsx.utils.book_new();
+      const ws = xlsx.utils.json_to_sheet(data, { dateNF: "yyyy-mm-dd hh:mm:ss" });
+      xlsx.utils.book_append_sheet(wb, ws, "orders");
+      const buf = xlsx.write(wb, { bookType: "xlsx", type: "buffer" });
+
+      res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+      res.setHeader("Content-Disposition", `attachment; filename="ordenes_${new Date().toISOString().slice(0, 10)}.xlsx"`);
+      res.send(buf);
+    } catch (err: any) {
+      console.error("❌ Export error:", err);
+      res.status(500).json({ message: "No se pudo exportar el Excel" });
     }
   });
+
+
+
+
+
+  // ---------- Tickets ----------
+  // routes.ts
+  app.get("/api/tickets", requiereAutenticacion, async (_req, res) => {
+    try {
+      const rows = await almacenamiento.getTicketsView();
+
+      // Si en algún lado quedara BigInt, lo volvemos JSON-safe por si acaso
+      const safe = JSON.parse(JSON.stringify(rows, (_, v) => (typeof v === "bigint" ? v.toString() : v)));
+
+      res.json(safe);
+    } catch (e: any) {
+      res.status(400).json({ message: e?.message || "No se pudieron obtener los tickets" });
+    }
+  });
+
+  // 🔧 Elimina la definición duplicada de POST /api/tickets/bulk (dejando solo una).
+
+
 
   app.post("/api/tickets", requiereAutenticacion, async (req, res) => {
     try {
-      const datosTicket = insertTicketSchema.parse(req.body);
-      // Obtiene número de ticket secuencial
-      const numeroTicket = await almacenamiento.getNextTicketNumber();
-
-      const ticket = await almacenamiento.createTicket({
-        ...datosTicket,
-        ticketNumber: numeroTicket,
+      const datos = insertTicketSchema.parse(req.body); // { orderId, notes? }
+      const ticket = await almacenamiento.createTicketAndFulfill({
+        orderId: datos.orderId,
+        notes: datos.notes,
       });
-      res.status(201).json(ticket);
-    } catch {
-      res.status(400).json({ message: "Datos de ticket inválidos" });
+
+      // 🔥 Convierte BigInt → string antes de mandar al cliente
+      const safeTicket = JSON.parse(
+        JSON.stringify(ticket, (_, v) => (typeof v === "bigint" ? v.toString() : v))
+      );
+
+      res.status(201).json(safeTicket);
+    } catch (e: any) {
+      const msg = e?.message || "No se pudo crear el ticket";
+      const isShopify = /Shopify (GET|POST)/i.test(msg);
+      res.status(isShopify ? 502 : 400).json({ message: msg });
     }
   });
+
+
 
   // Crear tickets masivos
   app.post("/api/tickets/bulk", requiereAutenticacion, async (req, res) => {
@@ -749,44 +967,69 @@ export async function registerRoutes(app: Express): Promise<Server> {
       console.log(`🎫 Creando tickets masivos para ${orderIds.length} órdenes...`);
       const resultado = await almacenamiento.createBulkTickets(orderIds, notes);
 
-      console.log(`✅ ${resultado.tickets.length} tickets creados, ${resultado.updated} órdenes actualizadas`);
+      const mensaje = `Tickets creados: ${resultado.tickets.length}. Órdenes actualizadas: ${resultado.updated}. Fallidas: ${resultado.failed.length}`;
 
       res.status(201).json({
         ok: true,
-        message: `Se crearon ${resultado.tickets.length} tickets exitosamente`,
+        message: mensaje,
         tickets: resultado.tickets,
         ordersUpdated: resultado.updated,
+        failed: resultado.failed,
       });
     } catch (error: any) {
       console.error("❌ Error creando tickets masivos:", error);
-      res.status(400).json({
-        ok: false,
-        message: "Error al crear tickets masivos",
-        error: error?.message
-      });
-    }
-  });
-
-  // Normalizar fulfillment_status NULL
-  app.post("/api/orders/normalize-fulfillment", requiereAutenticacion, async (req, res) => {
-    try {
-      console.log('🔄 Iniciando normalización de fulfillment_status...');
-      const resultado = await almacenamiento.normalizeNullFulfillmentStatus();
-
-      res.json({
-        ok: true,
-        message: `Se normalizaron ${resultado.updated} órdenes con fulfillment_status NULL`,
-        updated: resultado.updated,
-      });
-    } catch (error: any) {
-      console.error("❌ Error en normalización:", error);
       res.status(500).json({
         ok: false,
-        message: "Error al normalizar órdenes",
+        message: "Error interno al crear tickets masivos",
         error: error?.message
       });
     }
   });
+
+  // Eliminar ticket por ID
+  app.delete("/api/tickets/:id", requiereAutenticacion, async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      await almacenamiento.deleteTicket(id);
+      res.json({ ok: true });
+    } catch (e: any) {
+      res.status(400).json({ ok: false, message: e?.message || "No se pudo eliminar el ticket" });
+    }
+  });
+
+  // Revertir ticket (borrar + revertir fulfillment local; opcional Shopify)
+  app.post("/api/tickets/:id/revert", requiereAutenticacion, async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      const revertShopify = req.query.revertShopify === "1" || req.body?.revertShopify === true;
+      const r = await almacenamiento.revertTicket(id, { revertShopify });
+      res.json(r);
+    } catch (e: any) {
+      res.status(400).json({ ok: false, message: e?.message || "No se pudo revertir el ticket" });
+    }
+  });
+
+  //Feedback de ticket
+  app.post("/api/tickets/bulk", requiereAutenticacion, async (req, res) => {
+    try {
+      const { orderIds, notes } = createBulkTicketsSchema.parse(req.body);
+      const r = await almacenamiento.createBulkTickets(orderIds, notes);
+
+      // BigInt-safe por si algún field viene en bigint
+      const safe = JSON.parse(JSON.stringify(r, (_, v) => (typeof v === "bigint" ? v.toString() : v)));
+
+      res.status(201).json({
+        ok: true,
+        message: `Tickets creados: ${safe.tickets.length}. Órdenes marcadas fulfilled: ${safe.updated}. Fallidas: ${safe.failed.length}`,
+        ...safe,
+      });
+    } catch (e: any) {
+      res.status(400).json({ ok: false, message: e?.message || "Error al crear tickets masivos" });
+    }
+  });
+
+
+
 
   // ---------- Catálogos: Canales, Marcas, Paqueterías ----------
   app.get("/api/channels", requiereAutenticacion, async (_req, res) => {
@@ -1013,40 +1256,40 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Sincronización incremental de órdenes
-app.post("/api/integrations/shopify/orders/sync", requiereAutenticacion, async (req, res) => {
-  try {
-    const storeParam = (req.query.store as string) || '1';
-    const updatedSince = req.query.updatedSince as string;
-    const cursor = (req.query.cursor as string) || undefined;
-    const limit = parseInt(req.query.limit as string) || 100;
+  app.post("/api/integrations/shopify/orders/sync", requiereAutenticacion, async (req, res) => {
+    try {
+      const storeParam = (req.query.store as string) || '1';
+      const updatedSince = req.query.updatedSince as string;
+      const cursor = (req.query.cursor as string) || undefined;
+      const limit = parseInt(req.query.limit as string) || 100;
 
-    if (!updatedSince && !cursor) {
-      return res.status(400).json({
-        ok: false,
-        error: 'Parámetro updatedSince es requerido cuando no hay cursor',
+      if (!updatedSince && !cursor) {
+        return res.status(400).json({
+          ok: false,
+          error: 'Parámetro updatedSince es requerido cuando no hay cursor',
+        });
+      }
+
+      const result = await syncShopifyOrdersIncremental({
+        store: storeParam,
+        updatedSince: updatedSince || new Date(Date.now() - 10 * 60_000).toISOString(),
+        pageInfo: cursor,
+        limit,
       });
+
+      res.json({
+        ok: true,
+        message: `Sync incremental para tienda ${storeParam}`,
+        summary: result.summary,
+        hasNextPage: result.hasNextPage,
+        nextPageInfo: result.nextPageInfo,
+      });
+
+    } catch (e: any) {
+      console.log(`❌ Error en sync incremental: ${e.message}`);
+      res.status(500).json({ ok: false, error: e.message });
     }
-
-    const result = await syncShopifyOrdersIncremental({
-      store: storeParam,
-      updatedSince: updatedSince || new Date(Date.now() - 10 * 60_000).toISOString(),
-      pageInfo: cursor,
-      limit,
-    });
-
-    res.json({
-      ok: true,
-      message: `Sync incremental para tienda ${storeParam}`,
-      summary: result.summary,
-      hasNextPage: result.hasNextPage,
-      nextPageInfo: result.nextPageInfo,
-    });
-
-  } catch (e: any) {
-    console.log(`❌ Error en sync incremental: ${e.message}`);
-    res.status(500).json({ ok: false, error: e.message });
-  }
-});
+  });
   // Listar productos por tienda
   app.get("/api/integrations/shopify/products", requiereAutenticacion, async (req, res) => {
     try {

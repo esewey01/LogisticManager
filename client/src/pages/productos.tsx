@@ -1,26 +1,27 @@
-import React, { useState, useCallback, useMemo } from 'react';
+// client/src/pages/productos.tsx
+import React, { useState, useCallback } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
-import { 
-  Table, 
-  TableBody, 
-  TableCell, 
-  TableHead, 
-  TableHeader, 
-  TableRow 
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow
 } from '@/components/ui/table';
-import { 
-  Select, 
-  SelectContent, 
-  SelectItem, 
-  SelectTrigger, 
-  SelectValue 
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue
 } from '@/components/ui/select';
-import { 
+import {
   Dialog,
   DialogContent,
   DialogHeader,
@@ -29,14 +30,13 @@ import {
 } from '@/components/ui/dialog';
 import { Checkbox } from '@/components/ui/checkbox';
 import { useToast } from '@/hooks/use-toast';
-import { 
-  Search, 
-  Filter, 
-  Download, 
-  Upload, 
-  Edit3, 
-  Check, 
-  X, 
+import {
+  Search,
+  Download,
+  Upload,
+  Edit3,
+  Check,
+  X,
   ChevronLeft,
   ChevronRight,
   Package,
@@ -46,6 +46,8 @@ import {
 } from 'lucide-react';
 import { apiRequest } from '@/lib/queryClient';
 import { debounce } from 'lodash';
+
+/* ================== Tipos ================== */
 
 interface CatalogProduct {
   sku: string;
@@ -58,13 +60,13 @@ interface CatalogProduct {
   condicion?: string;
   marca_producto?: string;
   variante?: string;
-  largo?: number;
-  ancho?: number;
-  alto?: number;
-  peso?: number;
-  foto?: string;
-  costo?: number;
-  stock?: number;
+  largo?: number | null;
+  ancho?: number | null;
+  alto?: number | null;
+  peso?: number | null;
+  foto?: string | null;
+  costo?: number | null;
+  stock?: number | null;
 }
 
 interface ShopifyProduct {
@@ -78,10 +80,10 @@ interface ShopifyProduct {
   product_status: string;
   variant_id: number;
   shopify_variant_id: string;
-  sku?: string;
-  price?: number;
-  compare_at_price?: number;
-  barcode?: string;
+  sku?: string | null;
+  price?: number | null;
+  compare_at_price?: number | null;
+  barcode?: string | null;
   inventory_qty: number;
 }
 
@@ -91,8 +93,39 @@ interface ReconciliationStats {
   conflictos: number;
 }
 
+type CatalogApiResponse = {
+  rows: CatalogProduct[];
+  total: number;
+  page: number;
+  pageSize: number;
+  debug?: unknown;
+};
+
+type FacetsResponse = {
+  marcas: string[];
+  categorias: string[];
+  condiciones: string[];
+  marcasProducto: string[];
+};
+
+type ShopifyApiResponse = {
+  rows: ShopifyProduct[];
+  total: number;
+  page: number;
+  pageSize: number;
+};
+
+type UnlinkedCatalogResponse = {
+  rows: Array<{ sku: string; nombre_producto?: string; categoria?: string; marca_producto?: string }>;
+  total: number;
+  page: number;
+  pageSize: number;
+};
+
+/* ================ Componente ================ */
+
 export default function ProductosPage() {
-  const [activeTab, setActiveTab] = useState('catalogo');
+  const [activeTab, setActiveTab] = useState<'catalogo' | 'shopify' | 'conciliacion'>('catalogo');
   const [catalogPage, setCatalogPage] = useState(1);
   const [shopifyPage, setShopifyPage] = useState(1);
   const [reconciliationPage, setReconciliationPage] = useState(1);
@@ -101,8 +134,8 @@ export default function ProductosPage() {
   const [searchField, setSearchField] = useState<string>('');
   const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set());
   const [editingRow, setEditingRow] = useState<string | null>(null);
-  const [editData, setEditData] = useState<any>({});
-  
+  const [editData, setEditData] = useState<Partial<CatalogProduct & ShopifyProduct>>({});
+
   // Filtros para cada pestaña
   const [catalogFilters, setCatalogFilters] = useState({
     marca: '',
@@ -110,7 +143,7 @@ export default function ProductosPage() {
     condicion: '',
     marca_producto: ''
   });
-  
+
   const [shopifyFilters, setShopifyFilters] = useState({
     shopId: '',
     status: '',
@@ -131,93 +164,100 @@ export default function ProductosPage() {
 
   // ================ CATÁLOGO QUERIES ================
 
-  const { data: catalogData, isLoading: catalogLoading } = useQuery({
+  const { data: catalogData, isLoading: catalogLoading } = useQuery<CatalogApiResponse>({
     queryKey: ['/api/unified-products/catalog', catalogPage, searchTerm, searchField, catalogFilters],
-    queryFn: () => apiRequest({
-      url: '/api/unified-products/catalog',
-      params: {
-        page: catalogPage,
-        pageSize,
-        search: searchTerm,
-        searchField: searchField || undefined,
-        ...catalogFilters
-      }
-    }),
+    queryFn: () =>
+      apiRequest<CatalogApiResponse>(
+        '/api/unified-products/catalog',
+        {
+          params: {
+            page: catalogPage,
+            pageSize,
+            search: searchTerm,
+            searchField: searchField || undefined,
+            ...catalogFilters
+          }
+        }
+      ),
     enabled: activeTab === 'catalogo'
   });
 
-  const { data: catalogFacets } = useQuery({
+  const { data: catalogFacets } = useQuery<FacetsResponse>({
     queryKey: ['/api/unified-products/catalog/facets'],
-    queryFn: () => apiRequest({ url: '/api/unified-products/catalog/facets' }),
+    queryFn: () =>
+      apiRequest<FacetsResponse>('/api/unified-products/catalog/facets'),
     enabled: activeTab === 'catalogo'
   });
 
   const updateCatalogMutation = useMutation({
-    mutationFn: ({ sku, updates }: { sku: string; updates: any }) =>
-      apiRequest({
-        url: `/api/unified-products/catalog/${sku}`,
-        method: 'PATCH',
-        data: updates
-      }),
+    mutationFn: ({ sku, updates }: { sku: string; updates: Partial<CatalogProduct> }) =>
+      apiRequest<{ success: boolean }>(
+        `/api/unified-products/catalog/${encodeURIComponent(sku)}`,
+        { method: 'PATCH', data: updates }
+      ),
     onSuccess: () => {
-      toast({ description: "Producto actualizado correctamente" });
+      toast({ description: 'Producto actualizado correctamente' });
       queryClient.invalidateQueries({ queryKey: ['/api/unified-products/catalog'] });
       setEditingRow(null);
       setEditData({});
     },
     onError: () => {
-      toast({ variant: "destructive", description: "Error al actualizar producto" });
+      toast({ variant: 'destructive', description: 'Error al actualizar producto' });
     }
   });
 
   // ================ SHOPIFY QUERIES ================
 
-  const { data: shopifyData, isLoading: shopifyLoading } = useQuery({
+  const { data: shopifyData, isLoading: shopifyLoading } = useQuery<ShopifyApiResponse>({
     queryKey: ['/api/unified-products/shopify', shopifyPage, searchTerm, shopifyFilters],
-    queryFn: () => apiRequest({
-      url: '/api/unified-products/shopify',
-      params: {
-        page: shopifyPage,
-        pageSize,
-        search: searchTerm,
-        ...shopifyFilters
-      }
-    }),
+    queryFn: () =>
+      apiRequest<ShopifyApiResponse>(
+        '/api/unified-products/shopify',
+        {
+          params: {
+            page: shopifyPage,
+            pageSize,
+            search: searchTerm,
+            ...shopifyFilters
+          }
+        }
+      ),
     enabled: activeTab === 'shopify'
   });
 
   const updateShopifyMutation = useMutation({
-    mutationFn: ({ variantId, updates }: { variantId: number; updates: any }) =>
-      apiRequest({
-        url: `/api/unified-products/shopify/variant/${variantId}`,
-        method: 'PATCH',
-        data: updates
-      }),
+    mutationFn: ({ variantId, updates }: { variantId: number; updates: Partial<ShopifyProduct> }) =>
+      apiRequest(
+        `/api/unified-products/shopify/variant/${variantId}`,
+        { method: 'PATCH', data: updates }
+      ),
     onSuccess: () => {
-      toast({ description: "Variante actualizada correctamente" });
+      toast({ description: 'Variante actualizada correctamente' });
       queryClient.invalidateQueries({ queryKey: ['/api/unified-products/shopify'] });
       setEditingRow(null);
       setEditData({});
     },
     onError: () => {
-      toast({ variant: "destructive", description: "Error al actualizar variante" });
+      toast({ variant: 'destructive', description: 'Error al actualizar variante' });
     }
   });
 
   // ================ CONCILIACIÓN QUERIES ================
 
-  const { data: reconciliationStats } = useQuery({
+  const { data: reconciliationStats } = useQuery<ReconciliationStats>({
     queryKey: ['/api/unified-products/reconciliation/stats'],
-    queryFn: () => apiRequest({ url: '/api/unified-products/reconciliation/stats' }),
+    queryFn: () =>
+      apiRequest<ReconciliationStats>('/api/unified-products/reconciliation/stats'),
     enabled: activeTab === 'conciliacion'
   });
 
-  const { data: unlinkedCatalog } = useQuery({
+  const { data: unlinkedCatalog } = useQuery<UnlinkedCatalogResponse>({
     queryKey: ['/api/unified-products/reconciliation/unlinked/catalog', reconciliationPage],
-    queryFn: () => apiRequest({
-      url: '/api/unified-products/reconciliation/unlinked/catalog',
-      params: { page: reconciliationPage, pageSize }
-    }),
+    queryFn: () =>
+      apiRequest<UnlinkedCatalogResponse>(
+        '/api/unified-products/reconciliation/unlinked/catalog',
+        { params: { page: reconciliationPage, pageSize } }
+      ),
     enabled: activeTab === 'conciliacion'
   });
 
@@ -247,10 +287,11 @@ export default function ProductosPage() {
     updateShopifyMutation.mutate({ variantId, updates: editData });
   };
 
-  const handleRowSelection = (id: string, checked: boolean) => {
-    setSelectedRows(prev => {
+  const handleRowSelection = (id: string, checked: boolean | 'indeterminate') => {
+    const isChecked = checked === true;
+    setSelectedRows((prev: Set<string>) => {
       const newSet = new Set(prev);
-      if (checked) {
+      if (isChecked) {
         newSet.add(id);
       } else {
         newSet.delete(id);
@@ -261,7 +302,7 @@ export default function ProductosPage() {
 
   const handleBulkEdit = () => {
     if (selectedRows.size === 0) {
-      toast({ variant: "destructive", description: "Selecciona al menos un producto" });
+      toast({ variant: 'destructive', description: 'Selecciona al menos un producto' });
       return;
     }
     // Implementar edición masiva
@@ -275,8 +316,8 @@ export default function ProductosPage() {
       return <div className="p-8 text-center">Cargando productos del catálogo...</div>;
     }
 
-    const products = catalogData?.rows || [];
-    const total = catalogData?.total || 0;
+    const products = catalogData?.rows ?? [];
+    const total = catalogData?.total ?? 0;
 
     return (
       <div className="space-y-4">
@@ -292,7 +333,7 @@ export default function ProductosPage() {
                 data-testid="input-search-catalog"
               />
             </div>
-            
+
             <Select value={searchField} onValueChange={setSearchField}>
               <SelectTrigger className="w-40 h-8" data-testid="select-search-field">
                 <SelectValue placeholder="Campo de búsqueda" />
@@ -306,8 +347,8 @@ export default function ProductosPage() {
               </SelectContent>
             </Select>
 
-            <Select 
-              value={catalogFilters.categoria} 
+            <Select
+              value={catalogFilters.categoria}
               onValueChange={(value) => setCatalogFilters(prev => ({ ...prev, categoria: value }))}
             >
               <SelectTrigger className="w-32 h-8" data-testid="select-categoria">
@@ -321,8 +362,8 @@ export default function ProductosPage() {
               </SelectContent>
             </Select>
 
-            <Select 
-              value={catalogFilters.marca} 
+            <Select
+              value={catalogFilters.marca}
               onValueChange={(value) => setCatalogFilters(prev => ({ ...prev, marca: value }))}
             >
               <SelectTrigger className="w-32 h-8" data-testid="select-marca">
@@ -364,7 +405,8 @@ export default function ProductosPage() {
                   <Checkbox
                     checked={selectedRows.size === products.length && products.length > 0}
                     onCheckedChange={(checked) => {
-                      if (checked) {
+                      const isChecked = checked === true;
+                      if (isChecked) {
                         setSelectedRows(new Set(products.map(p => p.sku)));
                       } else {
                         setSelectedRows(new Set());
@@ -388,7 +430,7 @@ export default function ProductosPage() {
                   <TableCell>
                     <Checkbox
                       checked={selectedRows.has(product.sku)}
-                      onCheckedChange={(checked) => handleRowSelection(product.sku, checked as boolean)}
+                      onCheckedChange={(checked) => handleRowSelection(product.sku, checked as any)}
                       data-testid={`checkbox-select-${product.sku}`}
                     />
                   </TableCell>
@@ -396,7 +438,7 @@ export default function ProductosPage() {
                   <TableCell>
                     {editingRow === product.sku ? (
                       <Input
-                        value={editData.nombre_producto || product.nombre_producto || ''}
+                        value={editData.nombre_producto ?? product.nombre_producto ?? ''}
                         onChange={(e) => handleCatalogEdit(product.sku, 'nombre_producto', e.target.value)}
                         className="h-8"
                         data-testid={`input-edit-nombre-${product.sku}`}
@@ -412,8 +454,8 @@ export default function ProductosPage() {
                   </TableCell>
                   <TableCell>{product.marca_producto}</TableCell>
                   <TableCell>
-                    <Badge variant={product.stock > 0 ? "default" : "destructive"}>
-                      {product.stock || 0}
+                    <Badge variant={(product.stock ?? 0) > 0 ? 'default' : 'destructive'}>
+                      {product.stock ?? 0}
                     </Badge>
                   </TableCell>
                   <TableCell>
@@ -421,13 +463,13 @@ export default function ProductosPage() {
                       <Input
                         type="number"
                         step="0.01"
-                        value={editData.costo || product.costo || ''}
+                        value={editData.costo ?? product.costo ?? ''}
                         onChange={(e) => handleCatalogEdit(product.sku, 'costo', parseFloat(e.target.value))}
                         className="h-8 w-24"
                         data-testid={`input-edit-costo-${product.sku}`}
                       />
                     ) : (
-                      <span>${product.costo?.toFixed(2) || '0.00'}</span>
+                      <span>${(product.costo ?? 0).toFixed(2)}</span>
                     )}
                   </TableCell>
                   <TableCell>
@@ -509,8 +551,8 @@ export default function ProductosPage() {
       return <div className="p-8 text-center">Cargando productos de Shopify...</div>;
     }
 
-    const products = shopifyData?.rows || [];
-    const total = shopifyData?.total || 0;
+    const products = shopifyData?.rows ?? [];
+    const total = shopifyData?.total ?? 0;
 
     return (
       <div className="space-y-4">
@@ -526,9 +568,9 @@ export default function ProductosPage() {
                 data-testid="input-search-shopify"
               />
             </div>
-            
-            <Select 
-              value={shopifyFilters.shopId} 
+
+            <Select
+              value={shopifyFilters.shopId}
               onValueChange={(value) => setShopifyFilters(prev => ({ ...prev, shopId: value }))}
             >
               <SelectTrigger className="w-32 h-8" data-testid="select-shop">
@@ -541,8 +583,8 @@ export default function ProductosPage() {
               </SelectContent>
             </Select>
 
-            <Select 
-              value={shopifyFilters.status} 
+            <Select
+              value={shopifyFilters.status}
               onValueChange={(value) => setShopifyFilters(prev => ({ ...prev, status: value }))}
             >
               <SelectTrigger className="w-32 h-8" data-testid="select-status">
@@ -605,13 +647,13 @@ export default function ProductosPage() {
                       <Input
                         type="number"
                         step="0.01"
-                        value={editData.price || product.price || ''}
+                        value={editData.price ?? product.price ?? ''}
                         onChange={(e) => handleShopifyEdit(product.variant_id, 'price', parseFloat(e.target.value))}
                         className="h-8 w-24"
                         data-testid={`input-edit-price-${product.variant_id}`}
                       />
                     ) : (
-                      <span>${product.price?.toFixed(2) || '0.00'}</span>
+                      <span>${(product.price ?? 0).toFixed(2)}</span>
                     )}
                   </TableCell>
                   <TableCell>
@@ -619,22 +661,22 @@ export default function ProductosPage() {
                       <Input
                         type="number"
                         step="0.01"
-                        value={editData.compare_at_price || product.compare_at_price || ''}
+                        value={editData.compare_at_price ?? product.compare_at_price ?? ''}
                         onChange={(e) => handleShopifyEdit(product.variant_id, 'compare_at_price', parseFloat(e.target.value))}
                         className="h-8 w-24"
                         data-testid={`input-edit-compare-price-${product.variant_id}`}
                       />
                     ) : (
-                      <span>${product.compare_at_price?.toFixed(2) || '—'}</span>
+                      <span>${product.compare_at_price != null ? product.compare_at_price.toFixed(2) : '—'}</span>
                     )}
                   </TableCell>
                   <TableCell>
-                    <Badge variant={product.inventory_qty > 0 ? "default" : "destructive"}>
-                      {product.inventory_qty || 0}
+                    <Badge variant={(product.inventory_qty ?? 0) > 0 ? 'default' : 'destructive'}>
+                      {product.inventory_qty ?? 0}
                     </Badge>
                   </TableCell>
                   <TableCell>
-                    <Badge variant={product.product_status === 'active' ? "default" : "secondary"}>
+                    <Badge variant={product.product_status === 'active' ? 'default' : 'secondary'}>
                       {product.product_status}
                     </Badge>
                   </TableCell>
@@ -713,8 +755,8 @@ export default function ProductosPage() {
   };
 
   const renderReconciliationTab = () => {
-    const stats = reconciliationStats as ReconciliationStats;
-    const unlinked = unlinkedCatalog?.rows || [];
+    const stats = reconciliationStats;
+    const unlinked = unlinkedCatalog?.rows ?? [];
 
     return (
       <div className="space-y-6">
@@ -724,7 +766,7 @@ export default function ProductosPage() {
             <CardHeader className="pb-2">
               <CardDescription>Productos Emparejados</CardDescription>
               <CardTitle className="text-2xl text-green-600">
-                {stats?.emparejados || 0}
+                {stats?.emparejados ?? 0}
               </CardTitle>
             </CardHeader>
           </Card>
@@ -732,7 +774,7 @@ export default function ProductosPage() {
             <CardHeader className="pb-2">
               <CardDescription>Sin Vincular</CardDescription>
               <CardTitle className="text-2xl text-yellow-600">
-                {stats?.faltantes || 0}
+                {stats?.faltantes ?? 0}
               </CardTitle>
             </CardHeader>
           </Card>
@@ -740,7 +782,7 @@ export default function ProductosPage() {
             <CardHeader className="pb-2">
               <CardDescription>Conflictos</CardDescription>
               <CardTitle className="text-2xl text-red-600">
-                {stats?.conflictos || 0}
+                {stats?.conflictos ?? 0}
               </CardTitle>
             </CardHeader>
           </Card>
@@ -810,7 +852,7 @@ export default function ProductosPage() {
       </div>
 
       {/* Pestañas principales */}
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
+      <Tabs value={activeTab} onValueChange={(v: 'catalogo' | 'shopify' | 'conciliacion') => setActiveTab(v)} className="space-y-4">
         <TabsList className="grid w-full grid-cols-3">
           <TabsTrigger value="catalogo" className="flex items-center gap-2" data-testid="tab-catalogo">
             <Package className="w-4 h-4" />

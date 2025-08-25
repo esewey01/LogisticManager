@@ -6,6 +6,7 @@ Fecha: 2025
 """
 import requests
 import json
+import os
 
 # --- CONFIGURACIÓN DE TIENDA ---
 SHOP_NAME = 'c3b13f-2'
@@ -17,28 +18,46 @@ HEADERS = {
     "Content-Type": "application/json"
 }
 
+# Archivo para almacenar el último número de orden
+ORDER_COUNTER_FILE = "order_counter.txt"
 
-# === FUNCIONES PRINCIPALES ===
+def get_next_order_number():
+    """Obtiene y actualiza el siguiente número de orden WWP"""
+    if os.path.exists(ORDER_COUNTER_FILE):
+        with open(ORDER_COUNTER_FILE, "r") as f:
+            try:
+                last_number = int(f.read().strip())
+            except ValueError:
+                last_number = 0
+    else:
+        last_number = 0
+    
+    next_number = last_number + 1
+    with open(ORDER_COUNTER_FILE, "w") as f:
+        f.write(str(next_number))
+    
+    return f"WWP{next_number:03d}"
 
-def crear_orden(line_items, order_name=None):
+def crear_orden(line_items):
     """
     Crea una orden en Shopify con estado Recibida (PAID + UNFULFILLED)
+    Genera automáticamente un nombre con prefijo WWP y numeración secuencial
     :param line_items: lista de diccionarios con variant_id y quantity
-    :param order_name: nombre personalizado (ej: WW1001)
     :return: order_id, order_data
     """
     total_items = sum(item['quantity'] for item in line_items)
     costo_envio_total = total_items * 140
 
-    if not order_name:
-        order_name = f"WW-{len(line_items)}-{total_items}"
+    # Generar nombre automático con prefijo WWP
+    order_name = get_next_order_number()
+    print(f"📝 Generando nombre de orden: {order_name}")
 
     url = f"{BASE_URL}/orders.json"
     data = {
         "order": {
             "name": order_name,
             "line_items": line_items,
-            "financial_status": "pending", # Usar "paid" si se quiere simular pago inmediato
+            "financial_status": "paid", # Usar "paid" si se quiere simular pago inmediato
             "customer": {
                 "first_name": "Cliente",
                 "last_name": "David",
@@ -47,7 +66,7 @@ def crear_orden(line_items, order_name=None):
             "shipping_address": {
                 "first_name": "David",
                 "last_name": "ULUM",
-                "address11": "Calle Falsa 123",
+                "address1": "Calle Falsa 123",
                 "phone": "5512345678",
                 "city": "Ciudad de México",
                 "province": "CDMX",
@@ -331,7 +350,7 @@ def mostrar_menu():
     print("\n" + " " * 10 + "🔧 INTEGRACIÓN WW - SHOPIFY")
     print("=" * 50)
     print("1. Consultar productos y precios")
-    print("2. Crear orden (Recibida)")
+    print("2. Crear orden (Recibida) - Genera nombre WWP automáticamente")
     print("3. Consultar inventario")
     print("4. Consultar costo de envío")
     print("5. Listar pedidos recientes")
@@ -360,8 +379,7 @@ def main():
                 consultar_producto_y_precios()
 
             elif opcion == "2":
-                print("\n📦 CREAR ORDEN (Recibida)")
-                order_name = input("Nombre de la orden (ej: WW1001): ").strip() or None
+                print("\n📦 CREAR ORDEN (Recibida) - Nombre WWP generado automáticamente")
                 line_items = []
                 while True:
                     try:
@@ -373,7 +391,7 @@ def main():
                     except ValueError:
                         print("❌ ID o cantidad inválidos.")
                 if line_items:
-                    order_id, _ = crear_orden(line_items, order_name)
+                    order_id, _ = crear_orden(line_items)
                     if order_id:
                         print(f"✅ Usa ID {order_id} para avanzar estatus")
 

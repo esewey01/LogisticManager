@@ -6,7 +6,7 @@ import {
   // Tablas
   users as tablaUsuarios,
   brands as tablaMarcas,
-  catalogProducts as tablaProductosCatalogo,
+  catalogoProductos as tablaProductosCatalogo,
   channels as tablaCanales,
   carriers as tablaPaqueterias,
   orders as tablaOrdenes,
@@ -23,8 +23,8 @@ import {
   type InsertUser as InsertarUsuario,
   type Brand as Marca,
   type InsertBrand as InsertarMarca,
-  type CatalogProduct as ProductoCatalogo,
-  type InsertCatalogProduct as InsertarProductoCatalogo,
+  type catalogoProductos as ProductoCatalogo,
+  type InsertCatalogoProducto as InsertarProductoCatalogo,
   type Channel as Canal,
   type InsertChannel as InsertarCanal,
   type Carrier as Paqueteria,
@@ -64,6 +64,32 @@ import {
   gte,
   lte,
 } from "drizzle-orm";
+//Shopify fulfillment
+import { fulfillOrderInShopify } from "./shopifyFulfillment";
+
+export type ExportFilters = {
+  selectedIds?: (number | string)[];
+  statusFilter?: "unmanaged" | "managed" | "all";
+  channelId?: number;
+  search?: string;
+  searchType?: "all" | "sku" | "customer" | "product";
+  page?: number;
+  pageSize?: number;
+  sortField?: string;
+  sortOrder?: "asc" | "desc";
+};
+
+export type ImportRow = Record<string, unknown>;
+
+export type ImportResult =
+  | { rowIndex: number; status: "inserted" | "updated" | "skipped" }
+  | { rowIndex: number; status: "error"; message: string; field?: string; value?: unknown };
+
+export type ImportReport = {
+  results: ImportResult[];
+  summary: { processed: number; inserted: number; updated: number; skipped: number; errors: number };
+};
+
 
 const createdAtEff = (tabla: typeof tablaOrdenes) =>
   sql`COALESCE(${tabla.shopifyCreatedAt}, ${tabla.createdAt})`;
@@ -124,6 +150,7 @@ export interface IStorage {
   // Tickets
   getTickets(): Promise<Ticket[]>;
   getTicket(id: number): Promise<Ticket | undefined>;
+  CrearTicketParams(): { orderId: number; notes?: string };
   createTicket(ticket: InsertarTicket): Promise<Ticket>;
   updateTicket(id: number, updates: Partial<InsertarTicket>): Promise<Ticket>;
   createBulkTickets(
@@ -132,6 +159,34 @@ export interface IStorage {
   ): Promise<{ tickets: Ticket[]; updated: number }>;
   getNextTicketNumber(): Promise<string>;
   normalizeNullFulfillmentStatus(): Promise<{ updated: number }>;
+
+  //Vista de tickets
+  getTicketsView(): Promise<Array<{
+    id: number;
+    ticketNumber: string;
+    status: string;
+    notes: string | null;
+    createdAt: string;
+    updatedAt: string | null;
+    orderPk: string;        // id de orders como texto (evita BigInt en JSON)
+    orderId: string;        // order_id (Shopify)
+    orderName: string | null;
+    customerName: string | null;
+    shopId: number | null;
+    itemsCount: number;
+  }>>;
+
+  //TICKETS /fulfillemnt en Shopify
+  createTicketAndFulfill(params: {
+    orderId: number;        // PK local de orders.id
+    notes?: string;
+    notifyCustomer?: boolean;
+  }): Promise<Ticket>;
+
+  // Desaher tickets
+  deleteTicket(id: number): Promise<void>;
+  revertTicket(id: number, opts?: { revertShopify?: boolean }): Promise<{ ok: boolean; changedLocal: boolean; cancelledRemote?: number }>;
+
 
   // Reglas de envío
   getShippingRules(): Promise<ReglaEnvio[]>;
@@ -177,6 +232,24 @@ export interface IStorage {
   }): Promise<{ rows: any[]; total: number; page: number; pageSize: number }>;
 
   getOrderItems(orderId: number): Promise<any[]>;
+
+  //IMPORTACION Y EXPORTACION
+  getOrdersForExport(filters: ExportFilters): Promise<any[]>;
+  importOrdersFromRows(
+    rows: Array<Record<string, unknown>>
+  ): Promise<{
+    results: Array<{
+      rowIndex: number;
+      status: "ok" | "skipped" | "error";
+      message?: string;
+      field?: string;
+      value?: unknown;
+      orderId?: number | string;
+    }>;
+    summary: { processed: number; ok: number; skipped: number; errors: number };
+  }>;
+  importOrdersFromRows(rawRows: ImportRow[]): Promise<ImportReport>;
+
 
   getProductsPaginated(
     shopId: number,
@@ -430,28 +503,26 @@ export class DatabaseStorage implements IStorage {
    * Obtiene una orden por ID con detalles completos 
    * Corrección: Manejo correcto de bigint IDs y campos de la DB real
    */
-  async getOrder(id: number): Promise<Orden | undefined> {
+  async getOrder(idParam: unknown) {
     try {
-      console.log(`[Storage] getOrder called with ID: ${id}`);
+      const idNum = Number(idParam);
+      if (!Number.isInteger(idNum) || idNum <= 0) return undefined;
 
-      // Usar la sintaxis estándar de Drizzle con el tipo correcto
+      const idBig = BigInt(idNum); // ✅ nunca BigInt(NaN)
       const [orden] = await baseDatos
         .select()
         .from(tablaOrdenes)
-        .where(eq(tablaOrdenes.id, BigInt(id)));
+        .where(eq(tablaOrdenes.id, idBig));
 
-      console.log(`[Storage] Raw order found:`, !!orden);
-
-      if (!orden) return undefined;
-
-      // Retornar la orden tal como viene de la DB (ya tipada)
-      console.log(`[Storage] Returning order with ID: ${orden.id}`);
-      return orden;
-    } catch (error) {
-      console.error("[Storage] Error getting order:", error);
+      return orden ?? undefined;
+    } catch (e) {
+      console.error("[Storage] Error getting order:", e);
       return undefined;
     }
   }
+
+
+
 
   /** Crea una orden. */
   async createOrder(datos: InsertarOrden): Promise<Orden> {
@@ -561,6 +632,43 @@ export class DatabaseStorage implements IStorage {
   }
 
   // ==== TICKETS ====
+  //Vista para obtener tickets en la tabla de tickets
+  // storage.ts
+  async getTicketsView() {
+    const result = await baseDatos.execute(sql`
+    SELECT 
+      t.id,
+      t.ticket_number                                                         AS "ticketNumber",
+      t.status                                                                AS "status",
+      t.notes                                                                 AS "notes",
+      t.created_at                                                            AS "createdAt",
+      t.updated_at                                                            AS "updatedAt",
+      COALESCE(o.id::text, '')                                                AS "orderPk",
+      COALESCE(o.order_id, '')                                                AS "orderId",
+      COALESCE(o.name, '')                                                    AS "orderName",
+      COALESCE(o.customer_name, '')                                           AS "customerName",
+      o.shop_id                                                               AS "shopId",
+      COALESCE(COUNT(oi.id), 0)::int                                          AS "itemsCount",
+      COALESCE(
+        ARRAY_AGG(DISTINCT oi.sku) FILTER (WHERE oi.sku IS NOT NULL),
+        ARRAY[]::text[]
+      )                                                                        AS "skus",
+      COALESCE(
+        ARRAY_AGG(DISTINCT cp.marca) FILTER (WHERE cp.marca IS NOT NULL),
+        ARRAY[]::text[]
+      )                                                                        AS "brands"
+    FROM tickets t
+    LEFT JOIN orders o           ON o.id = t.order_id::bigint
+    LEFT JOIN order_items oi     ON oi.order_id = o.id
+    LEFT JOIN catalogo_productos cp ON cp.sku = oi.sku   -- usa SKU externo del item
+    GROUP BY t.id, o.id
+    ORDER BY t.created_at DESC
+  `);
+
+    return result.rows as any[];
+  }
+
+
 
   /** Lista tickets ordenados por fecha de creación descendente. */
   async getTickets(): Promise<Ticket[]> {
@@ -618,73 +726,204 @@ export class DatabaseStorage implements IStorage {
     return nextNumber.toString();
   }
 
-  /** Crea tickets masivos para múltiples órdenes. */
+
+  /** Crea tickets masivos y marca fulfilled en Shopify + BD */
+  // storage.ts
   async createBulkTickets(
     orderIds: (number | string)[],
     notes?: string,
-  ): Promise<{ tickets: Ticket[]; updated: number }> {
+  ): Promise<{ tickets: Ticket[]; updated: number; failed: Array<{ orderId: number | string; reason: string }> }> {
     const tickets: Ticket[] = [];
     let updated = 0;
+    const failed: Array<{ orderId: number | string; reason: string }> = [];
 
-    // Procesar cada orden
-    for (const orderId of orderIds) {
-      const numeroOrdenNumerica =
-        typeof orderId === "string" ? parseInt(orderId) : orderId;
+    for (const oid of orderIds) {
+      const orderIdNum = typeof oid === "string" ? parseInt(oid, 10) : oid;
 
-      // Verificar que la orden existe
-      const orden = await this.getOrder(numeroOrdenNumerica);
-      if (!orden) {
-        console.log(`⚠️  Orden ${orderId} no encontrada, omitiendo...`);
-        continue;
+      try {
+        // 1) Cargar orden local
+        const orden = await this.getOrder(orderIdNum);
+        if (!orden) {
+          failed.push({ orderId: oid, reason: "Orden no encontrada" });
+          continue;
+        }
+
+        const storeNumber: number =
+          (orden as any).shopId ?? parseInt(process.env.DEFAULT_SHOPIFY_STORE || "1", 10);
+        const shopifyOrderId = (orden as any).orderId || (orden as any).order_id;
+        if (!shopifyOrderId) {
+          failed.push({ orderId: oid, reason: "Orden sin order_id Shopify" });
+          continue;
+        }
+
+        // 2) Primero intentar fulfill en Shopify
+        let fulfillResp: any;
+        try {
+          fulfillResp = await fulfillOrderInShopify({
+            storeNumber,
+            shopifyOrderId: String(shopifyOrderId),
+            notifyCustomer: false,
+          });
+        } catch (shopifyError: any) {
+          failed.push({
+            orderId: oid,
+            reason: `Shopify error: ${shopifyError?.message || shopifyError}`
+          });
+          continue; // Si Shopify falla, no continuar con esta orden
+        }
+
+        // 3) Si Shopify fue exitoso, crear ticket y actualizar BD local
+        const ticketTx = await baseDatos.transaction(async (tx) => {
+          const [ticketNuevo] = await tx.insert(tablaTickets).values({
+            ticketNumber: sql`nextval('public.ticket_number_seq')::text`,
+            orderId: BigInt(orderIdNum),
+            status: "open",
+            notes: notes || `Ticket creado masivamente para orden ${shopifyOrderId}`,
+          }).returning();
+
+          // Actualizar fulfillment status en BD local
+          await tx.update(tablaOrdenes)
+            .set({
+              fulfillmentStatus: "fulfilled",
+              shopifyUpdatedAt: new Date()
+            })
+            .where(eq(tablaOrdenes.id, BigInt(orderIdNum)));
+
+          return ticketNuevo;
+        });
+
+        tickets.push(ticketTx);
+        updated++;
+
+      } catch (error: any) {
+        failed.push({
+          orderId: oid,
+          reason: `Error interno: ${error?.message || 'Desconocido'}`
+        });
       }
-
-      // Obtener siguiente número de ticket
-      const numeroTicket = await this.getNextTicketNumber();
-
-      // Crear el ticket
-      const ticketNuevo = await this.createTicket({
-        ticketNumber: numeroTicket,
-        orderId: numeroOrdenNumerica,
-        status: "open",
-        notes:
-          notes ||
-          `Ticket creado masivamente para orden ${orden.orderId || orderId}`,
-      });
-
-      tickets.push(ticketNuevo);
-
-      // Actualizar la orden para marcar fulfillmentStatus como fulfilled
-      await this.updateOrder(numeroOrdenNumerica, {
-        fulfillmentStatus: "fulfilled",
-      });
-
-      updated++;
     }
 
-    return { tickets, updated };
+    return { tickets, updated, failed };
   }
 
-  /** Normaliza órdenes con fulfillment_status NULL marcándolas como fulfilled. */
-  async normalizeNullFulfillmentStatus(): Promise<{ updated: number }> {
-    console.log("🔄 Normalizando fulfillment_status NULL...");
 
-    const resultado = await baseDatos
-      .update(tablaOrdenes)
-      .set({
-        fulfillmentStatus: "fulfilled",
-      })
-      .where(isNull(tablaOrdenes.fulfillmentStatus))
-      .returning({ id: tablaOrdenes.id });
 
-    const updated = resultado.length;
-    console.log(
-      `✅ ${updated} órdenes normalizadas con fulfillment_status FULFILLED`,
-    );
 
-    return { updated };
+
+  // ==== STATUS FULLFILMENT 
+
+  async createTicketAndFulfill(params: {
+    orderId: number;
+    notes?: string;
+    notifyCustomer?: boolean;
+  }) {
+    const { orderId, notes, notifyCustomer = false } = params;
+
+    // 1) Cargar orden local
+    const [orden] = await baseDatos
+      .select()
+      .from(tablaOrdenes)
+      .where(eq(tablaOrdenes.id, BigInt(orderId)));
+
+    if (!orden) throw new Error(`Orden ${orderId} no encontrada`);
+
+    const shopifyOrderId = orden.orderId;
+    if (!shopifyOrderId) throw new Error(`La orden ${orderId} no tiene order_id de Shopify`);
+
+    const storeNumber = orden.shopId ?? parseInt(process.env.DEFAULT_SHOPIFY_STORE || "1", 10);
+
+    try {
+      // 2) Primero fulfill en Shopify
+      const fulfillResp = await fulfillOrderInShopify({
+        storeNumber,
+        shopifyOrderId: String(shopifyOrderId),
+        notifyCustomer,
+      });
+
+      console.log("🛒 Shopify fulfill response:", fulfillResp);
+
+      // 3) Si Shopify fue exitoso, actualizar BD local
+      const nuevoTicket = await baseDatos.transaction(async (tx) => {
+        const [ticketCreado] = await tx
+          .insert(tablaTickets)
+          .values({
+            ticketNumber: sql`nextval('public.ticket_number_seq')::text`,
+            orderId: BigInt(orderId),
+            status: "open",
+            notes,
+          })
+          .returning();
+
+        if (!ticketCreado) throw new Error("No se pudo crear el ticket");
+
+        await tx
+          .update(tablaOrdenes)
+          .set({
+            fulfillmentStatus: "fulfilled",
+            shopifyUpdatedAt: new Date(),
+          })
+          .where(eq(tablaOrdenes.id, BigInt(orderId)));
+
+        return ticketCreado;
+      });
+
+      return nuevoTicket;
+    } catch (error) {
+      // Si algo falla, no hacemos nada en BD local
+      throw new Error(`Error al crear ticket y fulfill: ${error}`);
+    }
   }
 
-  // ==== REGLAS DE ENVÍO ====
+  /** Borra un ticket. */
+  async deleteTicket(id: number): Promise<void> {
+    await baseDatos.delete(tablaTickets).where(eq(tablaTickets.id, id));
+  }
+
+  //DESHACER: BORAR EL TICKET Y DEVUELVE LA ORDEN A UNFULFILLED LOCALMENTE
+  async revertTicket(id: number, opts?: { revertShopify?: boolean }) {
+    const ticket = await this.getTicket(id);
+    if (!ticket) return { ok: true, changedLocal: false };
+
+    const orderPk = (ticket as any).orderId as bigint | number;
+
+    // Cargar la orden para conocer shopId y orderId de Shopify
+    const orden = await this.getOrder(Number(orderPk));
+    if (!orden) {
+      // Igual borra el ticket, pero no podemos tocar la orden
+      await this.deleteTicket(id);
+      return { ok: true, changedLocal: false };
+    }
+
+    // (Opcional) cancelar fulfillments en Shopify
+    let cancelledRemote = 0;
+    if (opts?.revertShopify) {
+      const storeNumber = (orden as any).shopId;
+      const shopifyOrderId = (orden as any).orderId || (orden as any).order_id;
+
+      try {
+        cancelledRemote = await unfulfillOrderInShopify({
+          storeNumber,
+          shopifyOrderId: String(shopifyOrderId),
+        });
+      } catch (e) {
+        console.warn("[RevertTicket] No se pudo cancelar en Shopify:", (e as any)?.message || e);
+      }
+    }
+
+    // TX: borra ticket y regresa fulfillment_status local a 'unfulfilled'
+    await baseDatos.transaction(async (tx) => {
+      await tx.delete(tablaTickets).where(eq(tablaTickets.id, id));
+      await tx.update(tablaOrdenes)
+        .set({ fulfillmentStatus: '' as any, shopifyUpdatedAt: new Date() })
+        .where(eq(tablaOrdenes.id, typeof orderPk === 'bigint' ? orderPk : BigInt(orderPk)));
+    });
+
+    return { ok: true, changedLocal: true, cancelledRemote };
+  }
+
+
+
+  ///==== REGLAS DE ENVÍO ====
 
   /** Devuelve reglas de envío activas. */
   async getShippingRules(): Promise<ReglaEnvio[]> {
@@ -1265,196 +1504,217 @@ export class DatabaseStorage implements IStorage {
   // ==== ÓRDENES PAGINADAS ====
   async getOrdersPaginated(params: {
     statusFilter: "unmanaged" | "managed" | "all";
-    channelId?: number; // ✅ Este nombre es correcto
+    channelId?: number;
     page: number;
     pageSize: number;
     search?: string;
     searchType?: "all" | "sku" | "customer" | "product";
+    sortField?: string;
+    sortOrder?: "asc" | "desc";
   }): Promise<{ rows: any[]; total: number; page: number; pageSize: number }> {
-    const { statusFilter, channelId, page, pageSize, search, searchType = "all" } = params;
+    const {
+      statusFilter,
+      channelId,
+      page,
+      pageSize,
+      search,
+      searchType = "all",
+      sortField,
+      sortOrder = "desc",
+    } = params;
 
-    console.log(`🔍 getOrdersPaginated - filtros:`, { statusFilter, channelId, page, pageSize, search });
+    const conds: any[] = [];
 
-    try {
-      const conds: any[] = [];
-
-      // Filtro por estado de gestión usando case-insensitive
-      if (statusFilter === "unmanaged") {
-        conds.push(
-          sql`LOWER(COALESCE(o.fulfillment_status, '')) IN ('', 'unfulfilled')`
-        );
-      } else if (statusFilter === "managed") {
-        conds.push(
-          sql`LOWER(COALESCE(o.fulfillment_status, '')) = 'fulfilled'`
-        );
-      }
-
-      // ✅ FILTRO POR CANAL ACTIVADO Y CORREGIDO
-      if (channelId !== undefined && channelId !== null) {
-        conds.push(sql`o.shop_id = ${channelId}`); // ✅ Usar shop_id en lugar de channel_id
-      }
-
-      // Búsqueda textual mejorada con soporte para tipos específicos
-      if (search) {
-        const searchPattern = `%${search.toLowerCase()}%`;
-
-        if (searchType === "sku") {
-          conds.push(
-            sql`EXISTS (
-            SELECT 1 FROM order_items oi2 
-            WHERE oi2.order_id = o.id 
-            AND LOWER(COALESCE(oi2.sku, '')) LIKE ${searchPattern}
-          )`
-          );
-        } else if (searchType === "customer") {
-          conds.push(
-            sql`(
-            LOWER(COALESCE(o.customer_name, '')) LIKE ${searchPattern} OR 
-            LOWER(COALESCE(o.customer_email, '')) LIKE ${searchPattern}
-          )`
-          );
-        } else if (searchType === "product") {
-          conds.push(
-            sql`EXISTS (
-            SELECT 1 FROM order_items oi2 
-            WHERE oi2.order_id = o.id 
-            AND (
-              LOWER(COALESCE(oi2.title, '')) LIKE ${searchPattern} OR
-              LOWER(COALESCE(oi2.variant_title, '')) LIKE ${searchPattern}
-            )
-          )`
-          );
-        } else { // "all" or default
-          conds.push(
-            sql`(
-            LOWER(COALESCE(o.order_id, '')) LIKE ${searchPattern} OR 
-            LOWER(COALESCE(o.customer_name, '')) LIKE ${searchPattern} OR 
-            LOWER(COALESCE(o.customer_email, '')) LIKE ${searchPattern} OR
-            EXISTS (
-              SELECT 1 FROM order_items oi2 
-              WHERE oi2.order_id = o.id 
-              AND (
-                LOWER(COALESCE(oi2.sku, '')) LIKE ${searchPattern} OR
-                LOWER(COALESCE(oi2.title, '')) LIKE ${searchPattern} OR
-                LOWER(COALESCE(oi2.variant_title, '')) LIKE ${searchPattern}
-              )
-            )
-          )`
-          );
-        }
-      }
-
-      // Combinar condiciones
-      const whereClause = conds.length > 0 ? sql`${conds.reduce((acc, cond, i) =>
-        i === 0 ? cond : sql`${acc} AND ${cond}`
-      )}` : undefined;
-
-      const offset = Math.max(0, (page - 1) * pageSize);
-
-      // Query usando SOLO campos que existen en la estructura real de DB
-      const baseQuery = sql`
-      SELECT 
-        o.id::text as id,
-        COALESCE(o.name, o.order_id, '') as name,
-        COALESCE(o.customer_name, '') as "customerName",
-        o.shop_id as "channelId",
-        CASE 
-          WHEN o.shop_id = 1 THEN 'Tienda 1'
-          WHEN o.shop_id = 2 THEN 'Tienda 2'
-          ELSE 'Tienda ' || o.shop_id::text
-        END as "channelName", 
-        COALESCE(o.total_amount, '0') as "totalAmount",
-        COALESCE(o.fulfillment_status, '') as "fulfillmentStatus",
-        COALESCE(o.shopify_created_at, o.created_at, NOW()) as "createdAt",
-        COALESCE(COUNT(oi.id), 0) as "itemsCount",
-        COALESCE(ARRAY_AGG(oi.sku) FILTER (WHERE oi.sku IS NOT NULL), ARRAY[]::text[]) as skus,
-        CASE
-          WHEN LOWER(COALESCE(o.fulfillment_status, '')) IN ('', 'unfulfilled') THEN 'SIN_GESTIONAR'
-          WHEN LOWER(COALESCE(o.fulfillment_status, '')) = 'fulfilled' THEN 'GESTIONADA'
-          WHEN LOWER(COALESCE(o.fulfillment_status, '')) = 'restocked' THEN 'DEVUELTO'
-          ELSE 'ERROR'
-        END as "uiStatus",
-        EXISTS(SELECT 1 FROM tickets t WHERE t.order_id = o.id) as "hasTicket",
-        CASE 
-          WHEN LOWER(COALESCE(o.fulfillment_status, '')) = 'fulfilled' THEN true
-          ELSE false
-        END as "isManaged"
-      FROM orders o
-      LEFT JOIN order_items oi ON oi.order_id = o.id
-      ${whereClause ? sql`WHERE ${whereClause}` : sql``}
-      GROUP BY o.id, o.order_id, o.name, o.customer_name, o.total_amount, 
-               o.fulfillment_status, o.shopify_created_at, o.created_at, o.shop_id
-      ORDER BY COALESCE(o.shopify_created_at, o.created_at) DESC
-      LIMIT ${pageSize} OFFSET ${offset}
-    `;
-
-      // Query para contar total simplificado
-      const countQuery = sql`
-      SELECT COUNT(DISTINCT o.id) as count
-      FROM orders o
-      ${whereClause ? sql`WHERE ${whereClause}` : sql``}
-    `;
-
-      console.log(`📊 Ejecutando queries...`);
-
-      const [rows, totalRes] = await Promise.all([
-        baseDatos.execute(baseQuery),
-        baseDatos.execute(countQuery)
-      ]);
-
-      const total = Number(totalRes.rows[0]?.count ?? 0);
-
-      console.log(`✅ Resultados: ${rows.rows.length} filas, total: ${total}`);
-
-      return {
-        rows: rows.rows as any[],
-        page,
-        pageSize,
-        total
-      };
-
-    } catch (error: any) {
-      console.error(`❌ Error en getOrdersPaginated:`, error);
-      throw new Error(`Error al obtener órdenes paginadas: ${error.message}`);
+    // Estado
+    if (statusFilter === "unmanaged") {
+      conds.push(sql`LOWER(COALESCE(o.fulfillment_status, '')) IN ('', 'unfulfilled')`);
+    } else if (statusFilter === "managed") {
+      conds.push(sql`LOWER(COALESCE(o.fulfillment_status, '')) = 'fulfilled'`);
     }
+
+    // Canal
+    if (channelId !== undefined && channelId !== null) {
+      // usa shop_id como ya lo hacías
+      conds.push(sql`o.shop_id = ${channelId}`);
+    }
+
+    // Búsqueda
+    if (search) {
+      const searchPattern = `%${search.toLowerCase()}%`;
+      if (searchType === "sku") {
+        conds.push(sql`EXISTS (
+        SELECT 1 FROM order_items oi2 
+        WHERE oi2.order_id = o.id 
+        AND LOWER(COALESCE(oi2.sku, '')) LIKE ${searchPattern}
+      )`);
+      } else if (searchType === "customer") {
+        conds.push(sql`(
+        LOWER(COALESCE(o.customer_name, '')) LIKE ${searchPattern} OR 
+        LOWER(COALESCE(o.customer_email, '')) LIKE ${searchPattern}
+      )`);
+      } else if (searchType === "product") {
+        conds.push(sql`EXISTS (
+        SELECT 1 FROM order_items oi2 
+        WHERE oi2.order_id = o.id 
+        AND (
+          LOWER(COALESCE(oi2.title, '')) LIKE ${searchPattern} OR
+          LOWER(COALESCE(oi2.variant_title, '')) LIKE ${searchPattern}
+        )
+      )`);
+      } else {
+        conds.push(sql`(
+        LOWER(COALESCE(o.order_id, '')) LIKE ${searchPattern} OR 
+        LOWER(COALESCE(o.customer_name, '')) LIKE ${searchPattern} OR 
+        LOWER(COALESCE(o.customer_email, '')) LIKE ${searchPattern} OR
+        EXISTS (
+          SELECT 1 FROM order_items oi2 
+          WHERE oi2.order_id = o.id 
+          AND (
+            LOWER(COALESCE(oi2.sku, '')) LIKE ${searchPattern} OR
+            LOWER(COALESCE(oi2.title, '')) LIKE ${searchPattern} OR
+            LOWER(COALESCE(oi2.variant_title, '')) LIKE ${searchPattern}
+          )
+        )
+      )`);
+      }
+    }
+
+    const whereClause = conds.length
+      ? sql`${conds.reduce((acc, cond, i) => (i === 0 ? cond : sql`${acc} AND ${cond}`))}`
+      : undefined;
+
+    const offset = Math.max(0, (page - 1) * pageSize);
+    // ✅ Whitelist de columnas para ORDER BY
+    const sortMap: Record<string, string> = {
+      name: `COALESCE(o.name, o.order_id, '')`,
+      createdAt: `COALESCE(o.shopify_created_at, o.created_at)`,
+      totalAmount: `COALESCE(o.total_amount, 0)`,
+    };
+    const sortCol = sortField && sortMap[sortField] ? sortMap[sortField] : `COALESCE(o.shopify_created_at, o.created_at)`;
+    const sortDir = sortOrder === "asc" ? sql`ASC` : sql`DESC`;
+
+
+    const orderDir = sortOrder?.toLowerCase() === "asc" ? sql`ASC` : sql`DESC`;
+
+    const baseQuery = sql`
+    SELECT 
+      o.id::text as id,
+      COALESCE(o.name, o.order_id, '') as name,
+      COALESCE(o.customer_name, '') as "customerName",
+      o.shop_id as "channelId",
+      CASE 
+        WHEN o.shop_id = 1 THEN 'Tienda 1'
+        WHEN o.shop_id = 2 THEN 'Tienda 2'
+        ELSE 'Tienda ' || o.shop_id::text
+      END as "channelName", 
+      COALESCE(o.total_amount, '0') as "totalAmount",
+      COALESCE(o.fulfillment_status, '') as "fulfillmentStatus",
+      COALESCE(o.shopify_created_at, o.created_at, NOW()) as "createdAt",
+      COALESCE(COUNT(oi.id), 0) as "itemsCount",
+      COALESCE(ARRAY_AGG(oi.sku) FILTER (WHERE oi.sku IS NOT NULL), ARRAY[]::text[]) as skus,
+      CASE
+        WHEN LOWER(COALESCE(o.fulfillment_status, '')) IN ('', 'unfulfilled') THEN 'SIN_GESTIONAR'
+        WHEN LOWER(COALESCE(o.fulfillment_status, '')) = 'fulfilled' THEN 'GESTIONADA'
+        WHEN LOWER(COALESCE(o.fulfillment_status, '')) = 'restocked' THEN 'DEVUELTO'
+        ELSE 'ERROR'
+      END as "uiStatus",
+      EXISTS(SELECT 1 FROM tickets t WHERE t.order_id = o.id) as "hasTicket",
+      CASE 
+        WHEN LOWER(COALESCE(o.fulfillment_status, '')) = 'fulfilled' THEN true
+        ELSE false
+      END as "isManaged"
+    FROM orders o
+    LEFT JOIN order_items oi ON oi.order_id = o.id
+    ${whereClause ? sql`WHERE ${whereClause}` : sql``}
+    GROUP BY o.id, o.order_id, o.name, o.customer_name, o.total_amount, 
+             o.fulfillment_status, o.shopify_created_at, o.created_at, o.shop_id
+    ORDER BY ${sql.raw(sortCol)} ${sortDir}   -- ✅ orden dinámico seguro
+    LIMIT ${pageSize} OFFSET ${offset}
+  `;
+
+    const countQuery = sql`
+    SELECT COUNT(DISTINCT o.id) as count
+    FROM orders o
+    ${whereClause ? sql`WHERE ${whereClause}` : sql``}
+  `;
+
+    const [rows, totalRes] = await Promise.all([
+      baseDatos.execute(baseQuery),
+      baseDatos.execute(countQuery)
+    ]);
+
+    const total = Number(totalRes.rows[0]?.count ?? 0);
+
+    return {
+      rows: rows.rows as any[],
+      page,
+      pageSize,
+      total
+    };
   }
 
+
   // Items de una orden
-  async getOrderItems(orderId: number) {
+  async getOrderItems(orderIdParam: unknown) {
     try {
+      const idNum = Number(orderIdParam);
+      if (!Number.isInteger(idNum) || idNum <= 0) return [];
+
+      const idBig = BigInt(idNum);
+      console.log(`[DEBUG] Buscando items para order ID: ${idNum}`);
+
+      // Primero obtenemos los items básicos
+      const rawItems = await baseDatos
+        .select()
+        .from(tablaItemsOrden)
+        .where(eq(tablaItemsOrden.orderId, idBig));
+
+      console.log(`[DEBUG] Items encontrados:`, rawItems);
+
+      if (rawItems.length === 0) {
+        console.log(`[DEBUG] No se encontraron items para order ${idNum}`);
+        return [];
+      }
+
+      // Ahora hacemos el join con el catálogo
       const items = await baseDatos
         .select({
           id: tablaItemsOrden.id,
           sku: tablaItemsOrden.sku,
           quantity: tablaItemsOrden.quantity,
           price: tablaItemsOrden.price,
-          title: tablaProductos.title,
-          vendor: tablaProductos.vendor,
-          productName: tablaProductos.title, // Alias para el modal
-          skuInterno: tablaItemsOrden.sku,   // SKU interno 
-          skuExterno: tablaItemsOrden.sku,   // SKU externo (mismo por ahora)
+          shopifyProductId: tablaItemsOrden.shopifyProductId,
+          shopifyVariantId: tablaItemsOrden.shopifyVariantId,
+          productName: tablaProductosCatalogo.nombreProducto,
+          skuInterno: tablaProductosCatalogo.skuInterno,
+          skuExterno: tablaItemsOrden.sku,
         })
         .from(tablaItemsOrden)
         .leftJoin(
-          tablaProductos,
-          eq(tablaProductos.idShopify, tablaItemsOrden.shopifyProductId),
+          tablaProductosCatalogo,
+          eq(tablaProductosCatalogo.sku, tablaItemsOrden.sku)
         )
-        .where(eq(tablaItemsOrden.orderId, BigInt(orderId)))
+        .where(eq(tablaItemsOrden.orderId, idBig))
         .orderBy(asc(tablaItemsOrden.id));
 
-      // Remover duplicados por ID si existen
-      const uniqueItems = items.filter((item, index, self) =>
-        index === self.findIndex(t => t.id === item.id)
-      );
+      console.log(`[DEBUG] Items con join:`, items);
 
-      return uniqueItems;
-    } catch (error) {
-      console.error("Error getting order items:", error);
+      // Normaliza los datos
+      const normalized = items.map((it) => ({
+        ...it,
+        productName: it.productName?.trim() || `Producto ${it.sku || 'sin SKU'}`,
+        skuInterno: it.skuInterno || null,
+        skuExterno: it.skuExterno || it.sku || null,
+      }));
+
+      console.log(`[DEBUG] Items normalizados:`, normalized);
+      return normalized;
+    } catch (e) {
+      console.error("[ERROR] Error getting order items:", e);
       return [];
     }
   }
 
-  
 
   async getCatalogProductsPaginated(page: number, pageSize: number) {
     const offset = (page - 1) * pageSize;
@@ -1483,6 +1743,235 @@ export class DatabaseStorage implements IStorage {
       .from(tablaProductosExternos);
     return { rows, total: Number(totalRes[0]?.count ?? 0), page, pageSize };
   }
+
+  async getOrdersForExport(filters: ExportFilters): Promise<any[]> {
+    const {
+      selectedIds,
+      statusFilter = "unmanaged",
+      channelId,
+      search,
+      searchType = "all",
+      page,
+      pageSize,
+      sortField,
+      sortOrder = "desc",
+    } = filters;
+
+    // Si hay selección explícita, ignora filtros y trae solo esos IDs.
+    if (selectedIds?.length) {
+      const ids = selectedIds.map((id) => BigInt(id as any));
+      const q = sql`
+      SELECT 
+        o.id, o.shop_id as "shopId", o.order_id as "orderId",
+        o.name, o.order_number as "orderNumber",
+        o.customer_name as "customerName", o.customer_email as "customerEmail",
+        o.subtotal_price as "subtotalPrice", o.total_amount as "totalAmount",
+        o.currency, o.financial_status as "financialStatus", o.fulfillment_status as "fulfillmentStatus",
+        o.tags, o.created_at as "createdAt", o.shopify_created_at as "shopifyCreatedAt",
+        COUNT(oi.id) as "itemsCount",
+        COALESCE(ARRAY_AGG(oi.sku) FILTER (WHERE oi.sku IS NOT NULL), ARRAY[]::text[]) as skus
+      FROM orders o
+      LEFT JOIN order_items oi ON oi.order_id = o.id
+      WHERE o.id = ANY(${ids})
+      GROUP BY o.id
+    `;
+      const rows = await baseDatos.execute(q);
+      return rows.rows as any[];
+    }
+
+    // Si no hay selección, reusar la paginación "visible"
+    const resp = await this.getOrdersPaginated({
+      statusFilter,
+      channelId,
+      page: page ?? 1,
+      pageSize: pageSize ?? 1000,
+      search,
+      searchType,
+      sortField,
+      sortOrder,
+    });
+
+    // Normaliza a columnas exportables esperadas por el endpoint
+    return resp.rows.map((r: any) => ({
+      shopId: r.channelId,
+      orderId: r.name || r.id,
+      name: r.name,
+      orderNumber: null,
+      customerName: r.customerName,
+      customerEmail: r.customerEmail,
+      subtotalPrice: null,
+      totalAmount: r.totalAmount,
+      currency: null,
+      financialStatus: null,
+      fulfillmentStatus: r.fulfillmentStatus,
+      tags: null,
+      createdAt: r.createdAt,
+      shopifyCreatedAt: r.createdAt,
+      itemsCount: r.itemsCount,
+      skus: r.skus,
+    }));
+  }
+
+
+  // ===== Importación por filas =====
+  private parseNumber(v: unknown): number | null {
+    if (v == null || v === "") return null;
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  }
+  private parseDate(v: unknown): Date | null {
+    if (!v) return null;
+    const d = new Date(String(v));
+    return isNaN(d.getTime()) ? null : d;
+  }
+  private normalizeRow(r: ImportRow) {
+    const get = (k: string) => {
+      const key = Object.keys(r).find((kk) => kk.toLowerCase() === k.toLowerCase());
+      return key ? r[key] : null;
+    };
+
+    const rawTags = get("tags");
+    const tags = Array.isArray(rawTags)
+      ? rawTags
+      : typeof rawTags === "string" && rawTags
+        ? rawTags.split(",").map((s) => s.trim()).filter(Boolean)
+        : null;
+
+    return {
+      shopId: r.shopId ?? get("shopId") ?? get("shop_id"),
+      orderId: r.orderId ?? get("orderId") ?? get("order_id"),
+      name: get("name"),
+      orderNumber: get("orderNumber") ?? get("order_number"),
+      customerName: get("customerName") ?? get("customer_name"),
+      customerEmail: get("customerEmail") ?? get("customer_email"),
+      subtotalPrice: this.parseNumber(get("subtotalPrice") ?? get("subtotal_price")),
+      totalAmount: this.parseNumber(get("totalAmount") ?? get("total_amount")),
+      currency: get("currency"),
+      financialStatus: get("financialStatus") ?? get("financial_status"),
+      fulfillmentStatus: get("fulfillmentStatus") ?? get("fulfillment_status"),
+      tags,
+      createdAt: this.parseDate(get("createdAt") ?? get("created_at")),
+      shopifyCreatedAt: this.parseDate(get("shopifyCreatedAt") ?? get("shopify_created_at")),
+      items: get("items"),
+      skus: get("skus") ? String(get("skus")).split(",").map((s: string) => s.trim()).filter(Boolean) : null,
+    };
+  }
+  private validateRow(n: ReturnType<DatabaseStorage["normalizeRow"]>) {
+    if (n.shopId == null || String(n.shopId).trim() === "") {
+      return { ok: false as const, field: "shopId", message: "shopId es obligatorio" };
+    }
+    if (n.orderId == null || String(n.orderId).trim() === "") {
+      return { ok: false as const, field: "orderId", message: "orderId es obligatorio" };
+    }
+    if (n.customerEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(n.customerEmail))) {
+      return { ok: false as const, field: "customerEmail", message: "Formato de email inválido" };
+    }
+    if (n.subtotalPrice != null && typeof n.subtotalPrice !== "number") {
+      return { ok: false as const, field: "subtotalPrice", message: "subtotalPrice no es numérico" };
+    }
+    if (n.totalAmount != null && typeof n.totalAmount !== "number") {
+      return { ok: false as const, field: "totalAmount", message: "totalAmount no es numérico" };
+    }
+    return { ok: true as const };
+  }
+
+  async importOrdersFromRows(rows: Array<Record<string, unknown>>) {
+  const results: Array<{
+    rowIndex: number;
+    status: "ok" | "skipped" | "error";
+    message?: string;
+    field?: string;
+    value?: unknown;
+    orderId?: number | string;
+  }> = [];
+
+  let ok = 0, skipped = 0, errors = 0;
+
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
+
+    try {
+      const shopIdRaw = row["shopId"];
+      const orderIdRaw = row["orderId"];
+
+      if (shopIdRaw == null || orderIdRaw == null) {
+        skipped++;
+        results.push({
+          rowIndex: i,
+          status: "skipped",
+          message: "Faltan columnas obligatorias: shopId y/o orderId",
+        });
+        continue;
+      }
+
+      const shopId = Number(shopIdRaw);
+      const orderId = String(orderIdRaw).trim();
+      if (!Number.isInteger(shopId) || !orderId) {
+        skipped++;
+        results.push({
+          rowIndex: i,
+          status: "skipped",
+          message: "Valores inválidos en shopId/orderId",
+          field: !Number.isInteger(shopId) ? "shopId" : "orderId",
+          value: !Number.isInteger(shopId) ? shopIdRaw : orderIdRaw,
+        });
+        continue;
+      }
+
+      // Buscar si existe
+      const existente = await this.getOrderByShopifyId(orderId, shopId);
+
+      // Normalizaciones opcionales
+      const toDecimal = (v: unknown) =>
+        v == null || v === "" ? null : (typeof v === "number" ? v : Number(String(v).replace(/,/g, "")));
+      const toDate = (v: unknown) => (v ? new Date(String(v)) : null);
+      const toArray = (v: unknown) =>
+        Array.isArray(v) ? v : (typeof v === "string" ? v.split(",").map(s => s.trim()).filter(Boolean) : null);
+
+      const payload: Partial<InsertarOrden> = {
+        shopId,
+        orderId,
+        name: (row["name"] as string) ?? null,
+        orderNumber: (row["orderNumber"] as string) ?? null,
+        customerName: (row["customerName"] as string) ?? null,
+        customerEmail: (row["customerEmail"] as string) ?? null,
+        subtotalPrice: toDecimal(row["subtotalPrice"]) as any,
+        totalAmount: toDecimal(row["totalAmount"]) as any,
+        currency: (row["currency"] as string) ?? null,
+        financialStatus: (row["financialStatus"] as string) ?? null,
+        fulfillmentStatus: (row["fulfillmentStatus"] as string) ?? null,
+        tags: toArray(row["tags"]) as any,
+        createdAt: toDate(row["createdAt"]) ?? undefined,
+        shopifyCreatedAt: toDate(row["shopifyCreatedAt"]) ?? undefined,
+      };
+
+      if (existente) {
+        // update
+        await this.updateOrder(Number(existente.id), payload as any);
+      } else {
+        // create
+        await this.createOrder(payload as InsertarOrden);
+      }
+
+      ok++;
+      results.push({ rowIndex: i, status: "ok", orderId });
+
+    } catch (e: any) {
+      errors++;
+      results.push({
+        rowIndex: i,
+        status: "error",
+        message: e?.message || "Error no identificado",
+      });
+    }
+  }
+
+  return {
+    results,
+    summary: { processed: rows.length, ok, skipped, errors },
+  };
+}
+
 
 
 }

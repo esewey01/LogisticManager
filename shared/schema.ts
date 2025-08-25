@@ -2,7 +2,10 @@
 // NOTA: Mantengo los mismos exports originales para no romper imports existentes.
 //       Además agrego alias en español (usuarios, marcas, etc.) por claridad.
 
-import { pgTable, serial, text, boolean, timestamp, integer, decimal, date, bigint, json, varchar, jsonb } from "drizzle-orm/pg-core";
+import { pgTable, serial,text, boolean, timestamp, integer, decimal, 
+  date, bigint, json, varchar, jsonb  } from "drizzle-orm/pg-core";
+  import { sql } from "drizzle-orm";
+
 import { z } from "zod";
 
 // === USUARIOS ===
@@ -36,45 +39,31 @@ export type InsertBrand = typeof brands.$inferInsert;
 
 // === PRODUCTOS DE CATÁLOGO ===
 // Productos que pertenecen a una marca; valores económicos opcionales
-export const catalogProducts = pgTable("catalog_products", {
-  id: serial("id").primaryKey(),
-  sku: text("sku").notNull().unique(),           // SKU único
-  brandId: integer("brand_id").notNull(),        // referencia a brands.id (no FK explícita aquí)
-  nombreProducto: text("name").notNull(),                  // nombre del producto
-  description: text("description"),              // descripción (opcional)
-  price: decimal("price"),                        // precio de venta (opcional)
-  cost: decimal("cost"),                          // costo (opcional)
-  weight: decimal("weight"),                      // peso (opcional)
-  dimensions: text("dimensions"),                 // dimensiones (opcional)
-  isActive: boolean("is_active").notNull().default(true),
-  createdAt: timestamp("created_at").defaultNow(),
-  updatedAt: timestamp("updated_at"),
-});
-export type CatalogProduct = typeof catalogProducts.$inferSelect;
-export type InsertCatalogProduct = typeof catalogProducts.$inferInsert;
+
 
 // === CATÁLOGO DE PRODUCTOS (Tabla Real) ===
 // Catálogo de productos interno con estructura real de la DB
 export const catalogoProductos = pgTable("catalogo_productos", {
-  skuInterno: text("sku_interno").primaryKey().unique(),     // SKU interno único
-  sku: text("sku"),                                          // SKU externo
-  nombreProducto: text("nombre_producto"),                   // nombre del producto
-  marca: text("marca"),                                      // marca
-  modelo: text("modelo"),                                    // modelo
-  categoria: text("categoria"),                              // categoría
-  marcaProducto: text("marca_producto"),                     // marca del producto
-  variante: text("variante"),                                // variante
-  codigoBarras: text("codigo_barras"),                       // código de barras
-  foto: text("foto"),                                        // URL de la foto
-  peso: decimal("peso"),                                     // peso
-  alto: decimal("alto"),                                     // altura
-  ancho: decimal("ancho"),                                   // ancho
-  largo: decimal("largo"),                                   // largo
-  condicion: text("condicion"),                              // condición
-  stock: integer("stock"),                                   // stock disponible
-  costo: decimal("costo"),                                   // costo
-  situacion: text("situacion"),                              // situación
+  sku_interno: text("sku_interno").primaryKey().unique(),  // SKU interno único
+  sku: text("sku"),
+  nombre_producto: text("nombre_producto"),
+  marca: text("marca"),
+  modelo: text("modelo"),
+  categoria: text("categoria"),
+  marca_producto: text("marca_producto"),
+  variante: text("variante"),
+  codigo_barras: text("codigo_barras"),
+  foto: text("foto"),
+  peso: decimal("peso"),
+  alto: decimal("alto"),
+  ancho: decimal("ancho"),
+  largo: decimal("largo"),
+  condicion: text("condicion"),
+  stock: integer("stock"),
+  costo: decimal("costo"),
+  situacion: text("situacion"),
 });
+
 export type CatalogoProducto = typeof catalogoProductos.$inferSelect;
 export type InsertCatalogoProducto = typeof catalogoProductos.$inferInsert;
 
@@ -153,8 +142,10 @@ export type InsertOrderItem = typeof orderItems.$inferInsert;
 // Tickets basados en el esquema real
 export const tickets = pgTable("tickets", {
   id: serial("id").primaryKey(),                          // SERIAL PRIMARY KEY
-  ticketNumber: text("ticket_number").unique().notNull(), // TEXT UNIQUE NOT NULL
-  orderId: integer("order_id").notNull(),                 // INTEGER NOT NULL (FK a orders.id con ON DELETE CASCADE)
+    ticketNumber: text("ticket_number")
+    .notNull()
+    .default(sql`nextval('ticket_number_seq')::text`),    // TEXT UNIQUE NOT NULL
+  orderId: bigint("order_id", { mode: "bigint" }).notNull(),                 // INTEGER NOT NULL (FK a orders.id con ON DELETE CASCADE)
   status: text("status").notNull().default('open'),       // TEXT NOT NULL DEFAULT 'open'
   notes: text("notes"),                                   // TEXT
   createdAt: timestamp("created_at").defaultNow(),        // TIMESTAMP DEFAULT now()
@@ -315,7 +306,7 @@ export const insertVariantSchema = z.object({
 
 export const insertTicketSchema = z.object({
   ticketNumber: z.string().optional(),
-  orderId: z.number().int().positive("El ID de la orden debe ser un número positivo"),
+  orderId: z.coerce.number().int().positive("El ID de la orden debe ser un número positivo"),
   status: z.string().default("open"),
   notes: z.string().optional(),
 });
@@ -392,7 +383,7 @@ export type InsertShopifyJob = typeof shopifyJobs.$inferInsert;
 export {
   users as usuarios,
   brands as marcas,
-  catalogProducts as productosCatalogo,
+
   channels as canales,
   carriers as paqueterias,
   orders as ordenes,
@@ -406,8 +397,7 @@ export type {
   InsertUser as InsertarUsuario,
   Brand as Marca,
   InsertBrand as InsertarMarca,
-  CatalogProduct as ProductoCatalogo,
-  InsertCatalogProduct as InsertarProductoCatalogo,
+
   Channel as Canal,
   InsertChannel as InsertarCanal,
   Carrier as Paqueteria,
