@@ -54,8 +54,7 @@ function Router() {
         <Route component={NotFound} />
       </Switch>
       
-      {/* SOCKET-INTEGRATION: Chat widget flotante */}
-      <ChatWidget currentUser={user?.email || "Usuario"} />
+
     </AppLayout>
   );
 }

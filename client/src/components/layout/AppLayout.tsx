@@ -1,6 +1,8 @@
 import { ReactNode, useState, useEffect } from "react";
 import Navbar from "./Navbar";
 import Sidebar from "./Sidebar";
+import { ChatWidget } from "../ChatWidget"; // SOCKET-INTEGRATION
+import { useAuth } from "@/hooks/useAuth";
 
 interface AppLayoutProps {
   children: ReactNode;
@@ -8,6 +10,7 @@ interface AppLayoutProps {
 
 export default function AppLayout({ children }: AppLayoutProps) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const { user } = useAuth(); // SOCKET-INTEGRATION
 
   // Cargar estado del sidebar desde localStorage
   useEffect(() => {
@@ -37,6 +40,9 @@ export default function AppLayout({ children }: AppLayoutProps) {
           {children}
         </div>
       </main>
+      
+      {/* SOCKET-INTEGRATION: Chat widget flotante */}
+      <ChatWidget currentUser={user?.email || "Usuario"} />
     </div>
   );
 }

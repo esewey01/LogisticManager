@@ -7,6 +7,7 @@ LogiSys is a comprehensive logistics management web application designed for a c
 Preferred communication style: Simple, everyday language.
 Last migration completed: August 19, 2025 - Successfully updated database schema to match real structure with bigint IDs and complete business rules implementation.
 MLG API integration completed: August 26, 2025 - Full MLG Marketplace API integration with authentication, comprehensive endpoints, and React Query hooks.
+Three new integrations completed: August 26, 2025 - Express-PL shipping service, GMart image optimization, and Socket.IO real-time chat.
 
 # System Architecture
 
@@ -94,6 +95,20 @@ MLG API integration completed: August 26, 2025 - Full MLG Marketplace API integr
 - **express-session**: Session management with memory store
 - **bcrypt**: Password hashing
 - **CORS**: Cross-origin resource sharing configuration
+
+## New Integrations (August 26, 2025)
+- **Express-PL Shipping API**: Complete shipping label generation service
+  - Authentication: Environment-based credentials (EXPRESSPL_LOGIN, EXPRESSPL_PASSWORD, etc.)
+  - Endpoint: POST /api/shipping/expresspl/label for PDF label generation
+  - Features: Order-based shipping calculations, dimensions from catalog, fixed sender configuration
+- **GMart Image Integration**: Automatic product image resolution
+  - Utility: getGMartImage() function for SKU-based image URLs
+  - Fallback: GMart CDN integration for missing product images
+  - Component: OrderImageDisplay for order item visualization
+- **Socket.IO Real-time Chat**: Live communication system
+  - Backend: Real-time message broadcasting with Socket.IO server
+  - Frontend: Floating ChatWidget with connection status and message history
+  - Features: Ephemeral messaging, user identification, responsive UI
 
 ## Business Logic
 - **Business Rules Module**: Centralized fulfillment status mapping and order state management
