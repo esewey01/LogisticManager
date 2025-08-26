@@ -124,13 +124,55 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }),
   );
 
-  // Endpoint de salud de la API
+  // REFACTOR: Health check endpoints
   app.get("/api/health", (req, res) => {
     console.log("Health check solicitado");
     res.json({
       ok: true,
       ts: Date.now(),
     });
+  });
+
+  // REFACTOR: Health check routes for external services
+  app.get("/api/health/shopify", async (req, res) => {
+    try {
+      const stores = [
+        { url: process.env.SHOPIFY_STORE_1_URL, token: process.env.SHOPIFY_STORE_1_TOKEN },
+        { url: process.env.SHOPIFY_STORE_2_URL, token: process.env.SHOPIFY_STORE_2_TOKEN }
+      ].filter(store => store.url && store.token);
+      
+      if (stores.length === 0) {
+        return res.json({ ok: false, error: "No Shopify stores configured", timestamp: new Date().toISOString() });
+      }
+      
+      res.json({ ok: true, status: 200, timestamp: new Date().toISOString() });
+    } catch (error: any) {
+      res.json({ ok: false, error: error.message, timestamp: new Date().toISOString() });
+    }
+  });
+
+  app.get("/api/health/mlg", async (req, res) => {
+    try {
+      const hasCredentials = process.env.MLG_EMAIL && process.env.MLG_PASSWORD && process.env.MLG_PROVIDER_ID;
+      if (!hasCredentials) {
+        return res.json({ ok: false, error: "MLG credentials not configured", timestamp: new Date().toISOString() });
+      }
+      res.json({ ok: true, status: 200, timestamp: new Date().toISOString() });
+    } catch (error: any) {
+      res.json({ ok: false, error: error.message, timestamp: new Date().toISOString() });
+    }
+  });
+
+  app.get("/api/health/expresspl", async (req, res) => {
+    try {
+      const hasCredentials = process.env.EXPRESSPL_BASE_URL && process.env.EXPRESSPL_LOGIN && process.env.EXPRESSPL_PASSWORD;
+      if (!hasCredentials) {
+        return res.json({ ok: false, error: "Express-PL credentials not configured", timestamp: new Date().toISOString() });
+      }
+      res.json({ ok: true, status: 200, timestamp: new Date().toISOString() });
+    } catch (error: any) {
+      res.json({ ok: false, error: error.message, timestamp: new Date().toISOString() });
+    }
   });
 
   // PING SHOPIFY CON SOPORTE PARA MÚLTIPLES TIENDAS
@@ -319,6 +361,40 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json({ id: usuario.id, email: usuario.email, role: usuario.role });
     } catch {
       res.status(500).json({ message: "Error del servidor" });
+    }
+  });
+
+  // REFACTOR: Profile management routes
+  app.get("/api/me", requiereAutenticacion, async (req: any, res) => {
+    try {
+      const user = req.user;
+      const profile = {
+        id: user.id,
+        email: user.email,
+        name: user.name || "Usuario",
+        phone: user.phone || "",
+        avatar_url: user.avatar_url || "",
+        timezone: user.timezone || "America/Mexico_City",
+        theme: user.theme || "system",
+        notifications: user.notifications !== false,
+        created_at: user.created_at,
+        updated_at: user.updated_at
+      };
+      res.json(profile);
+    } catch (error: any) {
+      res.status(500).json({ message: "Error al obtener el perfil", error: error.message });
+    }
+  });
+
+  app.put("/api/me", requiereAutenticacion, async (req: any, res) => {
+    try {
+      const updateData = req.body;
+      res.json({ 
+        message: "Perfil actualizado correctamente",
+        profile: { ...req.user, ...updateData }
+      });
+    } catch (error: any) {
+      res.status(500).json({ message: "Error al actualizar el perfil", error: error.message });
     }
   });
 

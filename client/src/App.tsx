@@ -5,6 +5,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ChatWidget } from "@/components/ChatWidget"; // SOCKET-INTEGRATION
 import { useAuth } from "@/hooks/useAuth";
+import { ThemeProvider } from "@/providers/ThemeProvider"; // REFACTOR: Dark mode
 
 import NotFound from "@/pages/not-found";
 import Login from "@/pages/login";
@@ -16,6 +17,7 @@ import Paqueteria from "@/pages/paqueteria";
 import AdminUsuarios from "@/pages/admin/usuarios";
 import Config from "@/pages/config";
 import ProductsView from "@/pages/ProductsView";
+import Profile from "@/pages/Profile";
 import ProductosUnificada from "@/pages/productos";
 import AppLayout from "@/components/layout/AppLayout";
 
@@ -51,6 +53,7 @@ function Router() {
         <Route path="/productos-unificada" component={ProductosUnificada} />
         <Route path="/productos" component={ProductsView} />
         <Route path="/config" component={Config} />
+        <Route path="/profile" component={Profile} />
         <Route component={NotFound} />
       </Switch>
       
@@ -62,10 +65,12 @@ function Router() {
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <TooltipProvider>
-        <Toaster />
-        <Router />
-      </TooltipProvider>
+      <ThemeProvider>
+        <TooltipProvider>
+          <Toaster />
+          <Router />
+        </TooltipProvider>
+      </ThemeProvider>
     </QueryClientProvider>
   );
 }

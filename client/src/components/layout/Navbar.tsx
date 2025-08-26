@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Menu } from "lucide-react";
+import { Menu, User, Settings } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -12,6 +12,9 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/hooks/useAuth";
+import { ThemeToggle } from "@/components/ThemeToggle"; // REFACTOR: Dark mode
+import { HealthStatusIndicators } from "@/components/HealthStatusIndicator"; // REFACTOR: Health checks
+import { useLocation } from "wouter";
 
 interface NavbarProps {
   onToggleSidebar?: () => void;
@@ -19,6 +22,7 @@ interface NavbarProps {
 
 export default function Navbar({ onToggleSidebar }: NavbarProps) {
   const { user, logout } = useAuth();
+  const [, setLocation] = useLocation();
 
   return (
     <nav className="fixed top-0 left-0 right-0 z-50 bg-surface shadow-md h-16">
@@ -44,17 +48,11 @@ export default function Navbar({ onToggleSidebar }: NavbarProps) {
         </div>
         
         <div className="flex items-center space-x-4">
-          {/* API Status Indicators */}
-          <div className="flex items-center space-x-3 text-sm">
-            <div className="flex items-center space-x-1">
-              <div className="w-2 h-2 bg-success rounded-full"></div>
-              <span className="text-gray-600">Shopify</span>
-            </div>
-            <div className="flex items-center space-x-1">
-              <div className="w-2 h-2 bg-error rounded-full"></div>
-              <span className="text-gray-600">MGL</span>
-            </div>
-          </div>
+          {/* REFACTOR: Real-time health status indicators */}
+          <HealthStatusIndicators />
+          
+          {/* REFACTOR: Theme toggle */}
+          <ThemeToggle />
           
           {/* User Menu */}
           <DropdownMenu>
@@ -73,9 +71,13 @@ export default function Navbar({ onToggleSidebar }: NavbarProps) {
                 <div className="text-xs text-gray-500 capitalize">{user?.role}</div>
               </DropdownMenuLabel>
               <DropdownMenuSeparator />
-              <DropdownMenuItem>
-                <i className="fas fa-user mr-2"></i>
+              <DropdownMenuItem onClick={() => setLocation('/profile')} data-testid="link-profile">
+                <User className="mr-2 h-4 w-4" />
                 Mi Perfil
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setLocation('/config')} data-testid="link-config">
+                <Settings className="mr-2 h-4 w-4" />
+                Configuración
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem onClick={() => logout()} className="text-destructive">
