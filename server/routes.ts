@@ -1491,6 +1491,10 @@ app.get("/api/orders/:id/details", requiereAutenticacion, async (req, res) => {
     }
   });
 
+  // Register all MLG routes
+  const { registerMlgRoutes } = await import("./routes/mlgRoutes");
+  registerMlgRoutes(app);
+
   // Crea y devuelve el servidor HTTP a quien llama (index.ts)
   const servidorHttp = createServer(app);
   return servidorHttp;
