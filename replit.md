@@ -6,6 +6,7 @@ LogiSys is a comprehensive logistics management web application designed for a c
 
 Preferred communication style: Simple, everyday language.
 Last migration completed: August 19, 2025 - Successfully updated database schema to match real structure with bigint IDs and complete business rules implementation.
+MLG API integration completed: August 26, 2025 - Full MLG Marketplace API integration with authentication, comprehensive endpoints, and React Query hooks.
 
 # System Architecture
 
@@ -68,6 +69,13 @@ Last migration completed: August 19, 2025 - Successfully updated database schema
   - Endpoint: Shopify GraphQL API
   - Sync frequency: Every 5 minutes
   - Business Rules: FULFILLED → "Gestionado", UNFULFILLED/NULL → "Sin Gestionar", RESTOCKED → "Devuelto", Others → "Error"
+- **MLG Marketplace API**: Complete integration for product and sales management
+  - Authentication: Token-based with automatic refresh and memory caching
+  - Base URL: https://www.mlgdev.mx/marketplaceapi
+  - Endpoints: Categories, Subcategories, Brands, Products, Sales, Commissions, Bulk Operations, Stock Updates, Shipping Labels
+  - Backend: Express routes with Zod validation and error handling
+  - Frontend: React Query hooks for all endpoints
+  - Security: Environment-based credentials (MLG_EMAIL, MLG_PASSWORD, MLG_PROVIDER_ID)
 - **MercadoLibre API**: Order management (currently simulated)
   - Future OAuth implementation planned
   - Order search by seller ID

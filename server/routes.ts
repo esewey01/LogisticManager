@@ -1174,7 +1174,7 @@ app.get("/api/orders/:id/details", requiereAutenticacion, async (req, res) => {
       const { text } = req.body as { text?: string };
       if (!id || !text || !text.trim()) return res.status(400).json({ message: "Texto inválido" });
 
-      await almacenamiento.updateNote({ id, text: text.trim() });
+      await almacenamiento.updateNote(id, { content: text.trim() });
       res.json({ ok: true });
     } catch {
       res.status(500).json({ message: "No se pudo actualizar la nota" });
