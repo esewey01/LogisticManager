@@ -700,7 +700,7 @@ export default function Pedidos() {
                         }
                       }}
                     >
-                      Nombre
+                      Orden
                       {sortField === "name" && (
                         <span className="ml-1">
                           {sortOrder === "asc" ? " 🔼" : " 🔽"}
@@ -708,7 +708,7 @@ export default function Pedidos() {
                       )}
                     </Button>
                   </TableHead>
-                  <TableHead>SKU(s)</TableHead>
+                  <TableHead>SKU's del Canal</TableHead>
                   <TableHead>Canal</TableHead>
                   <TableHead>Productos</TableHead>
                   <TableHead>Monto</TableHead>

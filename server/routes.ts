@@ -212,7 +212,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           .json({
             ok: false,
             error: "Faltan envs",
-            visto: { shop: !!shop, token: !!token, ver },
+            vd: { shop: !!shop, token: !!token, ver },
           });
       }
       if (/^https?:\/\//i.test(shop)) {
