@@ -365,6 +365,43 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Top SKUs por rango
+  app.get("/api/dashboard/top-skus", requiereAutenticacion, async (req, res) => {
+    try {
+      const { from, to, limit } = req.query;
+      const fromDate = from ? new Date(String(from)) : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+      const toDate = to ? new Date(String(to)) : new Date();
+      const lim = Number(limit ?? 5);
+
+      const data = await almacenamiento.getTopSkusRange(fromDate, toDate, lim);
+      res.json({ topSkus: data });
+    } catch (err) {
+      res.status(500).json({ message: "No se pudo obtener Top SKUs" });
+    }
+  });
+
+  //CONTEO DE ORDENES POR CANAL
+  app.get("/api/dashboard/orders-by-channel", async (req, res) => {
+    try {
+      const { from, to } = req.query as { from?: string; to?: string };
+
+      const fromDate =
+        from && !Number.isNaN(Date.parse(from)) ? new Date(from) : undefined;
+      const toDate =
+        to && !Number.isNaN(Date.parse(to)) ? new Date(to) : undefined;
+
+      const data = await almacenamiento.getOrdersByChannel(fromDate, toDate);
+      res.json(data);
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ message: "Error obteniendo órdenes por canal" });
+    }
+  });
+
+
+
+
+
   // ---------- Catálogo de Productos ----------
   app.get("/api/products", requiereAutenticacion, async (req, res) => {
     try {
@@ -658,6 +695,32 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // routes.ts (agrega este endpoint)
+app.get("/api/orders/:id/details", requiereAutenticacion, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    console.log(`[GET /api/orders/:id/details] Solicitando detalles ID: ${id}`);
+
+    if (Number.isNaN(id)) {
+      return res.status(400).json({ message: "ID de orden inválido" });
+    }
+
+    // Usa el nuevo método
+    // Si tu almacenamiento es un objeto, asegúrate de que el método exista ahí.
+    const ordenDetallada = await (almacenamiento as any).getOrderDetails(id);
+
+    if (!ordenDetallada) {
+      return res.status(404).json({ message: "Orden no encontrada" });
+    }
+
+    // Seguridad JSON
+    const safe = JSON.parse(JSON.stringify(ordenDetallada));
+    res.json(safe);
+  } catch (error) {
+    console.error(`[GET /api/orders/:id/details] Error:`, error);
+    res.status(500).json({ message: "No se pudo obtener la orden (detalles)" });
+  }
+});
 
 
 
@@ -701,8 +764,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(500).json({ message: "No se pudieron obtener items" });
     }
   });
-
-
 
   app.post("/api/orders/:id/cancel", requiereAutenticacion, async (req, res) => {
     try {
@@ -1110,10 +1171,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.put("/api/notes/:id", requiereAutenticacion, async (req, res) => {
     try {
       const id = Number(req.params.id);
-      if (Number.isNaN(id))
-        return res.status(400).json({ message: "ID de nota inválido" });
-      const nota = await almacenamiento.updateNote(id, req.body);
-      res.json(nota);
+      const { text } = req.body as { text?: string };
+      if (!id || !text || !text.trim()) return res.status(400).json({ message: "Texto inválido" });
+
+      await almacenamiento.updateNote({ id, text: text.trim() });
+      res.json({ ok: true });
     } catch {
       res.status(500).json({ message: "No se pudo actualizar la nota" });
     }

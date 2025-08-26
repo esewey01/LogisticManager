@@ -224,6 +224,9 @@ export default function Pedidos() {
     }
   });
 
+  //
+  // ======= MUTATIONS =======
+
   const updateOrderMutation = useMutation({
     mutationFn: async ({ orderId, updates }: { orderId: number | string; updates: Partial<OrderRow> }) => {
       await apiRequest("PATCH", `/api/orders/${orderId}`, updates);

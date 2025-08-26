@@ -48,6 +48,7 @@ import {
   type InsertProductComboItem as InsertarItemCombo,
   type ExternalProduct as ProductoExterno,
   type InsertExternalProduct as InsertarProductoExterno,
+  orderItems,
 } from "@shared/schema";
 
 import { db as baseDatos } from "./db";
@@ -143,9 +144,11 @@ export interface IStorage {
   createOrder(order: InsertarOrden): Promise<Orden>;
   updateOrder(id: number, updates: Partial<InsertarOrden>): Promise<Orden>;
   getOrdersByCustomer(customerName: string): Promise<Orden[]>;
-  getOrdersByChannel(): Promise<
-    { channelCode: string; channelName: string; orders: number }[]
-  >;
+  getOrderDetails(idParam: unknown): Promise<any>;
+  getOrdersByChannel(
+    from?: Date,
+    to?: Date
+  ): Promise<{ channelCode: string; channelName: string; orders: number }[]>;
 
   // Tickets
   getTickets(): Promise<Ticket[]>;
@@ -219,6 +222,7 @@ export interface IStorage {
   ): Promise<Variante>;
 
   // Métricas de dashboard
+
   getDashboardMetricsRange(from: Date, to: Date): Promise<DashboardMetrics>;
 
   getOrdersPaginated(params: {
@@ -501,6 +505,97 @@ export class DatabaseStorage implements IStorage {
       .orderBy(desc(createdAtEff(tablaOrdenes)));
   }
 
+  //INFORMACION RELEVANTE DE LA ORDEN
+  async getOrderDetails(idParam: unknown) {
+    try {
+      const idNum = Number(idParam);
+      if (!Number.isInteger(idNum) || idNum <= 0) return undefined;
+      const idBig = BigInt(idNum);
+
+      // NOTA: alias en camelCase para que coincidan con el FE
+      const { rows } = await baseDatos.execute(sql`
+        SELECT
+          -- Datos generales de la orden (camelCase)
+          o.id                               AS "id",
+          o.shop_id                          AS "shopId",
+          o.order_id                         AS "orderId",
+          o.name                             AS "name",
+          o.order_number                     AS "orderNumber",
+          o.customer_name                    AS "customerName",
+          o.customer_email                   AS "customerEmail",
+          o.subtotal_price                   AS "subtotalPrice",
+          o.total_amount                     AS "totalAmount",
+          o.currency                         AS "currency",
+          o.financial_status                 AS "financialStatus",
+          o.fulfillment_status               AS "fulfillmentStatus",
+          o.tags                             AS "tags",
+          o.order_note                       AS "orderNote",
+          o.created_at                       AS "createdAt",
+          o.shopify_created_at               AS "shopifyCreatedAt",
+          o.ship_name                        AS "shipName",
+          o.ship_phone                       AS "shipPhone",
+          o.ship_address1                    AS "shipAddress1",
+          o.ship_city                        AS "shipCity",
+          o.ship_province                    AS "shipProvince",
+          o.ship_country                     AS "shipCountry",
+          o.ship_zip                         AS "shipZip",
+
+          -- Ítems enriquecidos como JSONB
+          COALESCE(
+            jsonb_agg(
+              jsonb_build_object(
+                'orderItemId',    oi.id,
+                'skuCanal',       oi.sku,
+                'skuMarca',       cp.sku,
+                'skuInterno',     cp.sku_interno,
+                'quantity',       oi.quantity,
+                'priceVenta',     oi.price,
+
+                'title',          p.title,
+                'vendor',         p.vendor,
+                'productType',    p.product_type,
+
+                'barcode',        v.barcode,
+                'compareAtPrice', v.compare_at_price,
+                'stockShopify',   v.inventory_qty,
+
+                'nombreProducto', cp.nombre_producto,
+                'categoria',      cp.categoria,
+                'condicion',      cp.condicion,
+                'marca',          cp.marca,
+                'variante',       cp.variante,
+                'largo',          cp.largo,
+                'ancho',          cp.ancho,
+                'alto',           cp.alto,
+                'peso',           cp.peso,
+                'foto',           cp.foto,
+                'costo',          cp.costo,
+                'stockMarca',     cp.stock
+              )
+            ) FILTER (WHERE oi.id IS NOT NULL),
+            '[]'::jsonb
+          ) AS "items"
+        FROM orders o
+        LEFT JOIN order_items oi
+          ON oi.order_id = o.id
+        LEFT JOIN products p
+          ON p.id_shopify = oi.shopify_product_id
+        LEFT JOIN variants v
+          ON v.id_shopify = oi.shopify_variant_id
+        LEFT JOIN catalogo_productos cp
+          ON cp.sku_interno = oi.sku
+        WHERE o.id = ${idBig}
+        GROUP BY o.id
+      `);
+
+      const row = (rows as any[])[0];
+      return row ?? undefined;
+    } catch (e) {
+      console.error("[Storage] Error getOrderDetails:", (e as any)?.message || e);
+      return undefined;
+    }
+  }
+
   /** 
    * Obtiene una orden por ID con detalles completos 
    * Corrección: Manejo correcto de bigint IDs y campos de la DB real
@@ -557,31 +652,38 @@ export class DatabaseStorage implements IStorage {
       .orderBy(desc(tablaOrdenes.createdAt));
   }
 
-  async getOrdersByChannel(): Promise<
-    { channelCode: string; channelName: string; orders: number }[]
-  > {
+  async getOrdersByChannel(
+    from?: Date,
+    to?: Date
+  ): Promise<{ channelCode: string; channelName: string; orders: number }[]> {
+    // Condiciones seguras, paramétricas
+    const fromCond = from
+      ? sql`o.created_at >= ${from}`
+      : sql`o.created_at >= NOW() - INTERVAL '30 days'`;
+    const toCond = to ? sql`o.created_at < ${to}` : sql`TRUE`;
+
     const result = await baseDatos.execute<{
       channel_code: string;
       channel_name: string;
       orders: number;
     }>(sql`
-    SELECT 
-      CASE 
-        WHEN o.shop_id = 1 THEN 'WW'
-        WHEN o.shop_id = 2 THEN 'CT'
-        ELSE 'OTHER'
-      END as channel_code,
-      CASE 
-        WHEN o.shop_id = 1 THEN 'WordWide'
-        WHEN o.shop_id = 2 THEN 'CrediTienda'
-        ELSE 'Otra Tienda'
-      END as channel_name,
-      COUNT(o.id)::int as orders
-    FROM orders o
-    WHERE o.created_at >= NOW() - INTERVAL '30 days'
-    GROUP BY o.shop_id
-    ORDER BY orders DESC
-  `);
+      SELECT 
+        CASE 
+          WHEN o.shop_id = 1 THEN 'WW'
+          WHEN o.shop_id = 2 THEN 'CT'
+          ELSE 'OTHER'
+        END as channel_code,
+        CASE 
+          WHEN o.shop_id = 1 THEN 'WordWide'
+          WHEN o.shop_id = 2 THEN 'CrediTienda'
+          ELSE 'Otra Tienda'
+        END as channel_name,
+        COUNT(o.id)::int as orders
+      FROM orders o
+      WHERE ${fromCond} AND ${toCond}
+      GROUP BY o.shop_id
+      ORDER BY orders DESC
+    `);
 
     return result.rows.map((row) => ({
       channelCode: row.channel_code,
@@ -589,6 +691,7 @@ export class DatabaseStorage implements IStorage {
       orders: row.orders,
     }));
   }
+
 
   /** Obtiene estadísticas de órdenes canceladas/reabastecidas */
   async getCancelledOrdersStats(): Promise<{ count: number; percentage: number }> {
@@ -984,6 +1087,8 @@ export class DatabaseStorage implements IStorage {
     return nota;
   }
 
+
+
   /** Elimina una nota por ID. */
   async deleteNote(id: number): Promise<void> {
     await baseDatos.delete(tablaNotas).where(eq(tablaNotas.id, id));
@@ -1201,6 +1306,43 @@ export class DatabaseStorage implements IStorage {
       })),
     };
   }
+
+  //============TOP SKU EN UN RANGO DE FECHAS=============
+  // TOP SKUs en un rango de fechas
+  async getTopSkusRange(
+    from: Date,
+    to: Date,
+    limit = 5
+  ): Promise<Array<{ sku: string | null; totalQty: number; revenue: number }>> {
+    const range = and(
+      gte(tablaOrdenes.shopifyCreatedAt, from),
+      lte(tablaOrdenes.shopifyCreatedAt, to),
+      isNotNull(tablaOrdenes.shopifyCreatedAt),
+      isNull(tablaOrdenes.shopifyCancelledAt)
+    );
+
+    // Unimos order_items con orders para filtrar por fechas de la orden
+    const rows = await baseDatos
+      .select({
+        sku: orderItems.sku, // tu "SKU interno"
+        totalQty: sql<number>`COALESCE(SUM(${orderItems.quantity}), 0)`,
+        revenue: sql<number>`COALESCE(SUM(${orderItems.quantity} * COALESCE(${orderItems.price}, 0)), 0)`,
+      })
+      .from(orderItems)
+      .innerJoin(tablaOrdenes, eq(tablaOrdenes.id, orderItems.orderId))
+      .where(range)
+      .groupBy(orderItems.sku)
+      .orderBy(sql`COALESCE(SUM(${orderItems.quantity}), 0) DESC`)
+      .limit(limit);
+
+    return rows.map(r => ({
+      sku: r.sku ?? null,
+      totalQty: Number(r.totalQty ?? 0),
+      revenue: Number(r.revenue ?? 0),
+    }));
+  }
+
+
 
   /** Obtiene órdenes del día actual. */
   async getTodayOrders(): Promise<{ count: number; totalAmount: number }> {
@@ -1876,101 +2018,101 @@ export class DatabaseStorage implements IStorage {
   }
 
   async importOrdersFromRows(rows: Array<Record<string, unknown>>) {
-  const results: Array<{
-    rowIndex: number;
-    status: "ok" | "skipped" | "error";
-    message?: string;
-    field?: string;
-    value?: unknown;
-    orderId?: number | string;
-  }> = [];
+    const results: Array<{
+      rowIndex: number;
+      status: "ok" | "skipped" | "error";
+      message?: string;
+      field?: string;
+      value?: unknown;
+      orderId?: number | string;
+    }> = [];
 
-  let ok = 0, skipped = 0, errors = 0;
+    let ok = 0, skipped = 0, errors = 0;
 
-  for (let i = 0; i < rows.length; i++) {
-    const row = rows[i];
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
 
-    try {
-      const shopIdRaw = row["shopId"];
-      const orderIdRaw = row["orderId"];
+      try {
+        const shopIdRaw = row["shopId"];
+        const orderIdRaw = row["orderId"];
 
-      if (shopIdRaw == null || orderIdRaw == null) {
-        skipped++;
+        if (shopIdRaw == null || orderIdRaw == null) {
+          skipped++;
+          results.push({
+            rowIndex: i,
+            status: "skipped",
+            message: "Faltan columnas obligatorias: shopId y/o orderId",
+          });
+          continue;
+        }
+
+        const shopId = Number(shopIdRaw);
+        const orderId = String(orderIdRaw).trim();
+        if (!Number.isInteger(shopId) || !orderId) {
+          skipped++;
+          results.push({
+            rowIndex: i,
+            status: "skipped",
+            message: "Valores inválidos en shopId/orderId",
+            field: !Number.isInteger(shopId) ? "shopId" : "orderId",
+            value: !Number.isInteger(shopId) ? shopIdRaw : orderIdRaw,
+          });
+          continue;
+        }
+
+        // Buscar si existe
+        const existente = await this.getOrderByShopifyId(orderId, shopId);
+
+        // Normalizaciones opcionales
+        const toDecimal = (v: unknown) =>
+          v == null || v === "" ? null : (typeof v === "number" ? v : Number(String(v).replace(/,/g, "")));
+        const toDate = (v: unknown) => (v ? new Date(String(v)) : null);
+        const toArray = (v: unknown) =>
+          Array.isArray(v) ? v : (typeof v === "string" ? v.split(",").map(s => s.trim()).filter(Boolean) : null);
+
+        const payload: Partial<InsertarOrden> = {
+          shopId,
+          orderId,
+          name: (row["name"] as string) ?? null,
+          orderNumber: (row["orderNumber"] as string) ?? null,
+          customerName: (row["customerName"] as string) ?? null,
+          customerEmail: (row["customerEmail"] as string) ?? null,
+          subtotalPrice: toDecimal(row["subtotalPrice"]) as any,
+          totalAmount: toDecimal(row["totalAmount"]) as any,
+          currency: (row["currency"] as string) ?? null,
+          financialStatus: (row["financialStatus"] as string) ?? null,
+          fulfillmentStatus: (row["fulfillmentStatus"] as string) ?? null,
+          tags: toArray(row["tags"]) as any,
+          createdAt: toDate(row["createdAt"]) ?? undefined,
+          shopifyCreatedAt: toDate(row["shopifyCreatedAt"]) ?? undefined,
+        };
+
+        if (existente) {
+          // update
+          await this.updateOrder(Number(existente.id), payload as any);
+        } else {
+          // create
+          await this.createOrder(payload as InsertarOrden);
+        }
+
+        ok++;
+        results.push({ rowIndex: i, status: "ok", orderId });
+
+      } catch (e: any) {
+        errors++;
         results.push({
           rowIndex: i,
-          status: "skipped",
-          message: "Faltan columnas obligatorias: shopId y/o orderId",
+          status: "error",
+          message: e?.message || "Error no identificado",
         });
-        continue;
       }
-
-      const shopId = Number(shopIdRaw);
-      const orderId = String(orderIdRaw).trim();
-      if (!Number.isInteger(shopId) || !orderId) {
-        skipped++;
-        results.push({
-          rowIndex: i,
-          status: "skipped",
-          message: "Valores inválidos en shopId/orderId",
-          field: !Number.isInteger(shopId) ? "shopId" : "orderId",
-          value: !Number.isInteger(shopId) ? shopIdRaw : orderIdRaw,
-        });
-        continue;
-      }
-
-      // Buscar si existe
-      const existente = await this.getOrderByShopifyId(orderId, shopId);
-
-      // Normalizaciones opcionales
-      const toDecimal = (v: unknown) =>
-        v == null || v === "" ? null : (typeof v === "number" ? v : Number(String(v).replace(/,/g, "")));
-      const toDate = (v: unknown) => (v ? new Date(String(v)) : null);
-      const toArray = (v: unknown) =>
-        Array.isArray(v) ? v : (typeof v === "string" ? v.split(",").map(s => s.trim()).filter(Boolean) : null);
-
-      const payload: Partial<InsertarOrden> = {
-        shopId,
-        orderId,
-        name: (row["name"] as string) ?? null,
-        orderNumber: (row["orderNumber"] as string) ?? null,
-        customerName: (row["customerName"] as string) ?? null,
-        customerEmail: (row["customerEmail"] as string) ?? null,
-        subtotalPrice: toDecimal(row["subtotalPrice"]) as any,
-        totalAmount: toDecimal(row["totalAmount"]) as any,
-        currency: (row["currency"] as string) ?? null,
-        financialStatus: (row["financialStatus"] as string) ?? null,
-        fulfillmentStatus: (row["fulfillmentStatus"] as string) ?? null,
-        tags: toArray(row["tags"]) as any,
-        createdAt: toDate(row["createdAt"]) ?? undefined,
-        shopifyCreatedAt: toDate(row["shopifyCreatedAt"]) ?? undefined,
-      };
-
-      if (existente) {
-        // update
-        await this.updateOrder(Number(existente.id), payload as any);
-      } else {
-        // create
-        await this.createOrder(payload as InsertarOrden);
-      }
-
-      ok++;
-      results.push({ rowIndex: i, status: "ok", orderId });
-
-    } catch (e: any) {
-      errors++;
-      results.push({
-        rowIndex: i,
-        status: "error",
-        message: e?.message || "Error no identificado",
-      });
     }
-  }
 
-  return {
-    results,
-    summary: { processed: rows.length, ok, skipped, errors },
-  };
-}
+    return {
+      results,
+      summary: { processed: rows.length, ok, skipped, errors },
+    };
+  }
 
 
 

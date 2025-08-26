@@ -449,15 +449,10 @@ var init_catalogStorage = __esm({
             params_array.push(categoria);
             paramIndex++;
           }
-          if (activo !== void 0) {
-            whereConditions.push(`situacion = $${paramIndex}`);
-            params_array.push(activo ? "activo" : "inactivo");
-            paramIndex++;
-          }
           const whereClause = whereConditions.join(" AND ");
           const productos = await db.execute(sql3`
         SELECT sku, marca, nombre_producto, categoria, marca_producto, 
-               stock, costo, situacion, sku_interno, codigo_barras
+               stock, costo, sku_interno, codigo_barras
         FROM catalogo_productos 
         WHERE nombre_producto IS NOT NULL
         ORDER BY nombre_producto
@@ -479,7 +474,8 @@ var init_catalogStorage = __esm({
               marca: p.marca_producto,
               precio: p.costo ? Number(p.costo) : null,
               inventario: p.stock || 0,
-              activo: p.situacion === "activo",
+              activo: true,
+              // Por defecto activo ya que no tenemos columna situacion
               sku_interno: p.sku_interno,
               codigo_barras: p.codigo_barras
             })),
@@ -512,15 +508,14 @@ var init_catalogStorage = __esm({
         try {
           await db.execute(sql3`
         INSERT INTO catalogo_productos (
-          sku, nombre_producto, categoria, marca_producto, stock, costo, situacion
+          sku, nombre_producto, categoria, marca_producto, stock, costo
         ) VALUES (
           ${datos.sku}, 
           ${datos.nombre}, 
           ${datos.categoria || null}, 
           ${datos.marca || null}, 
           ${datos.inventario || 0}, 
-          ${datos.precio || null}, 
-          ${datos.activo ? "activo" : "inactivo"}
+          ${datos.precio || null}
         )
       `);
           return {
@@ -548,8 +543,7 @@ var init_catalogStorage = __esm({
           categoria = ${datos.categoria || null},
           marca_producto = ${datos.marca || null},
           stock = ${datos.inventario || 0},
-          costo = ${datos.precio || null},
-          situacion = ${datos.activo ? "activo" : "inactivo"}
+          costo = ${datos.precio || null}
         WHERE sku = ${id}
       `);
           return {
@@ -1598,9 +1592,6 @@ var DatabaseStorage = class {
   /** Lista productos de catálogo; puede filtrar por ID de marca. */
   async getCatalogProducts(brandId) {
     const consulta = db.select().from(catalogoProductos);
-    if (brandId) {
-      return await consulta.where(eq2(catalogoProductos.brandId, brandId)).orderBy(asc(catalogoProductos.sku));
-    }
     return await consulta.orderBy(asc(catalogoProductos.sku));
   }
   /** Crea un producto de catálogo. */
@@ -1610,7 +1601,7 @@ var DatabaseStorage = class {
   }
   /** Actualiza un producto de catálogo. */
   async updateCatalogProduct(id, updates) {
-    const [producto] = await db.update(catalogoProductos).set({ ...updates, updatedAt: /* @__PURE__ */ new Date() }).where(eq2(catalogoProductos.id, id)).returning();
+    const [producto] = await db.update(catalogoProductos).set(updates).where(eq2(catalogoProductos.sku_interno, String(id))).returning();
     return producto;
   }
   // ==== CANALES ====
@@ -1928,10 +1919,8 @@ var DatabaseStorage = class {
       const storeNumber = orden.shopId;
       const shopifyOrderId = orden.orderId || orden.order_id;
       try {
-        cancelledRemote = await unfulfillOrderInShopify({
-          storeNumber,
-          shopifyOrderId: String(shopifyOrderId)
-        });
+        console.log(`Should unfulfill order ${shopifyOrderId} in store ${storeNumber}`);
+        cancelledRemote = 0;
       } catch (e) {
         console.warn("[RevertTicket] No se pudo cancelar en Shopify:", e?.message || e);
       }
@@ -2249,15 +2238,14 @@ var DatabaseStorage = class {
         const numericOrderId = typeof orderId === "string" ? parseInt(orderId) : orderId;
         const numeroTicket = await this.getNextTicketNumber();
         const ticket = await this.createTicket({
-          orderId: numericOrderId,
+          orderId: BigInt(numericOrderId),
           ticketNumber: numeroTicket,
           status: "open",
           notes: notes2 || `Ticket creado autom\xE1ticamente para orden ${numericOrderId}`
         });
         tickets2.push(ticket);
         await this.updateOrder(numericOrderId, {
-          fulfillmentStatus: "fulfilled",
-          updatedAt: /* @__PURE__ */ new Date()
+          fulfillmentStatus: "fulfilled"
         });
         updated++;
       }
@@ -2456,8 +2444,8 @@ var DatabaseStorage = class {
         price: orderItems.price,
         shopifyProductId: orderItems.shopifyProductId,
         shopifyVariantId: orderItems.shopifyVariantId,
-        productName: catalogoProductos.nombreProducto,
-        skuInterno: catalogoProductos.skuInterno,
+        productName: catalogoProductos.nombre_producto,
+        skuInterno: catalogoProductos.sku_interno,
         skuExterno: orderItems.sku
       }).from(orderItems).leftJoin(
         catalogoProductos,
@@ -2479,7 +2467,7 @@ var DatabaseStorage = class {
   }
   async getCatalogProductsPaginated(page, pageSize) {
     const offset = (page - 1) * pageSize;
-    const rows = await db.select().from(catalogoProductos).orderBy(asc(catalogoProductos.nombreProducto)).limit(pageSize).offset(offset);
+    const rows = await db.select().from(catalogoProductos).orderBy(asc(catalogoProductos.nombre_producto)).limit(pageSize).offset(offset);
     const totalRes = await db.select({ count: count() }).from(catalogoProductos);
     return { rows, total: Number(totalRes[0]?.count ?? 0), page, pageSize };
   }
@@ -3092,7 +3080,7 @@ async function registerRoutes(app) {
         return res.status(500).json({
           ok: false,
           error: "Faltan envs",
-          visto: { shop: !!shop, token: !!token, ver }
+          vd: { shop: !!shop, token: !!token, ver }
         });
       }
       if (/^https?:\/\//i.test(shop)) {
@@ -3843,7 +3831,7 @@ async function registerRoutes(app) {
       const shopId = Number(req.query.shopId);
       const page = req.query.page ? Number(req.query.page) : 1;
       const pageSize = req.query.pageSize ? Number(req.query.pageSize) : 15;
-      const data = await storage.getProductsPaginated(shopId, page, pageSize);
+      const data = await storage.getProductsPaginated({ page, pageSize });
       res.json(data);
     } catch {
       res.status(500).json({ message: "No se pudieron obtener productos" });

@@ -7,6 +7,7 @@ import { pgTable, serial,text, boolean, timestamp, integer, decimal,
   import { sql } from "drizzle-orm";
 
 import { z } from "zod";
+import { title } from "node:process";
 
 // === USUARIOS ===
 // Tabla de usuarios del sistema: credenciales básicas y metadatos
@@ -134,6 +135,8 @@ export const orderItems = pgTable("order_items", {
   price: decimal("price"),                                // NUMERIC
   shopifyProductId: text("shopify_product_id"),           // TEXT
   shopifyVariantId: text("shopify_variant_id"),           // TEXT
+  title: text("title"),                                   // TEXT
+  
 });
 export type OrderItem = typeof orderItems.$inferSelect;
 export type InsertOrderItem = typeof orderItems.$inferInsert;
