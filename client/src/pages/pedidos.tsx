@@ -16,6 +16,7 @@ import * as React from "react";
 import { Filter, Search, X } from "lucide-react";
 import { Eye, Ticket, Trash2 } from "lucide-react";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
+import { MlgPingBox } from "@/components/MlgPingBox"; // MLG-INTEGRATION
 
 import {
   Popover,
@@ -425,6 +426,11 @@ export default function Pedidos() {
         <div className="mb-8">
           <h1 className="text-2xl font-semibold text-gray-900 mb-2">Gestión de Pedidos</h1>
           <p className="text-gray-600">Administra y procesa los pedidos del sistema</p>
+          
+          {/* MLG-INTEGRATION: Testing component */}
+          <div className="mt-4">
+            <MlgPingBox />
+          </div>
         </div>
 
         {/* Filters and Actions */}

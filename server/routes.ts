@@ -1470,6 +1470,27 @@ app.get("/api/orders/:id/details", requiereAutenticacion, async (req, res) => {
     res.json({ message: "Simulación MercadoLibre", status: "pending" });
   });
 
+  // ========== INTEGRACIÓN MLG API (MLG-INTEGRATION) ==========
+  // Health/ping contra un endpoint protegido de MLG
+  app.get("/api/mlg/ping", requiereAutenticacion, async (_req, res) => {
+    try {
+      const { mlgRequest } = await import("./services/MlgClient");
+      // Ajusta el path a un recurso real de MLG que requiera token:
+      // Ejemplos posibles (confirma con su doc):
+      //  - /api/Productos/ObtenerCategorias
+      //  - /api/Productos/ObtenerCatalogo
+      const upstream = await mlgRequest(`/api/Productos/ObtenerCategorias`, { method: "GET" });
+      if (!upstream.ok) {
+        const text = await upstream.text();
+        return res.status(502).json({ message: "MLG upstream error", status: upstream.status, body: text });
+      }
+      const json = await upstream.json();
+      res.json({ ok: true, data: json });
+    } catch (err: any) {
+      res.status(500).json({ message: "MLG ping failed", error: String(err?.message ?? err) });
+    }
+  });
+
   // Crea y devuelve el servidor HTTP a quien llama (index.ts)
   const servidorHttp = createServer(app);
   return servidorHttp;
