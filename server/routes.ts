@@ -1494,6 +1494,10 @@ app.get("/api/orders/:id/details", requiereAutenticacion, async (req, res) => {
   // Register all MLG routes
   const { registerMlgRoutes } = await import("./routes/mlgRoutes");
   registerMlgRoutes(app);
+  
+  // EXPRESSPL-INTEGRATION: Registrar rutas de envío
+  const { registerShippingRoutes } = await import("./routes/shippingRoutes");
+  registerShippingRoutes(app);
 
   // Crea y devuelve el servidor HTTP a quien llama (index.ts)
   const servidorHttp = createServer(app);

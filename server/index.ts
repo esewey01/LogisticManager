@@ -25,6 +25,10 @@ import { registerRoutes } from "./routes";
 // Importa utilidades para integrar Vite (frontend) y servir archivos
 import { setupVite, serveStatic, log } from "./vite";
 
+// SOCKET-INTEGRATION: Import Socket.IO utilities
+import { createServer } from "http";
+import { attachSockets } from "./socketio";
+
 // Crea la aplicación Express
 const aplicacion = express();
 
@@ -100,6 +104,9 @@ aplicacion.use((req, res, next) => {
 (async () => {
   // Registra todas las rutas y obtiene el servidor HTTP
   const servidor = await registerRoutes(aplicacion);
+  
+  // SOCKET-INTEGRATION: Attach Socket.IO to HTTP server
+  attachSockets(servidor);
 
   // Middleware de manejo de errores centralizado
   aplicacion.use(

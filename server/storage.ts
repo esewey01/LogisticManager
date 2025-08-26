@@ -221,8 +221,12 @@ export interface IStorage {
     updates: Partial<InsertarVariante>,
   ): Promise<Variante>;
 
-  // Métricas de dashboard
+  // EXPRESSPL-INTEGRATION: Métodos para generar guías de envío
+  getOrderById(orderId: number): Promise<Orden | undefined>;
+  getOrderItemsForShipping(orderId: number): Promise<ItemOrden[]>;
+  getCatalogoBySkuInterno(sku: string): Promise<ProductoCatalogo | undefined>;
 
+  // Métricas de dashboard
   getDashboardMetricsRange(from: Date, to: Date): Promise<DashboardMetrics>;
 
   getOrdersPaginated(params: {
@@ -1451,6 +1455,52 @@ export class DatabaseStorage implements IStorage {
     } catch (error) {
       console.error("Error getting sales by month:", error);
       return [];
+    }
+  }
+
+  // EXPRESSPL-INTEGRATION: Implementación de métodos para generar guías
+
+  /** Obtiene una orden por ID para generación de guías. */
+  async getOrderById(orderId: number): Promise<Orden | undefined> {
+    try {
+      const [order] = await baseDatos
+        .select()
+        .from(tablaOrdenes)
+        .where(eq(tablaOrdenes.id, BigInt(orderId)))
+        .limit(1);
+      return order;
+    } catch (error) {
+      console.error("Error getting order by ID:", error);
+      return undefined;
+    }
+  }
+
+  /** Obtiene los items de una orden para calcular dimensiones y cantidad (EXPRESSPL). */
+  async getOrderItemsForShipping(orderId: number): Promise<ItemOrden[]> {
+    try {
+      const items = await baseDatos
+        .select()
+        .from(tablaItemsOrden)
+        .where(eq(tablaItemsOrden.orderId, BigInt(orderId)));
+      return items;
+    } catch (error) {
+      console.error("Error getting order items for shipping:", error);
+      return [];
+    }
+  }
+
+  /** Obtiene un producto del catálogo por SKU interno para dimensiones. */
+  async getCatalogoBySkuInterno(sku: string): Promise<ProductoCatalogo | undefined> {
+    try {
+      const [producto] = await baseDatos
+        .select()
+        .from(tablaProductosCatalogo)
+        .where(eq(tablaProductosCatalogo.sku_interno, sku))
+        .limit(1);
+      return producto;
+    } catch (error) {
+      console.error("Error getting catalog product by SKU:", error);
+      return undefined;
     }
   }
 

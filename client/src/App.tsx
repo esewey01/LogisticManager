@@ -3,6 +3,7 @@ import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { ChatWidget } from "@/components/ChatWidget"; // SOCKET-INTEGRATION
 import { useAuth } from "@/hooks/useAuth";
 
 import NotFound from "@/pages/not-found";
@@ -52,6 +53,9 @@ function Router() {
         <Route path="/config" component={Config} />
         <Route component={NotFound} />
       </Switch>
+      
+      {/* SOCKET-INTEGRATION: Chat widget flotante */}
+      <ChatWidget currentUser={user?.email || "Usuario"} />
     </AppLayout>
   );
 }
