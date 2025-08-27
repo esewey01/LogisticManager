@@ -1,64 +1,77 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-/* REFACTOR: Dark mode CSS variables */
+/* =========================
+   Tokens de color (LIGHT)
+   ========================= */
 :root {
-  --background: 0 0% 100%;
-  --foreground: 222.2 84% 4.9%;
-  --card: 0 0% 100%;
-  --card-foreground: 222.2 84% 4.9%;
-  --popover: 0 0% 100%;
-  --popover-foreground: 222.2 84% 4.9%;
-  --primary: 222.2 47.4% 11.2%;
-  --primary-foreground: 210 40% 98%;
-  --secondary: 210 40% 96%;
-  --secondary-foreground: 222.2 84% 4.9%;
-  --muted: 210 40% 96%;
-  --muted-foreground: 215.4 16.3% 46.9%;
-  --accent: 210 40% 96%;
-  --accent-foreground: 222.2 84% 4.9%;
-  --destructive: 0 84.2% 60.2%;
-  --destructive-foreground: 210 40% 98%;
-  --border: 214.3 31.8% 91.4%;
-  --input: 214.3 31.8% 91.4%;
-  --ring: 222.2 84% 4.9%;
+  /* Base */
+  --background: #ffffff;
+  --foreground: #0f172a; /* slate-900 */
+
+  /* Superficies */
+  --card: #ffffff;
+  --card-foreground: #0f172a;
+  --popover: #ffffff;
+  --popover-foreground: #0f172a;
+
+  /* Accentos & estados */
+  --primary: #111827; /* gray-900 */
+  --primary-foreground: #f8fafc; /* slate-50 */
+  --secondary: #f1f5f9; /* slate-100 */
+  --secondary-foreground: #0f172a;
+  --muted: #f1f5f9; /* slate-100 */
+  --muted-foreground: #64748b; /* slate-500 */
+  --accent: #f1f5f9;
+  --accent-foreground: #0f172a;
+  --destructive: #ef4444; /* red-500 */
+  --destructive-foreground: #ffffff;
+
+  /* Bordes, inputs, focus ring */
+  --border: #e5e7eb; /* gray-200 */
+  --input: #e5e7eb;
+  --ring: #0f172a; /* slate-900 */
+
+  /* Radius global */
   --radius: 0.5rem;
-  --chart-1: 12 76% 61%;
-  --chart-2: 173 58% 39%;
-  --chart-3: 197 37% 24%;
-  --chart-4: 43 74% 66%;
-  --chart-5: 27 87% 67%;
 }
 
+/* =========================
+   Tokens de color (DARK)
+   ========================= */
 .dark {
-  --background: 222.2 84% 4.9%;
-  --foreground: 210 40% 98%;
-  --card: 222.2 84% 4.9%;
-  --card-foreground: 210 40% 98%;
-  --popover: 222.2 84% 4.9%;
-  --popover-foreground: 210 40% 98%;
-  --primary: 210 40% 98%;
-  --primary-foreground: 222.2 47.4% 11.2%;
-  --secondary: 217.2 32.6% 17.5%;
-  --secondary-foreground: 210 40% 98%;
-  --muted: 217.2 32.6% 17.5%;
-  --muted-foreground: 215 20.2% 65.1%;
-  --accent: 217.2 32.6% 17.5%;
-  --accent-foreground: 210 40% 98%;
-  --destructive: 0 62.8% 30.6%;
-  --destructive-foreground: 210 40% 98%;
-  --border: 217.2 32.6% 17.5%;
-  --input: 217.2 32.6% 17.5%;
-  --ring: 212.7 26.8% 83.9%;
-  --chart-1: 220 70% 50%;
-  --chart-2: 160 60% 45%;
-  --chart-3: 30 80% 55%;
-  --chart-4: 280 65% 60%;
-  --chart-5: 340 75% 55%;
+  /* Base */
+  --background: #0b1220;      /* tono azul/gris oscuro agradable */
+  --foreground: #eaeef6;      /* texto claro */
+
+  /* Superficies */
+  --card: #0b1220;
+  --card-foreground: #eaeef6;
+  --popover: #0b1220;
+  --popover-foreground: #eaeef6;
+
+  /* Accentos & estados */
+  --primary: #eaeef6;
+  --primary-foreground: #111827;
+  --secondary: #1f2937;       /* gray-800 */
+  --secondary-foreground: #eaeef6;
+  --muted: #1f2937;
+  --muted-foreground: #9aa4b2; /* gris medio */
+  --accent: #1f2937;
+  --accent-foreground: #eaeef6;
+  --destructive: #7f1d1d;     /* red-900 */
+  --destructive-foreground: #fef2f2;
+
+  /* Bordes, inputs, focus ring */
+  --border: #1f2937;
+  --input: #1f2937;
+  --ring: #cbd5e1;            /* slate-300 */
 }
 
+/* Base */
 @layer base {
   * {
     @apply border-border;
@@ -67,25 +80,17 @@
     @apply bg-background text-foreground;
     font-family: 'Inter', system-ui, -apple-system, sans-serif;
     font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+    transition: background-color 0.3s, color 0.3s;
   }
 }
 
+/* Utilities */
 @layer utilities {
   .text-balance {
     text-wrap: balance;
   }
 }
 
-/* Additional custom styles */
-.animate-spin {
-  animation: spin 1s linear infinite;
-}
-
-@keyframes spin {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
-}
+/* Helpers */
+.animate-spin { animation: spin 1s linear infinite; }
+@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }

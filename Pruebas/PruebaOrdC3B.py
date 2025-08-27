@@ -1,25 +1,36 @@
 """
 Modulo para integración con Shopify.
 Gestiona creación de órdenes y estados BIW: Recibida, Enviada, Entregada, Cancelada.
++ Soporte de Metafields (definición, escritura y lectura): "logistics.delivery_date"
 Autor: David Velasquez / ULUM
 Fecha: 2025
 """
 import requests
 import json
 import os
+from typing import Optional, Tuple, Any, Dict
 
 # --- CONFIGURACIÓN DE TIENDA ---
 SHOP_NAME = 'c3b13f-2'
 ACCESS_TOKEN = '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'
 API_VERSION = '2025-07'
 BASE_URL = f'https://{SHOP_NAME}.myshopify.com/admin/api/{API_VERSION}'
+GRAPHQL_URL = f'{BASE_URL}/graphql.json'
 HEADERS = {
     "X-Shopify-Access-Token": ACCESS_TOKEN,
     "Content-Type": "application/json"
 }
 
+# --- CONFIG METAFIELD POR DEFECTO ---
+MF_NAMESPACE = "Logistica"
+MF_KEY = "FechaEntrega"      # cambia si quieres otro key
+MF_TYPE = "date"              # usa "date_time" si necesitas hora
+
 # Archivo para almacenar el último número de orden
 ORDER_COUNTER_FILE = "order_counter.txt"
+
+
+# -------------------- HELPERS GENERALES --------------------
 
 def get_next_order_number():
     """Obtiene y actualiza el siguiente número de orden WWP"""
@@ -31,12 +42,153 @@ def get_next_order_number():
                 last_number = 0
     else:
         last_number = 0
-    
+
     next_number = last_number + 1
     with open(ORDER_COUNTER_FILE, "w") as f:
         f.write(str(next_number))
-    
+
     return f"WWP{next_number:03d}"
+
+
+def _order_numeric_id_to_gid(order_id: int) -> str:
+    """Convierte un ID numérico de orden a GID GraphQL."""
+    return f"gid://shopify/Order/{order_id}"
+
+
+def graphql_request(query: str, variables: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """Hace una petición GraphQL a Shopify Admin, maneja errores comunes y devuelve JSON."""
+    payload = {"query": query}
+    if variables:
+        payload["variables"] = variables
+
+    r = requests.post(GRAPHQL_URL, headers=HEADERS, json=payload)
+    try:
+        r.raise_for_status()
+    except requests.HTTPError as e:
+        # Intenta imprimir detalles útiles del cuerpo
+        try:
+            print("GraphQL error response:", r.json())
+        except Exception:
+            print("GraphQL text response:", r.text)
+        raise e
+
+    data = r.json()
+    if "errors" in data and data["errors"]:
+        # Errores a nivel de operación
+        raise RuntimeError(f"GraphQL Operation Errors: {data['errors']}")
+    return data
+
+
+# -------------------- METAFIELDS: DEFINICIÓN / SET / GET --------------------
+
+def ensure_order_metafield_definition(namespace: str = MF_NAMESPACE, key: str = MF_KEY, mf_type: str = MF_TYPE):
+    """
+    Crea la definición para ORDER si no existe.
+    - type: "date" o "date_time"
+    - ownerType: "ORDER"
+    """
+    mutation = """
+    mutation CreateDef($definition: MetafieldDefinitionInput!) {
+      metafieldDefinitionCreate(definition: $definition) {
+        createdDefinition {
+          id
+          name
+          namespace
+          key
+          ownerType
+        }
+        userErrors { field message code }
+      }
+    }
+    """
+    variables = {
+      "definition": {
+        "name": "Fecha de Entrega",
+        "namespace": namespace,
+        "key": key,
+        "description": "Fecha de entrega real y confirmada por logística",
+        "type": mf_type,          # "date" | "date_time"
+        "ownerType": "ORDER"
+        # Si quieres controlar visibilidad/acceso: usa "access", no visibleToStorefrontApi
+        # "access": { "admin": "MERCHANT_READ" }
+      }
+    }
+    data = graphql_request(mutation, variables)["data"]["metafieldDefinitionCreate"]
+    if data.get("createdDefinition"):
+        cd = data["createdDefinition"]
+        print(f"✅ Definición lista: {cd['namespace']}.{cd['key']} (owner={cd['ownerType']})")
+        return cd.get("id")
+
+    errs = data.get("userErrors") or []
+    # Si ya existía, Shopify suele devolver un error de conflicto (lo ignoramos con mensaje)
+    if errs:
+        msg = " ".join(e.get("message","").lower() for e in errs)
+        if "already exists" in msg or "already" in msg:
+            print(f"ℹ️ La definición {namespace}.{key} ya existe.")
+            return None
+        raise RuntimeError(f"metafieldDefinitionCreate userErrors: {errs}")
+
+    return None
+
+
+def set_order_metafield(order_id: int, value: str, namespace: str = MF_NAMESPACE, key: str = MF_KEY, mf_type: str = MF_TYPE):
+    """
+    Establece el metafield en la orden.
+    - mf_type: "date" -> value "YYYY-MM-DD"
+               "date_time" -> ISO 8601 (e.g., "2025-08-29T00:00:00Z")
+    """
+    ensure_order_metafield_definition(namespace, key, mf_type)
+    gid = _order_numeric_id_to_gid(order_id)
+
+    mutation = """
+    mutation MetafieldsSet($metafields: [MetafieldsSetInput!]!) {
+      metafieldsSet(metafields: $metafields) {
+        metafields { key namespace value updatedAt }
+        userErrors { field message code }
+      }
+    }
+    """
+    variables = {
+      "metafields": [{
+        "ownerId": gid,
+        "namespace": namespace,
+        "key": key,
+        "type": mf_type,   # string enum: "date" | "date_time" | "single_line_text_field" etc.
+        "value": value
+      }]
+    }
+    resp = graphql_request(mutation, variables)["data"]["metafieldsSet"]
+    errs = resp.get("userErrors") or []
+    if errs:
+        raise RuntimeError(f"metafieldsSet userErrors: {errs}")
+
+    mf = (resp.get("metafields") or [None])[0]
+    if mf:
+        print(f"✅ Metafield {namespace}.{key} = {mf['value']}")
+        return mf.get("value")
+    print("⚠️ No se devolvió el metafield tras set.")
+    return None
+
+
+def get_order_metafield(order_id: int, namespace: str = MF_NAMESPACE, key: str = MF_KEY):
+    gid = _order_numeric_id_to_gid(order_id)
+    query = """
+    query GetOrderMF($id: ID!, $ns: String!, $key: String!) {
+      order(id: $id) {
+        metafield(namespace: $ns, key: $key) { type value }
+      }
+    }
+    """
+    data = graphql_request(query, {"id": gid, "ns": namespace, "key": key})["data"]["order"]
+    mf = data.get("metafield")
+    if mf:
+        print(f"ℹ️ {namespace}.{key} => {mf['value']} (type={mf['type']})")
+        return mf
+    print(f"ℹ️ {namespace}.{key} no existe en la orden {order_id}.")
+    return None
+
+
+# -------------------- LÓGICA EXISTENTE: ÓRDENES/ESTATUS --------------------
 
 def crear_orden(line_items):
     """
@@ -57,7 +209,7 @@ def crear_orden(line_items):
         "order": {
             "name": order_name,
             "line_items": line_items,
-            "financial_status": "paid", # Usar "paid" si se quiere simular pago inmediato
+            "financial_status": "paid",
             "customer": {
                 "first_name": "Cliente",
                 "last_name": "David",
@@ -344,7 +496,7 @@ def obtener_estatus_biw(order_id):
         return "Error"
 
 
-# === MENÚ ===
+# -------------------- MENÚ --------------------
 
 def mostrar_menu():
     print("\n" + " " * 10 + "🔧 INTEGRACIÓN WW - SHOPIFY")
@@ -358,6 +510,8 @@ def mostrar_menu():
     print("7. Marcar orden como ENVIADA")
     print("8. Marcar orden como ENTREGADA (simulación)")
     print("9. Cancelar orden (Cancelada)")
+    print("10. Escribir Fecha de Entrega (metafield)")
+    print("11. Leer Fecha de Entrega (metafield)")
     print("0. Salir")
 
 
@@ -443,6 +597,32 @@ def main():
                     cancelar_orden(oid)
                 except ValueError:
                     print("❌ ID inválido.")
+
+            elif opcion == "10":
+                try:
+                    oid = int(input("Order ID: "))
+                    if MF_TYPE == "date":
+                        val = input("Fecha de entrega (YYYY-MM-DD): ").strip()
+                    else:
+                        val = input("Fecha/hora entrega ISO 8601 (p.ej. 2025-08-27T18:30:00Z): ").strip()
+                    set_order_metafield(oid, val)
+                except ValueError:
+                    print("❌ ID inválido.")
+                except Exception as e:
+                    print(f"❌ Error al escribir metafield: {e}")
+
+            elif opcion == "11":
+                try:
+                    oid = int(input("Order ID: "))
+                    mf = get_order_metafield(oid)
+                    if mf:
+                        print(f"📅 Fecha de entrega: {mf['value']} (type={mf['type']})")
+                    else:
+                        print("📭 Sin fecha registrada.")
+                except ValueError:
+                    print("❌ ID inválido.")
+                except Exception as e:
+                    print(f"❌ Error al leer metafield: {e}")
 
             else:
                 print("❌ Opción no válida.")

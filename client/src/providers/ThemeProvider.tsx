@@ -1,4 +1,3 @@
-// REFACTOR: Dark mode theme provider with system preference detection
 import React, { createContext, useContext, useEffect, useState } from "react";
 
 type Theme = "light" | "dark" | "system";
@@ -6,106 +5,53 @@ type Theme = "light" | "dark" | "system";
 interface ThemeContextType {
   theme: Theme;
   setTheme: (theme: Theme) => void;
-  actualTheme: "light" | "dark"; // The computed theme (resolves 'system')
+  actualTheme: "light" | "dark";
 }
 
-const ThemeContext = createContext<ThemeContextType>({
-  theme: "system",
-  setTheme: () => {},
-  actualTheme: "light"
-});
+const ThemeContext = createContext<ThemeContextType | null>(null);
 
 export function useTheme() {
-  const context = useContext(ThemeContext);
-  if (!context) {
-    throw new Error("useTheme must be used within a ThemeProvider");
-  }
-  return context;
-}
-
-interface ThemeProviderProps {
-  children: React.ReactNode;
-  defaultTheme?: Theme;
-  storageKey?: string;
+  const ctx = useContext(ThemeContext);
+  if (!ctx) throw new Error("useTheme must be used within ThemeProvider");
+  return ctx;
 }
 
 export function ThemeProvider({
   children,
   defaultTheme = "system",
   storageKey = "theme",
-  ...props
-}: ThemeProviderProps) {
+}: {
+  children: React.ReactNode;
+  defaultTheme?: Theme;
+  storageKey?: string;
+}) {
   const [theme, setTheme] = useState<Theme>(defaultTheme);
   const [actualTheme, setActualTheme] = useState<"light" | "dark">("light");
 
   useEffect(() => {
-    // Load theme from localStorage
-    try {
-      const storedTheme = localStorage.getItem(storageKey) as Theme;
-      if (storedTheme && ["light", "dark", "system"].includes(storedTheme)) {
-        setTheme(storedTheme);
-      }
-    } catch (error) {
-      console.warn("Failed to load theme from localStorage:", error);
-    }
+    const stored = localStorage.getItem(storageKey) as Theme | null;
+    if (stored && ["light", "dark", "system"].includes(stored)) setTheme(stored);
   }, [storageKey]);
 
   useEffect(() => {
-    // Compute actual theme
-    let computedTheme: "light" | "dark";
+    const root = document.documentElement;
+    let computed: "light" | "dark";
 
     if (theme === "system") {
-      computedTheme = window.matchMedia("(prefers-color-scheme: dark)").matches
+      computed = window.matchMedia("(prefers-color-scheme: dark)").matches
         ? "dark"
         : "light";
     } else {
-      computedTheme = theme;
+      computed = theme;
     }
 
-    setActualTheme(computedTheme);
-
-    // Apply theme to document
-    const root = document.documentElement;
+    setActualTheme(computed);
     root.classList.remove("light", "dark");
-    root.classList.add(computedTheme);
-
-    // Set data attribute for CSS variables
-    root.setAttribute("data-theme", computedTheme);
+    root.classList.add(computed);
   }, [theme]);
-
-  useEffect(() => {
-    // Listen for system theme changes
-    if (theme === "system") {
-      const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
-      
-      const handleChange = (e: MediaQueryListEvent) => {
-        setActualTheme(e.matches ? "dark" : "light");
-        
-        // Update document classes
-        const root = document.documentElement;
-        root.classList.remove("light", "dark");
-        root.classList.add(e.matches ? "dark" : "light");
-        root.setAttribute("data-theme", e.matches ? "dark" : "light");
-      };
-
-      mediaQuery.addEventListener("change", handleChange);
-      return () => mediaQuery.removeEventListener("change", handleChange);
-    }
-  }, [theme]);
-
-  const handleSetTheme = (newTheme: Theme) => {
-    setTheme(newTheme);
-    
-    // Save to localStorage
-    try {
-      localStorage.setItem(storageKey, newTheme);
-    } catch (error) {
-      console.warn("Failed to save theme to localStorage:", error);
-    }
-  };
 
   return (
-    <ThemeContext.Provider value={{ theme, setTheme: handleSetTheme, actualTheme }}>
+    <ThemeContext.Provider value={{ theme, setTheme, actualTheme }}>
       {children}
     </ThemeContext.Provider>
   );

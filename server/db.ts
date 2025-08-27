@@ -12,7 +12,7 @@ if (!process.env.DATABASE_URL) {
 // Conexión a PostgreSQL con SSL (Neon requiere SSL)
 export const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false },
+//  ssl: { rejectUnauthorized: true },
 });
 
 //SOLO PARA IDENTIFICAR LA BASE DE DATOS
