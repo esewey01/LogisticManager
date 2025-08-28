@@ -1,74 +1,49 @@
 import type { Config } from "tailwindcss";
 
 export default {
-  darkMode: ["class"], // control por clase "dark" en <html>
-  content: [
-    "./client/index.html",
-    "./client/src/**/*.{js,jsx,ts,tsx}"
-  ],
+  darkMode: "class",
+  content: ["./client/index.html", "./client/src/**/*.{ts,tsx,js,jsx}"],
   theme: {
     extend: {
-      borderRadius: {
-        lg: "var(--radius)",
-        md: "calc(var(--radius) - 2px)",
-        sm: "calc(var(--radius) - 4px)",
-      },
       colors: {
-        background: "var(--background)",
-        foreground: "var(--foreground)",
-        card: {
-          DEFAULT: "var(--card)",
-          foreground: "var(--card-foreground)",
-        },
-        popover: {
-          DEFAULT: "var(--popover)",
-          foreground: "var(--popover-foreground)",
-        },
-        primary: {
-          DEFAULT: "var(--primary)",
-          foreground: "var(--primary-foreground)",
-        },
-        secondary: {
-          DEFAULT: "var(--secondary)",
-          foreground: "var(--secondary-foreground)",
-        },
-        muted: {
-          DEFAULT: "var(--muted)",
-          foreground: "var(--muted-foreground)",
-        },
-        accent: {
-          DEFAULT: "var(--accent)",
-          foreground: "var(--accent-foreground)",
-        },
-        destructive: {
-          DEFAULT: "var(--destructive)",
-          foreground: "var(--destructive-foreground)",
-        },
-        border: "var(--border)",
-        input: "var(--input)",
-        ring: "var(--ring)",
+        // Base tokens
+        bg: "rgb(var(--bg))",
+        fg: "rgb(var(--fg))",
+        muted: "rgb(var(--muted))",
+        card: "rgb(var(--card))",
+        border: "rgb(var(--border))",
+        primary: "rgb(var(--primary))",
+        accent: "rgb(var(--accent))",
+        danger: "rgb(var(--danger))",
+
+        // shadcn/ui compatible aliases
+        background: "rgb(var(--bg))",
+        foreground: "rgb(var(--fg))",
+        popover: "rgb(var(--card))",
+        "popover-foreground": "rgb(var(--fg))",
+        "card-foreground": "rgb(var(--fg))",
+        input: "rgb(var(--border))",
+        ring: "rgb(var(--primary))",
+        secondary: "rgb(var(--card))",
+        "secondary-foreground": "rgb(var(--fg))",
+        destructive: "rgb(var(--danger))",
+        "destructive-foreground": "rgb(255 255 255)",
+        "muted-foreground": "rgb(var(--muted))",
+        "primary-foreground": "rgb(255 255 255)",
+        "accent-foreground": "rgb(255 255 255)",
       },
-      fontFamily: {
-        sans: ["Inter", "system-ui", "-apple-system", "sans-serif"],
+      zIndex: {
+        60: "60",
+        70: "70",
       },
-      keyframes: {
-        "accordion-down": {
-          from: { height: "0" },
-          to: { height: "var(--radix-accordion-content-height)" },
-        },
-        "accordion-up": {
-          from: { height: "var(--radix-accordion-content-height)" },
-          to: { height: "0" },
-        },
+      boxShadow: {
+        soft: "var(--shadow)",
       },
-      animation: {
-        "accordion-down": "accordion-down 0.2s ease-out",
-        "accordion-up": "accordion-up 0.2s ease-out",
+      borderRadius: {
+        xl: "0.9rem",
+        "2xl": "1.2rem",
       },
     },
   },
-  plugins: [
-    require("tailwindcss-animate"),
-    require("@tailwindcss/typography")
-  ],
+  plugins: [require("tailwindcss-animate"), require("@tailwindcss/typography")],
 } satisfies Config;

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Menu, User, Settings } from "lucide-react";
+import { Menu, User, Settings, Truck, ChevronDown } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -12,7 +12,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/hooks/useAuth";
-import { ThemeToggle } from "@/components/ThemeToggle"; // REFACTOR: Dark mode
+import ThemeToggle from "@/components/theme/ThemeToggle"; // REFACTOR: Dark mode
 import { HealthStatusIndicators } from "@/components/HealthStatusIndicator"; // REFACTOR: Health checks
 import { useLocation } from "wouter";
 
@@ -25,7 +25,7 @@ export default function Navbar({ onToggleSidebar }: NavbarProps) {
   const [, setLocation] = useLocation();
 
   return (
-    <nav className="fixed top-0 left-0 right-0 z-50 bg-surface shadow-md h-16">
+    <nav className="fixed top-0 left-0 right-0 z-50 bg-card border-b border-border shadow-soft h-16">
       <div className="flex items-center justify-between h-full px-6">
         <div className="flex items-center space-x-4">
           {/* Botón para colapsar sidebar */}
@@ -33,17 +33,17 @@ export default function Navbar({ onToggleSidebar }: NavbarProps) {
             variant="ghost"
             size="sm"
             onClick={onToggleSidebar}
-            className="p-2 hover:bg-gray-100"
+            className="p-2 hover:bg-accent/10"
             data-testid="button-toggle-sidebar"
           >
             <Menu className="h-5 w-5" />
           </Button>
           
           <div className="flex items-center space-x-3">
-            <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center">
-              <i className="fas fa-shipping-fast text-white text-sm"></i>
+            <div className="w-8 h-8 bg-primary rounded-2xl flex items-center justify-center">
+              <Truck className="text-primary-foreground h-4 w-4" />
             </div>
-            <h1 className="text-xl font-semibold text-primary">ULUM PLUS</h1>
+            <h1 className="text-xl font-semibold text-primary leading-7">ULUM PLUS</h1>
           </div>
         </div>
         
@@ -57,18 +57,18 @@ export default function Navbar({ onToggleSidebar }: NavbarProps) {
           {/* User Menu */}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="ghost" className="flex items-center space-x-2">
+              <Button variant="ghost" className="flex items-center gap-2">
                 <div className="w-8 h-8 bg-primary rounded-full flex items-center justify-center">
-                  <i className="fas fa-user text-white text-sm"></i>
+                  <User className="h-4 w-4 text-primary-foreground" />
                 </div>
-                <span className="font-medium">{user?.email}</span>
-                <i className="fas fa-chevron-down text-xs text-gray-500"></i>
+                <span className="font-medium text-foreground text-sm">{user?.email}</span>
+                <ChevronDown className="h-4 w-4 text-muted" />
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-48">
               <DropdownMenuLabel>
                 <div className="font-medium">{user?.email}</div>
-                <div className="text-xs text-gray-500 capitalize">{user?.role}</div>
+                <div className="text-xs text-muted capitalize">{user?.role}</div>
               </DropdownMenuLabel>
               <DropdownMenuSeparator />
               <DropdownMenuItem onClick={() => setLocation('/profile')} data-testid="link-profile">

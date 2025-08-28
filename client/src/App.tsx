@@ -5,7 +5,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ChatWidget } from "@/components/ChatWidget"; // SOCKET-INTEGRATION
 import { useAuth } from "@/hooks/useAuth";
-import { ThemeProvider } from "@/providers/ThemeProvider"; // REFACTOR: Dark mode
+import { ThemeProvider } from "@/components/theme/ThemeProvider";
 
 import NotFound from "@/pages/not-found";
 import Login from "@/pages/login";

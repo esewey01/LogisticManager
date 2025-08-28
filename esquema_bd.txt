@@ -1,0 +1,245 @@
+CREATE TABLE brands(
+    id SERIAL NOT NULL,
+    name text NOT NULL,
+    code text NOT NULL,
+    is_active boolean NOT NULL DEFAULT true,
+    created_at timestamp without time zone DEFAULT now(),
+    updated_at timestamp without time zone,
+    PRIMARY KEY(id)
+);
+CREATE UNIQUE INDEX brands_code_unique ON public.brands USING btree (code);
+
+
+CREATE TABLE carriers(
+    id SERIAL NOT NULL,
+    name text NOT NULL,
+    code text NOT NULL,
+    api_endpoint text,
+    is_active boolean NOT NULL DEFAULT true,
+    created_at timestamp without time zone DEFAULT now(),
+    updated_at timestamp without time zone,
+    PRIMARY KEY(id)
+);
+CREATE UNIQUE INDEX carriers_code_unique ON public.carriers USING btree (code);
+
+
+CREATE TABLE catalogo_productos(
+    sku text,
+    marca text,
+    sku_interno text,
+    codigo_barras text,
+    nombre_producto text,
+    modelo text,
+    categoria text,
+    condicion text,
+    marca_producto text,
+    variante text,
+    largo numeric,
+    ancho numeric,
+    alto numeric,
+    peso numeric,
+    foto text,
+    costo numeric,
+    stock integer
+);
+
+
+CREATE TABLE channels(
+    id SERIAL NOT NULL,
+    code text NOT NULL,
+    name text NOT NULL,
+    color text,
+    icon text,
+    is_active boolean NOT NULL DEFAULT true,
+    created_at timestamp without time zone DEFAULT now(),
+    updated_at timestamp without time zone,
+    PRIMARY KEY(id)
+);
+CREATE UNIQUE INDEX channels_code_unique ON public.channels USING btree (code);
+
+
+CREATE TABLE notes(
+    id SERIAL NOT NULL,
+    user_id integer NOT NULL,
+    content text NOT NULL,
+    created_at timestamp without time zone DEFAULT now(),
+    updated_at timestamp without time zone,
+    PRIMARY KEY(id)
+);
+
+
+CREATE TABLE order_items(
+    id SERIAL NOT NULL,
+    order_id bigint NOT NULL,
+    sku text,
+    quantity integer NOT NULL,
+    price numeric,
+    created_at timestamp without time zone DEFAULT now(),
+    shopify_product_id text,
+    shopify_variant_id text,
+    title text,
+    variant_title text,
+    PRIMARY KEY(id),
+    CONSTRAINT order_items_order_fk FOREIGN key(order_id) REFERENCES orders(id)
+);
+CREATE INDEX idx_order_items_order_id ON public.order_items USING btree (order_id);
+CREATE INDEX ix_order_items_shopify_product ON public.order_items USING btree (shopify_product_id);
+CREATE INDEX ix_order_items_shopify_variant ON public.order_items USING btree (shopify_variant_id);
+CREATE INDEX ix_order_items_sku ON public.order_items USING btree (sku);
+
+
+CREATE TABLE orders(
+    id SERIAL NOT NULL,
+    order_id text NOT NULL,
+    customer_name text,
+    total_amount numeric,
+    status text NOT NULL DEFAULT 'pending'::text,
+    created_at timestamp without time zone DEFAULT now(),
+    name text,
+    order_number text,
+    financial_status text,
+    fulfillment_status text,
+    currency text DEFAULT 'MXN'::text,
+    subtotal_price numeric,
+    customer_email text,
+    tags text[],
+    ship_name text,
+    ship_phone text,
+    ship_address1 text,
+    ship_city text,
+    ship_province text,
+    ship_country text,
+    ship_zip text,
+    shopify_created_at timestamp with time zone,
+    shopify_updated_at timestamp with time zone,
+    shopify_processed_at timestamp with time zone,
+    shopify_closed_at timestamp with time zone,
+    shopify_cancelled_at timestamp with time zone,
+    cancel_reason text,
+    order_note text,
+    note_attributes jsonb,
+    shop_id integer,
+    updated_at timestamp without time zone DEFAULT now(),
+    PRIMARY KEY(id),
+    CONSTRAINT orders_channel_fk FOREIGN key(shop_id) REFERENCES channels(id)
+);
+CREATE UNIQUE INDEX uniq_shop_order ON public.orders USING btree (shop_id, order_id);
+CREATE INDEX idx_orders_shop_created_at ON public.orders USING btree (shop_id, shopify_created_at);
+CREATE INDEX ix_orders_channel ON public.orders USING btree (shop_id);
+CREATE INDEX ix_orders_shop ON public.orders USING btree (shop_id);
+CREATE INDEX ix_orders_shop_created ON public.orders USING btree (shop_id, created_at);
+CREATE INDEX orders_created_idx ON public.orders USING btree (created_at DESC);
+CREATE INDEX orders_fulfillment_status_idx ON public.orders USING btree (fulfillment_status);
+CREATE INDEX orders_shopify_created_idx ON public.orders USING btree (shopify_created_at DESC);
+CREATE UNIQUE INDEX ux_orders_shop_order ON public.orders USING btree (shop_id, order_id);
+
+
+
+CREATE TABLE product_links(
+    id SERIAL NOT NULL,
+    catalogo_sku varchar(100) NOT NULL,
+    shopify_variant_id varchar(100),
+    shopify_product_id varchar(100),
+    variant_id integer,
+    product_id integer,
+    match_status varchar(20) DEFAULT 'pending'::character varying,
+    sync_status varchar(20) DEFAULT 'pending'::character varying,
+    error_message text,
+    last_sync_at timestamp without time zone,
+    created_at timestamp without time zone DEFAULT now(),
+    updated_at timestamp without time zone DEFAULT now(),
+    created_by integer,
+    updated_by integer,
+    PRIMARY KEY(id),
+    CONSTRAINT product_links_created_by_fkey FOREIGN key(created_by) REFERENCES users(id),
+    CONSTRAINT product_links_product_id_fkey FOREIGN key(product_id) REFERENCES products(id),
+    CONSTRAINT product_links_updated_by_fkey FOREIGN key(updated_by) REFERENCES users(id),
+    CONSTRAINT product_links_variant_id_fkey FOREIGN key(variant_id) REFERENCES variants(id)
+);
+
+
+CREATE TABLE products(
+    id SERIAL NOT NULL,
+    id_shopify text NOT NULL,
+    shop_id integer NOT NULL,
+    title text NOT NULL,
+    vendor text,
+    product_type text,
+    status text NOT NULL DEFAULT 'active'::text,
+    tags text[],
+    created_at timestamp without time zone DEFAULT now(),
+    updated_at timestamp without time zone,
+    sku text,
+    PRIMARY KEY(id)
+);
+CREATE INDEX ix_products_shop ON public.products USING btree (shop_id);
+CREATE INDEX products_shop_id_idx ON public.products USING btree (shop_id);
+CREATE UNIQUE INDEX ux_products_shop_shopify ON public.products USING btree (shop_id, id_shopify);
+
+
+
+
+
+CREATE TABLE tickets(
+    id SERIAL NOT NULL,
+    ticket_number SERIAL NOT NULL,
+    order_id bigint NOT NULL,
+    status text NOT NULL DEFAULT 'open'::text,
+    notes text,
+    created_at timestamp without time zone DEFAULT now(),
+    updated_at timestamp without time zone,
+    PRIMARY KEY(id),
+    CONSTRAINT tickets_order_fk FOREIGN key(order_id) REFERENCES orders(id)
+);
+CREATE UNIQUE INDEX tickets_ticket_number_unique ON public.tickets USING btree (ticket_number);
+CREATE INDEX ix_tickets_order ON public.tickets USING btree (order_id);
+CREATE INDEX ix_tickets_status ON public.tickets USING btree (status);
+
+
+CREATE TABLE users(
+    id SERIAL NOT NULL,
+    email text NOT NULL,
+    password text NOT NULL,
+    first_name text,
+    last_name text,
+    role text NOT NULL DEFAULT 'user'::text,
+    last_login timestamp without time zone,
+    created_at timestamp without time zone DEFAULT now(),
+    updated_at timestamp without time zone,
+    PRIMARY KEY(id)
+);
+CREATE UNIQUE INDEX users_email_unique ON public.users USING btree (email);
+
+
+
+
+CREATE TABLE variants(
+    id SERIAL NOT NULL,
+    id_shopify text NOT NULL,
+    product_id integer NOT NULL,
+    sku text,
+    price numeric,
+    compare_at_price numeric,
+    barcode text,
+    inventory_qty integer,
+    created_at timestamp without time zone DEFAULT now(),
+    updated_at timestamp without time zone,
+    external_variant_id text,
+    PRIMARY KEY(id),
+    CONSTRAINT variants_product_fk FOREIGN key(product_id) REFERENCES products(id)
+);
+CREATE INDEX ix_variants_product ON public.variants USING btree (product_id);
+CREATE INDEX ix_variants_shopify ON public.variants USING btree (id_shopify);
+CREATE INDEX ix_variants_sku ON public.variants USING btree (sku);
+
+
+
+
+
+
+
+
+
+
+
+

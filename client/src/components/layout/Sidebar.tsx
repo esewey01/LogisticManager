@@ -2,6 +2,7 @@ import { Link, useLocation } from "wouter";
 import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/hooks/useAuth";
 import { useQuery } from "@tanstack/react-query";
+import { PieChart, ShoppingBag, Ticket, Package, Truck, Boxes, Layers, Users, Settings } from "lucide-react";
 
 interface SidebarProps {
   collapsed: boolean;
@@ -83,13 +84,23 @@ export default function Sidebar({ collapsed }: SidebarProps) {
     return (
       <Link href={item.path}>
         <div
-          className={`flex items-center ${collapsed ? 'justify-center px-2' : 'space-x-3 px-4'} py-3 rounded-lg transition-all cursor-pointer ${isActive
-              ? "bg-primary text-white font-medium"
-              : "text-gray-600 hover:bg-gray-100"
+          className={`flex items-center ${collapsed ? 'justify-center px-2' : 'space-x-3 px-4'} py-3 rounded-2xl transition-all cursor-pointer ${isActive
+              ? "bg-primary text-primary-foreground font-medium"
+              : "text-muted hover:bg-accent/10 hover:text-foreground"
             }`}
           title={collapsed ? item.label : undefined}
         >
-          <i className={`${item.icon} w-5 ${collapsed ? 'text-center' : ''}`}></i>
+          <span className={`w-5 ${collapsed ? 'text-center' : ''}`}>
+            {item.path === '/' && <PieChart className="h-5 w-5" />}
+            {item.path === '/pedidos' && <ShoppingBag className="h-5 w-5" />}
+            {item.path === '/tickets' && <Ticket className="h-5 w-5" />}
+            {item.path === '/catalogo' && <Package className="h-5 w-5" />}
+            {item.path === '/paqueteria' && <Truck className="h-5 w-5" />}
+            {item.path === '/productos' && <Boxes className="h-5 w-5" />}
+            {item.path === '/productos-unificada' && <Layers className="h-5 w-5" />}
+            {item.path === '/admin/usuarios' && <Users className="h-5 w-5" />}
+            {item.path === '/config' && <Settings className="h-5 w-5" />}
+          </span>
           {!collapsed && (
             <>
               <span>{item.label}</span>
@@ -109,7 +120,7 @@ export default function Sidebar({ collapsed }: SidebarProps) {
   };
 
   return (
-    <aside className={`fixed left-0 top-16 h-[calc(100vh-4rem)] bg-surface shadow-lg z-40 transition-all duration-300 ${
+    <aside className={`fixed left-0 top-16 h-[calc(100vh-4rem)] bg-card border-r border-border shadow-soft z-40 transition-all duration-300 ${
       collapsed ? 'w-16' : 'w-60'
     }`}>
       <div className={`${collapsed ? 'p-2' : 'p-6'}`}>
@@ -119,8 +130,8 @@ export default function Sidebar({ collapsed }: SidebarProps) {
           ))}
 
           {user?.role === "admin" && !collapsed && (
-            <div className="pt-4 border-t border-gray-200">
-              <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2 px-4">
+            <div className="pt-4 border-t border-border">
+              <div className="text-xs font-semibold text-muted uppercase tracking-wider mb-2 px-4">
                 Administración
               </div>
               {adminItems.map((item) => (
@@ -131,7 +142,7 @@ export default function Sidebar({ collapsed }: SidebarProps) {
           
           {/* Admin items en modo colapsado */}
           {user?.role === "admin" && collapsed && (
-            <div className="pt-4 border-t border-gray-200 space-y-2">
+            <div className="pt-4 border-t border-border space-y-2">
               {adminItems.map((item) => (
                 <NavItem key={item.path} item={item} />
               ))}

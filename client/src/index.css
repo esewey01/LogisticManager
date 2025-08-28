@@ -1,96 +1,34 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap');
-
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-/* =========================
-   Tokens de color (LIGHT)
-   ========================= */
+:where(*) { box-sizing: border-box; }
+:focus-visible { outline: 2px solid rgb(var(--primary)); outline-offset: 2px; }
+
 :root {
-  /* Base */
-  --background: #ffffff;
-  --foreground: #0f172a; /* slate-900 */
-
-  /* Superficies */
-  --card: #ffffff;
-  --card-foreground: #0f172a;
-  --popover: #ffffff;
-  --popover-foreground: #0f172a;
-
-  /* Accentos & estados */
-  --primary: #111827; /* gray-900 */
-  --primary-foreground: #f8fafc; /* slate-50 */
-  --secondary: #f1f5f9; /* slate-100 */
-  --secondary-foreground: #0f172a;
-  --muted: #f1f5f9; /* slate-100 */
-  --muted-foreground: #64748b; /* slate-500 */
-  --accent: #f1f5f9;
-  --accent-foreground: #0f172a;
-  --destructive: #ef4444; /* red-500 */
-  --destructive-foreground: #ffffff;
-
-  /* Bordes, inputs, focus ring */
-  --border: #e5e7eb; /* gray-200 */
-  --input: #e5e7eb;
-  --ring: #0f172a; /* slate-900 */
-
-  /* Radius global */
-  --radius: 0.5rem;
+  --bg: 255 255 255;
+  --fg: 17 24 39;
+  --muted: 107 114 128;
+  --card: 249 250 251;
+  --border: 229 231 235;
+  --primary: 37 99 235;
+  --accent: 16 185 129;
+  --danger: 239 68 68;
+  --shadow: 0 10px 20px rgba(0,0,0,.08);
 }
-
-/* =========================
-   Tokens de color (DARK)
-   ========================= */
 .dark {
-  /* Base */
-  --background: #0b1220;      /* tono azul/gris oscuro agradable */
-  --foreground: #eaeef6;      /* texto claro */
-
-  /* Superficies */
-  --card: #0b1220;
-  --card-foreground: #eaeef6;
-  --popover: #0b1220;
-  --popover-foreground: #eaeef6;
-
-  /* Accentos & estados */
-  --primary: #eaeef6;
-  --primary-foreground: #111827;
-  --secondary: #1f2937;       /* gray-800 */
-  --secondary-foreground: #eaeef6;
-  --muted: #1f2937;
-  --muted-foreground: #9aa4b2; /* gris medio */
-  --accent: #1f2937;
-  --accent-foreground: #eaeef6;
-  --destructive: #7f1d1d;     /* red-900 */
-  --destructive-foreground: #fef2f2;
-
-  /* Bordes, inputs, focus ring */
-  --border: #1f2937;
-  --input: #1f2937;
-  --ring: #cbd5e1;            /* slate-300 */
+  --bg: 17 24 39;
+  --fg: 243 244 246;
+  --muted: 156 163 175;
+  --card: 31 41 55;
+  --border: 55 65 81;
+  --primary: 59 130 246;
+  --accent: 45 212 191;
+  --danger: 248 113 113;
+  --shadow: 0 12px 24px rgba(0,0,0,.35);
 }
-
-/* Base */
-@layer base {
-  * {
-    @apply border-border;
-  }
-  body {
-    @apply bg-background text-foreground;
-    font-family: 'Inter', system-ui, -apple-system, sans-serif;
-    font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
-    transition: background-color 0.3s, color 0.3s;
-  }
+html, body, #root { height: 100%; }
+body {
+  background: rgb(var(--bg));
+  color: rgb(var(--fg));
 }
-
-/* Utilities */
-@layer utilities {
-  .text-balance {
-    text-wrap: balance;
-  }
-}
-
-/* Helpers */
-.animate-spin { animation: spin 1s linear infinite; }
-@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }

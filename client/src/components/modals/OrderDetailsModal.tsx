@@ -18,6 +18,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { Ticket, Package } from "lucide-react";
 
 interface OrderDetailsModalProps {
   order: any;
@@ -71,13 +72,13 @@ export default function OrderDetailsModal({ order, onClose, channels }: OrderDet
           {/* Order Header */}
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="text-sm font-medium text-gray-600">ID Pedido</label>
-              <p className="text-lg font-semibold text-gray-900">
+              <label className="text-sm font-medium text-muted">ID Pedido</label>
+              <p className="text-lg font-semibold text-foreground">
                 {order?.externalId || order?.id}
               </p>
             </div>
             <div>
-              <label className="text-sm font-medium text-gray-600">Canal</label>
+              <label className="text-sm font-medium text-muted">Canal</label>
               <div className="flex items-center space-x-2">
                 {channel && (
                   <Badge
@@ -91,50 +92,50 @@ export default function OrderDetailsModal({ order, onClose, channels }: OrderDet
               </div>
             </div>
             <div>
-              <label className="text-sm font-medium text-gray-600">Cliente</label>
-              <p className="text-gray-900">{order?.customerName}</p>
+              <label className="text-sm font-medium text-muted">Cliente</label>
+              <p className="text-foreground">{order?.customerName}</p>
             </div>
             <div>
-              <label className="text-sm font-medium text-gray-600">Fecha</label>
-              <p className="text-gray-900">
+              <label className="text-sm font-medium text-muted">Fecha</label>
+              <p className="text-foreground">
                 {order?.createdAt ? new Date(order.createdAt).toLocaleDateString() : "—"}
               </p>
             </div>
           </div>
 
           {/* Customer Info */}
-          <div className="bg-gray-50 rounded-lg p-4">
-            <h4 className="font-medium text-gray-900 mb-3">Información de Contacto</h4>
+          <div className="bg-card border border-border rounded-2xl p-4">
+            <h4 className="font-medium text-foreground mb-3">Información de Contacto</h4>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                <label className="text-sm font-medium text-gray-600">Dirección</label>
-                <p className="text-gray-900">{order?.shippingAddress}</p>
+                <label className="text-sm font-medium text-muted">Dirección</label>
+                <p className="text-foreground">{order?.shippingAddress}</p>
               </div>
               <div>
-                <label className="text-sm font-medium text-gray-600">Teléfono</label>
-                <p className="text-gray-900">{order?.customerPhone || "No disponible"}</p>
+                <label className="text-sm font-medium text-muted">Teléfono</label>
+                <p className="text-foreground">{order?.customerPhone || "No disponible"}</p>
               </div>
               <div>
-                <label className="text-sm font-medium text-gray-600">Email</label>
-                <p className="text-gray-900">{order?.customerEmail || "No disponible"}</p>
+                <label className="text-sm font-medium text-muted">Email</label>
+                <p className="text-foreground">{order?.customerEmail || "No disponible"}</p>
               </div>
             </div>
           </div>
 
           {/* Products */}
           <div>
-            <h4 className="font-medium text-gray-900 mb-3">Productos</h4>
+            <h4 className="font-medium text-foreground mb-3">Productos</h4>
 
             {itemsLoading && <p className="text-sm text-muted-foreground">Cargando artículos…</p>}
             {itemsError && (
-              <p className="text-sm text-red-600">
+              <p className="text-sm text-destructive">
                 No se pudieron cargar los artículos. Intenta nuevamente más tarde.
               </p>
             )}
 
             {!itemsLoading && !itemsError && (
               <>
-                <div className="border border-gray-200 rounded-lg overflow-hidden">
+                <div className="border border-border rounded-2xl overflow-hidden">
                   <Table>
                     <TableHeader>
                       <TableRow>
@@ -172,20 +173,20 @@ export default function OrderDetailsModal({ order, onClose, channels }: OrderDet
 
           {/* Order Status */}
           <div>
-            <h4 className="font-medium text-gray-900 mb-3">Estado del Pedido</h4>
+            <h4 className="font-medium text-foreground mb-3">Estado del Pedido</h4>
             <div className="flex items-center space-x-4">
               <Badge variant={order?.isManaged ? "default" : "destructive"}>
                 {order?.isManaged ? "Gestionado" : "Sin gestionar"}
               </Badge>
               {order?.hasTicket && (
                 <Badge variant="secondary">
-                  <i className="fas fa-ticket-alt mr-1"></i>
+                  <Ticket className="mr-1 h-3.5 w-3.5" />
                   Tiene Ticket
                 </Badge>
               )}
               {order?.isCombo && (
                 <Badge variant="outline">
-                  <i className="fas fa-box mr-1"></i>
+                  <Package className="mr-1 h-3.5 w-3.5" />
                   Combo
                 </Badge>
               )}
@@ -195,19 +196,19 @@ export default function OrderDetailsModal({ order, onClose, channels }: OrderDet
           {/* Notes */}
           {order?.notes && (
             <div>
-              <h4 className="font-medium text-gray-900 mb-3">Notas</h4>
-              <p className="text-gray-700 bg-gray-50 p-3 rounded-lg">{order.notes}</p>
+              <h4 className="font-medium text-foreground mb-3">Notas</h4>
+              <p className="text-foreground/80 bg-card border border-border p-3 rounded-2xl">{order.notes}</p>
             </div>
           )}
 
           {/* Action Buttons */}
-          <div className="flex items-center justify-end space-x-4 pt-4 border-t">
+          <div className="flex items-center justify-end space-x-4 pt-4 border-t border-border">
             <Button variant="outline" onClick={onClose}>
               Cerrar
             </Button>
             {!order?.hasTicket && (
               <Button>
-                <i className="fas fa-ticket-alt mr-2"></i>
+                <Ticket className="mr-2 h-4 w-4" />
                 Crear Ticket
               </Button>
             )}

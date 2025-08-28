@@ -77,8 +77,8 @@ function getRange(preset: RangePreset) {
 function MicroBar({ value, max, className }: { value: number; max: number; className?: string }) {
   const pct = max > 0 ? Math.min(100, (value / max) * 100) : 0;
   return (
-    <div className={`h-2 bg-gray-200 rounded-full overflow-hidden ${className}`}>
-      <div className="h-full bg-blue-600" style={{ width: `${pct}%` }} />
+    <div className={`h-2 bg-border rounded-full overflow-hidden ${className}`}>
+      <div className="h-full bg-primary" style={{ width: `${pct}%` }} />
     </div>
   );
 }
@@ -91,7 +91,7 @@ function StatCard({
   label,
   value,
   hint,
-  color = "bg-blue-100 text-blue-600",
+  color = "bg-accent/10 text-accent",
 }: {
   icon: React.ReactNode;
   label: string;
@@ -100,14 +100,14 @@ function StatCard({
   color?: string;
 }) {
   return (
-    <Card className="hover:shadow-md transition-shadow">
+    <Card className="hover:shadow-soft transition-shadow">
       <div className="flex items-center gap-3 p-4">
         <div className={cn("p-2 rounded-full", color)}>{icon}</div>
         <div>
-          <p className="text-sm font-medium text-gray-500">{label}</p>
+          <p className="text-sm font-medium text-muted">{label}</p>
           <div className="flex items-baseline gap-1">
-            <p className="text-xl font-bold text-gray-900">{value}</p>
-            {hint && <span className="text-sm text-gray-500">{hint}</span>}
+            <p className="text-xl font-bold text-foreground">{value}</p>
+            {hint && <span className="text-sm text-muted">{hint}</span>}
           </div>
         </div>
       </div>
@@ -133,7 +133,7 @@ function DateRangeSelector({
           onClick={() => onPresetChange(key)}
           className={`px-3 py-1.5 text-sm transition-colors ${preset === key
             ? "bg-primary text-white"
-            : "bg-white hover:bg-gray-50 text-gray-700"
+            : "bg-card hover:bg-accent/10 text-foreground"
             }`}
         >
           {key.charAt(0).toUpperCase() + key.slice(1)}
@@ -166,7 +166,7 @@ function NoteItemEditable({ note }: { note: NoteDTO & { createdAt?: string | Dat
   const created = note.createdAt ? new Date(note.createdAt).toLocaleString() : null;
 
   return (
-    <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg relative group hover:shadow-sm transition-shadow">
+    <div className="p-3 bg-amber-50 border border-amber-200 rounded-2xl relative group hover:shadow-sm transition-shadow">
       {editing ? (
         <div className="space-y-2">
           <Textarea value={text} onChange={(e) => setText(e.target.value)} className="min-h-16" />
@@ -181,9 +181,9 @@ function NoteItemEditable({ note }: { note: NoteDTO & { createdAt?: string | Dat
         </div>
       ) : (
         <>
-          <p className="text-sm text-gray-800 whitespace-pre-wrap">{note.text}</p>
+          <p className="text-sm text-foreground whitespace-pre-wrap">{note.text}</p>
           <div className="mt-2 flex items-center justify-between">
-            {created && <span className="text-xs text-gray-500">Creada: {created}</span>}
+            {created && <span className="text-xs text-muted">Creada: {created}</span>}
             <Badge variant="secondary" className="text-xs">Nota</Badge>
           </div>
           <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity flex gap-1">
@@ -318,7 +318,7 @@ export default function Dashboard() {
         {/* Header */}
         <header className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
+            <h1 className="text-2xl font-bold text-foreground">Dashboard</h1>
             <p className="text-sm text-gray-600">
               Rango:{" "}
               <span className="font-medium">{from.toLocaleDateString()}</span> –{" "}
@@ -373,9 +373,9 @@ export default function Dashboard() {
                     const maxQty = Math.max(...topSkus.map((t) => t.totalQty), 1);
                     const pct = (s.totalQty / maxQty) * 100;
                     return (
-                      <div key={idx} className="p-2 bg-gray-50 rounded-lg">
+                      <div key={idx} className="p-2 bg-gray-50 rounded-2xl">
                         <div className="flex justify-between mb-1">
-                          <span className="font-medium text-gray-800">{s.sku || "SIN SKU"}</span>
+                          <span className="font-medium text-foreground">{s.sku || "SIN SKU"}</span>
 
                           <p className="mt-1 text-xs text-gray-600">
                             Ingresos: ${s.revenue.toLocaleString()} MXN
@@ -388,7 +388,7 @@ export default function Dashboard() {
                     );
                   })
                 ) : (
-                  <p className="text-gray-500 text-center py-4">Sin datos</p>
+                  <p className="text-muted text-center py-4">Sin datos</p>
                 )}
               </div>
             </CardContent>
@@ -428,14 +428,14 @@ export default function Dashboard() {
                         <div className="flex-1">
                           <MicroBar value={item.count} max={max} className="w-full" />
                         </div>
-                        <span className="text-sm font-medium text-gray-900 w-10 text-right">
+                        <span className="text-sm font-medium text-foreground w-10 text-right">
                           {item.count}
                         </span>
                       </div>
                     );
                   })
                 ) : (
-                  <p className="text-gray-500 text-center">Cargando...</p>
+                  <p className="text-muted text-center">Cargando...</p>
                 )}
               </div>
             </CardContent>
@@ -454,12 +454,12 @@ export default function Dashboard() {
             </CardHeader>
             <CardContent>
               <div className="grid grid-cols-2 gap-4">
-                <div className="p-4 bg-gray-50 rounded-lg text-center">
-                  <p className="text-sm text-gray-500">Cantidad</p>
-                  <p className="text-2xl font-bold text-gray-900">{todayOrders?.count ?? 0}</p>
+                <div className="p-4 bg-gray-50 rounded-2xl text-center">
+                  <p className="text-sm text-muted">Cantidad</p>
+                  <p className="text-2xl font-bold text-foreground">{todayOrders?.count ?? 0}</p>
                 </div>
-                <div className="p-4 bg-gray-50 rounded-lg text-center">
-                  <p className="text-sm text-gray-500">Total vendido</p>
+                <div className="p-4 bg-gray-50 rounded-2xl text-center">
+                  <p className="text-sm text-muted">Total vendido</p>
                   <p className="text-2xl font-bold text-green-600">
                     ${(todayOrders?.totalAmount ?? 0).toLocaleString()} MXN
                   </p>
@@ -478,7 +478,7 @@ export default function Dashboard() {
             </CardHeader>
             <CardContent>
               {channelLoading ? (
-                <p className="text-gray-500 text-center py-2">Cargando...</p>
+                <p className="text-muted text-center py-2">Cargando...</p>
               ) : channelError ? (
                 <p className="text-red-500 text-center py-2">
                   Error: {(channelErrorDetail as Error).message}
@@ -488,9 +488,9 @@ export default function Dashboard() {
                   {channelData.map((item) => {
                     const max = Math.max(...channelData.map((c) => c.orders));
                     return (
-                      <div key={item.channelCode} className="p-3 bg-gray-50 rounded-lg">
+                      <div key={item.channelCode} className="p-3 bg-gray-50 rounded-2xl">
                         <div className="flex justify-between mb-1">
-                          <span className="font-medium text-gray-800">{item.channelName}</span>
+                          <span className="font-medium text-foreground">{item.channelName}</span>
                           <span className="text-gray-700">{item.orders} en total</span>
                         </div>
                         <MicroBar value={item.orders} max={max} className="w-full h-2" />
@@ -499,7 +499,7 @@ export default function Dashboard() {
                   })}
                 </div>
               ) : (
-                <p className="text-gray-500 text-center py-2">No hay datos</p>
+                <p className="text-muted text-center py-2">No hay datos</p>
               )}
             </CardContent>
           </Card>
@@ -544,7 +544,7 @@ export default function Dashboard() {
                   <NoteItemEditable key={note.id} note={note} />
                 ))}
                 {notes.length === 0 && (
-                  <p className="text-gray-500 text-center py-2">Sin notas recientes</p>
+                  <p className="text-muted text-center py-2">Sin notas recientes</p>
                 )}
               </div>
             </div>
