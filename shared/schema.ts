@@ -1,346 +1,277 @@
-// shared/schema.ts — Esquema de base de datos con Drizzle (comentado en español)
-// NOTA: Mantengo los mismos exports originales para no romper imports existentes.
-//       Además agrego alias en español (usuarios, marcas, etc.) por claridad.
+// shared/schema.ts — Esquema de base de datos con Drizzle ALINEADO a esquema_bd.txt
+// Español: este archivo refleja exactamente las tablas y columnas definidas en tu SQL real.
+// Nota: Mantengo los mismos exports públicos (tipos e identificadores) donde aplica
+// y añado índices/uniques conforme al dump. Tablas extra no presentes en la BD
+// fueron removidas para evitar desalineaciones. Si tu app las usa, crea migraciones.
 
-import { pgTable, serial,text, boolean, timestamp, integer, decimal, 
-  date, bigint, json, varchar, jsonb  } from "drizzle-orm/pg-core";
-  import { sql } from "drizzle-orm";
+import {
+  pgTable,
+  serial,
+  text,
+  boolean,
+  timestamp,
+  integer,
+  decimal,
+  bigint,
+  varchar,
+  jsonb,
+} from "drizzle-orm/pg-core";
+import { index, uniqueIndex } from "drizzle-orm/pg-core";
 
-import { z } from "zod";
-import { title } from "node:process";
-
-// === USUARIOS ===
-// Tabla de usuarios del sistema: credenciales básicas y metadatos
+// =========================================================
+// USERS
+// =========================================================
 export const users = pgTable("users", {
-  id: serial("id").primaryKey(),                 // ID autoincremental (PK)
-  email: text("email").notNull().unique(),        // correo único (login)
-  password: text("password").notNull(),          // hash de contraseña
-  firstName: text("first_name"),                 // nombre (opcional)
-  lastName: text("last_name"),                   // apellido (opcional)
-  role: text("role").notNull().default("user"), // rol: user | admin
-  lastLogin: timestamp("last_login"),            // último acceso
-  createdAt: timestamp("created_at").defaultNow(),
-  updatedAt: timestamp("updated_at"),
-});
-export type User = typeof users.$inferSelect;       // tipo de lectura (SELECT)
-export type InsertUser = typeof users.$inferInsert; // tipo de inserción (INSERT)
-
-// === MARCAS ===
-// Catálogo de marcas (ej. ELEGATE)
-export const brands = pgTable("brands", {
   id: serial("id").primaryKey(),
-  name: text("name").notNull(),                  // nombre visible
-  code: text("code").notNull().unique(),         // código corto único
-  isActive: boolean("is_active").notNull().default(true),
+  email: text("email").notNull().unique(),
+  password: text("password").notNull(),
+  firstName: text("first_name"),
+  lastName: text("last_name"),
+  role: text("role").notNull().default("user"),
+  lastLogin: timestamp("last_login"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at"),
 });
+export type User = typeof users.$inferSelect;
+export type InsertUser = typeof users.$inferInsert;
+
+// =========================================================
+// BRANDS
+// =========================================================
+export const brands = pgTable(
+  "brands",
+  {
+    id: serial("id").primaryKey(),
+    name: text("name").notNull(),
+    code: text("code").notNull(),
+    isActive: boolean("is_active").notNull().default(true),
+    createdAt: timestamp("created_at").defaultNow(),
+    updatedAt: timestamp("updated_at"),
+  },
+  (t) => ({
+    uxCode: uniqueIndex("brands_code_unique").on(t.code),
+  }),
+);
 export type Brand = typeof brands.$inferSelect;
 export type InsertBrand = typeof brands.$inferInsert;
 
-// === PRODUCTOS DE CATÁLOGO ===
-// Productos que pertenecen a una marca; valores económicos opcionales
-
-
-// === CATÁLOGO DE PRODUCTOS (Tabla Real) ===
-// Catálogo de productos interno con estructura real de la DB
-export const catalogoProductos = pgTable("catalogo_productos", {
-  sku_interno: text("sku_interno").primaryKey().unique(),  // SKU interno único
-  sku: text("sku"),
-  nombre_producto: text("nombre_producto"),
-  marca: text("marca"),
-  modelo: text("modelo"),
-  categoria: text("categoria"),
-  marca_producto: text("marca_producto"),
-  variante: text("variante"),
-  codigo_barras: text("codigo_barras"),
-  foto: text("foto"),
-  peso: decimal("peso"),
-  alto: decimal("alto"),
-  ancho: decimal("ancho"),
-  largo: decimal("largo"),
-  condicion: text("condicion"),
-  stock: integer("stock"),
-  costo: decimal("costo"),
-  situacion: text("situacion"),
-});
-
-export type CatalogoProducto = typeof catalogoProductos.$inferSelect;
-export type InsertCatalogoProducto = typeof catalogoProductos.$inferInsert;
-
-// === CANALES ===
-// Canales de venta (WW, CT, MGL, etc.)
-export const channels = pgTable("channels", {
-  id: serial("id").primaryKey(),
-  code: text("code").notNull().unique(),          // código corto único del canal
-  name: text("name").notNull(),                   // nombre del canal
-  color: text("color"),                           // color para UI (hex)
-  icon: text("icon"),                             // icono para UI (clase o nombre)
-  isActive: boolean("is_active").notNull().default(true),
-  createdAt: timestamp("created_at").defaultNow(),
-  updatedAt: timestamp("updated_at"),
-});
-export type Channel = typeof channels.$inferSelect;
-export type InsertChannel = typeof channels.$inferInsert;
-
-// === PAQUETERÍAS ===
-// Transportistas/Carriers (DHL, Estafeta, etc.)
-export const carriers = pgTable("carriers", {
-  id: serial("id").primaryKey(),
-  name: text("name").notNull(),                   // nombre visible
-  code: text("code").notNull().unique(),          // código único (ej. DHL)
-  apiEndpoint: text("api_endpoint"),              // endpoint API (si aplica)
-  isActive: boolean("is_active").notNull().default(true),
-  createdAt: timestamp("created_at").defaultNow(),
-  updatedAt: timestamp("updated_at"),
-});
+// =========================================================
+// CARRIERS
+// =========================================================
+export const carriers = pgTable(
+  "carriers",
+  {
+    id: serial("id").primaryKey(),
+    name: text("name").notNull(),
+    code: text("code").notNull(),
+    apiEndpoint: text("api_endpoint"),
+    isActive: boolean("is_active").notNull().default(true),
+    createdAt: timestamp("created_at").defaultNow(),
+    updatedAt: timestamp("updated_at"),
+  },
+  (t) => ({
+    uxCode: uniqueIndex("carriers_code_unique").on(t.code),
+  }),
+);
 export type Carrier = typeof carriers.$inferSelect;
 export type InsertCarrier = typeof carriers.$inferInsert;
 
-// === ÓRDENES ===
-// Estructura basada en el esquema real proporcionado
-export const orders = pgTable("orders", {
-  id: bigint("id", { mode: "bigint" }).generatedAlwaysAsIdentity().primaryKey(), // << AUTOGENERATED // BIGSERIAL PRIMARY KEY
-  shopId: integer("shop_id").notNull(),                     // INT NOT NULL ← importante
-  orderId: text("order_id").notNull(),                      // TEXT NOT NULL (ID externo de la plataforma)
-  name: text("name"),
-  orderNumber: text("order_number"),
-  customerName: text("customer_name"),                      // TEXT
-  customerEmail: text("customer_email"),                    // TEXT
-  subtotalPrice: decimal("subtotal_price"),                 // NUMERIC
-  totalAmount: decimal("total_amount"),                     // NUMERIC
-  currency: text("currency"),                               // TEXT
-  financialStatus: text("financial_status"),                // TEXT
-  fulfillmentStatus: text("fulfillment_status"),            // TEXT
-  tags: text("tags").array(),                               // TEXT[]
-  noteAttributes: json("note_attributes"),                  // JSONB
-  createdAt: timestamp("created_at"),                       // TIMESTAMP
-  shopifyCreatedAt: timestamp("shopify_created_at", { withTimezone: true }), // TIMESTAMPTZ
-  shopifyUpdatedAt: timestamp("shopify_updated_at", { withTimezone: true }), // TIMESTAMPTZ
-  shopifyProcessedAt: timestamp("shopify_processed_at", { withTimezone: true }), // TIMESTAMPTZ
-  shopifyClosedAt: timestamp("shopify_closed_at", { withTimezone: true }), // TIMESTAMPTZ
-  shopifyCancelledAt: timestamp("shopify_cancelled_at", { withTimezone: true }), // TIMESTAMPTZ
+// =========================================================
+// CATALOGO_PRODUCTOS (sin PK explícita en la BD)
+// =========================================================
+export const catalogoProductos = pgTable("catalogo_productos", {
+  sku: text("sku"),
+  marca: text("marca"),
+  sku_interno: text("sku_interno"),
+  codigo_barras: text("codigo_barras"),
+  nombre_producto: text("nombre_producto"),
+  modelo: text("modelo"),
+  categoria: text("categoria"),
+  condicion: text("condicion"),
+  marca_producto: text("marca_producto"),
+  variante: text("variante"),
+  largo: decimal("largo"),
+  ancho: decimal("ancho"),
+  alto: decimal("alto"),
+  peso: decimal("peso"),
+  foto: text("foto"),
+  costo: decimal("costo"),
+  stock: integer("stock"),
 });
+export type CatalogoProducto = typeof catalogoProductos.$inferSelect;
+export type InsertCatalogoProducto = typeof catalogoProductos.$inferInsert;
 
-export type Order = typeof orders.$inferSelect;
-export type InsertOrder = typeof orders.$inferInsert;
+// =========================================================
+// CHANNELS
+// =========================================================
+export const channels = pgTable(
+  "channels",
+  {
+    id: serial("id").primaryKey(),
+    code: text("code").notNull(),
+    name: text("name").notNull(),
+    color: text("color"),
+    icon: text("icon"),
+    isActive: boolean("is_active").notNull().default(true),
+    createdAt: timestamp("created_at").defaultNow(),
+    updatedAt: timestamp("updated_at"),
+  },
+  (t) => ({
+    uxCode: uniqueIndex("channels_code_unique").on(t.code),
+  }),
+);
+export type Channel = typeof channels.$inferSelect;
+export type InsertChannel = typeof channels.$inferInsert;
 
-// === ORDER_ITEMS ===
-// Items de órdenes basado en el esquema real
-export const orderItems = pgTable("order_items", {
-  id: serial("id").primaryKey(),                          // SERIAL PRIMARY KEY
-  orderId: bigint("order_id", { mode: "bigint" }).notNull(), // BIGINT NOT NULL (FK a orders.id con ON DELETE CASCADE)
-  sku: text("sku"),                                       // TEXT
-  quantity: integer("quantity").notNull(),                // INT NOT NULL
-  price: decimal("price"),                                // NUMERIC
-  shopifyProductId: text("shopify_product_id"),           // TEXT
-  shopifyVariantId: text("shopify_variant_id"),           // TEXT
-  title: text("title"),                                   // TEXT
-  
-});
-export type OrderItem = typeof orderItems.$inferSelect;
-export type InsertOrderItem = typeof orderItems.$inferInsert;
-
-// === TICKETS ===
-// Tickets basados en el esquema real
-export const tickets = pgTable("tickets", {
-  id: serial("id").primaryKey(),                          // SERIAL PRIMARY KEY
-    ticketNumber: text("ticket_number")
-    .notNull()
-    .default(sql`nextval('ticket_number_seq')::text`),    // TEXT UNIQUE NOT NULL
-  orderId: bigint("order_id", { mode: "bigint" }).notNull(),                 // INTEGER NOT NULL (FK a orders.id con ON DELETE CASCADE)
-  status: text("status").notNull().default('open'),       // TEXT NOT NULL DEFAULT 'open'
-  notes: text("notes"),                                   // TEXT
-  createdAt: timestamp("created_at").defaultNow(),        // TIMESTAMP DEFAULT now()
-  updatedAt: timestamp("updated_at"),                     // TIMESTAMP
-});
-export type Ticket = typeof tickets.$inferSelect;
-export type InsertTicket = typeof tickets.$inferInsert;
-
-// === REGLAS DE ENVÍO ===
-// Reglas para seleccionar paquetería/servicio según condiciones
-export const shippingRules = pgTable("shipping_rules", {
-  id: serial("id").primaryKey(),
-  name: text("name").notNull(),                   // nombre de la regla
-  condition: text("condition").notNull(),         // expresión/condición (definición libre)
-  carrierId: integer("carrier_id").notNull(),     // referencia a carriers.id
-  service: text("service"),                       // nombre del servicio (si aplica)
-  cost: decimal("cost"),                          // costo estimado
-  estimatedDays: integer("estimated_days"),       // días estimados de entrega
-  isActive: boolean("is_active").notNull().default(true),
-  createdAt: timestamp("created_at").defaultNow(),
-  updatedAt: timestamp("updated_at"),
-});
-export type ShippingRule = typeof shippingRules.$inferSelect;
-export type InsertShippingRule = typeof shippingRules.$inferInsert;
-
-// === NOTAS ===
-// Notas privadas por usuario (cuaderno personal)
+// =========================================================
+// NOTES
+// =========================================================
 export const notes = pgTable("notes", {
   id: serial("id").primaryKey(),
-  userId: integer("user_id").notNull(),          // usuario propietario de la nota
-  content: text("content").notNull(),             // contenido de la nota
+  userId: integer("user_id").notNull(),
+  content: text("content").notNull(),
   createdAt: timestamp("created_at").defaultNow(),
-  updatedAt: timestamp("updated_at").defaultNow(),
+  updatedAt: timestamp("updated_at"), // en la BD no hay default
 });
 export type Note = typeof notes.$inferSelect;
 export type InsertNote = typeof notes.$inferInsert;
 
-// === PRODUCTOS SHOPIFY ===
-// Productos sincronizados desde Shopify por tienda
-export const products = pgTable("products", {
-  id: serial("id").primaryKey(),
-  idShopify: text("id_shopify").notNull(),        // ID de Shopify
-  shopId: integer("shop_id").notNull(),           // 1 o 2 (tienda)
-  title: text("title").notNull(),                 // título del producto
-  vendor: text("vendor"),                         // proveedor/marca
-  productType: text("product_type"),              // tipo de producto
-  status: text("status").notNull().default("active"), // active, draft
-  tags: text("tags").array(),                     // etiquetas (array)
-  createdAt: timestamp("created_at").defaultNow(),
-  updatedAt: timestamp("updated_at"),
-});
+// =========================================================
+// ORDERS
+// =========================================================
+export const orders = pgTable(
+  "orders",
+  {
+    id: serial("id").primaryKey(), // SERIAL (int4) en la BD real
+    orderId: text("order_id").notNull(),
+    customerName: text("customer_name"),
+    totalAmount: decimal("total_amount"),
+    status: text("status").notNull().default("pending"),
+    createdAt: timestamp("created_at").defaultNow(),
+
+    name: text("name"),
+    orderNumber: text("order_number"),
+    financialStatus: text("financial_status"),
+    fulfillmentStatus: text("fulfillment_status"),
+    currency: text("currency").default("MXN"),
+    subtotalPrice: decimal("subtotal_price"),
+    customerEmail: text("customer_email"),
+    tags: text("tags").array(),
+    shipName: text("ship_name"),
+    shipPhone: text("ship_phone"),
+    shipAddress1: text("ship_address1"),
+    shipCity: text("ship_city"),
+    shipProvince: text("ship_province"),
+    shipCountry: text("ship_country"),
+    shipZip: text("ship_zip"),
+    shopifyCreatedAt: timestamp("shopify_created_at", { withTimezone: true }),
+    shopifyUpdatedAt: timestamp("shopify_updated_at", { withTimezone: true }),
+    shopifyProcessedAt: timestamp("shopify_processed_at", { withTimezone: true }),
+    shopifyClosedAt: timestamp("shopify_closed_at", { withTimezone: true }),
+    shopifyCancelledAt: timestamp("shopify_cancelled_at", { withTimezone: true }),
+    cancelReason: text("cancel_reason"),
+    orderNote: text("order_note"),
+    noteAttributes: jsonb("note_attributes"),
+    shopId: integer("shop_id").references(() => channels.id),
+    updatedAt: timestamp("updated_at").defaultNow(),
+  },
+  (t) => ({
+    // La BD tiene ambos: uniq_shop_order y ux_orders_shop_order (duplicados). Mantener uno
+    uxShopOrder: uniqueIndex("ux_orders_shop_order").on(t.shopId, t.orderId),
+    idxByShopCreated: index("ix_orders_shop_created").on(t.shopId, t.createdAt),
+    idxFulfillment: index("orders_fulfillment_status_idx").on(t.fulfillmentStatus),
+    idxShopifyCreated: index("orders_shopify_created_idx").on(t.shopifyCreatedAt),
+    idxShop: index("ix_orders_shop").on(t.shopId),
+    idxChannel: index("ix_orders_channel").on(t.shopId),
+  }),
+);
+export type Order = typeof orders.$inferSelect;
+export type InsertOrder = typeof orders.$inferInsert;
+
+// =========================================================
+// ORDER_ITEMS (FK a orders.id, en la BD es BIGINT)
+// =========================================================
+export const orderItems = pgTable(
+  "order_items",
+  {
+    id: serial("id").primaryKey(),
+    orderId: bigint("order_id", { mode: "number" }).notNull().references(() => orders.id),
+    sku: text("sku"),
+    quantity: integer("quantity").notNull(),
+    price: decimal("price"),
+    createdAt: timestamp("created_at").defaultNow(),
+    shopifyProductId: text("shopify_product_id"),
+    shopifyVariantId: text("shopify_variant_id"),
+    title: text("title"),
+    variantTitle: text("variant_title"),
+  },
+  (t) => ({
+    idxOrder: index("idx_order_items_order_id").on(t.orderId),
+    idxSku: index("ix_order_items_sku").on(t.sku),
+    idxShopProd: index("ix_order_items_shopify_product").on(t.shopifyProductId),
+    idxShopVar: index("ix_order_items_shopify_variant").on(t.shopifyVariantId),
+  }),
+);
+export type OrderItem = typeof orderItems.$inferSelect;
+export type InsertOrderItem = typeof orderItems.$inferInsert;
+
+// =========================================================
+// PRODUCTS (Shopify)
+// =========================================================
+export const products = pgTable(
+  "products",
+  {
+    id: serial("id").primaryKey(),
+    idShopify: text("id_shopify").notNull(),
+    shopId: integer("shop_id").notNull(),
+    title: text("title").notNull(),
+    vendor: text("vendor"),
+    productType: text("product_type"),
+    status: text("status").notNull().default("active"),
+    tags: text("tags").array(),
+    createdAt: timestamp("created_at").defaultNow(),
+    updatedAt: timestamp("updated_at"),
+    sku: text("sku"),
+  },
+  (t) => ({
+    idxShop: index("ix_products_shop").on(t.shopId),
+    idxShop2: index("products_shop_id_idx").on(t.shopId),
+    uxShopShopify: uniqueIndex("ux_products_shop_shopify").on(t.shopId, t.idShopify),
+  }),
+);
 export type Product = typeof products.$inferSelect;
 export type InsertProduct = typeof products.$inferInsert;
 
-// Productos externos
-export const externalProducts = pgTable("external_products", {
-  id: serial("id").primaryKey(),
-  sku: text("sku").notNull().unique(),
-  prod: text("name").notNull(),
-  createdAt: timestamp("created_at").defaultNow(),
-});
-export type ExternalProduct = typeof externalProducts.$inferSelect;
-export type InsertExternalProduct = typeof externalProducts.$inferInsert;
-
-// === VARIANTES DE PRODUCTOS ===
-// Variantes de productos Shopify (SKU, precio, inventario)
-export const variants = pgTable("variants", {
-  id: serial("id").primaryKey(),
-  productId: integer("product_id"),               // referencia a products.id
-  idShopify: text("id_shopify"),                  // ID de variante en Shopify
-  sku: text("sku"),                               // SKU de la variante
-  price: decimal("price"),                        // precio de venta
-  compareAtPrice: decimal("compare_at_price"),    // precio de comparación
-  barcode: text("barcode"),                       // código de barras
-  inventoryQty: integer("inventory_qty"),         // cantidad en inventario
-  createdAt: timestamp("created_at"),
-  updatedAt: timestamp("updated_at"),
-});
+// =========================================================
+// VARIANTS (Shopify)
+// =========================================================
+export const variants = pgTable(
+  "variants",
+  {
+    id: serial("id").primaryKey(),
+    idShopify: text("id_shopify").notNull(),
+    productId: integer("product_id").notNull().references(() => products.id),
+    sku: text("sku"),
+    price: decimal("price"),
+    compareAtPrice: decimal("compare_at_price"),
+    barcode: text("barcode"),
+    inventoryQty: integer("inventory_qty"),
+    createdAt: timestamp("created_at").defaultNow(),
+    updatedAt: timestamp("updated_at"),
+    externalVariantId: text("external_variant_id"),
+  },
+  (t) => ({
+    idxProd: index("ix_variants_product").on(t.productId),
+    idxShopify: index("ix_variants_shopify").on(t.idShopify),
+    idxSku: index("ix_variants_sku").on(t.sku),
+  }),
+);
 export type Variant = typeof variants.$inferSelect;
 export type InsertVariant = typeof variants.$inferInsert;
 
-
-
-// === COMBOS DE PRODUCTOS ===
-// Relación para productos combo (un producto que contiene otros)
-export const productComboItems = pgTable("product_combo_items", {
-  id: serial("id").primaryKey(),
-  productComboId: integer("product_combo_id").notNull(), // producto que es combo
-  productSimpleId: integer("product_simple_id").notNull(), // producto componente
-  qty: integer("qty").notNull().default(1),              // cantidad del componente
-  createdAt: timestamp("created_at").defaultNow(),
-});
-export type ProductComboItem = typeof productComboItems.$inferSelect;
-export type InsertProductComboItem = typeof productComboItems.$inferInsert;
-
-// === ESQUEMAS ZOD (validación en rutas) ===
-// Se usan para validar cuerpo de peticiones en endpoints.
-// Schema corregido para inserción de órdenes - compatible con estructura real de DB
-export const insertOrderSchema = z.object({
-  // ID requerido (bigint)
-  id: z.union([z.bigint(), z.string(), z.number()]).optional(),
-
-  // Campos obligatorios según DB
-  shopId: z.number().int().min(1).max(2),
-  orderId: z.string().min(1, "Order ID es requerido"),
-
-  // Campos opcionales de cliente
-  customerName: z.string().optional(),
-  customerEmail: z.string().optional(),
-
-  // Campos de precio
-  subtotalPrice: z.string().optional(),
-  totalAmount: z.string().optional(),
-  currency: z.string().default("MXN"),
-
-  // Estados
-  financialStatus: z.string().optional(),
-  fulfillmentStatus: z.string().optional(),
-
-  // Metadatos
-  tags: z.array(z.string()).default([]),
-  noteAttributes: z.any().optional(),
-
-  // Timestamps Shopify
-  createdAt: z.date().optional(),
-  shopifyCreatedAt: z.date().optional(),
-  shopifyUpdatedAt: z.date().optional(),
-  shopifyProcessedAt: z.date().optional(),
-  shopifyClosedAt: z.date().optional(),
-  shopifyCancelledAt: z.date().optional(),
-}).transform((data) => {
-  // Transformar ID a bigint si es necesario
-  if (data.id && typeof data.id !== 'bigint') {
-    data.id = typeof data.id === 'string' ? BigInt(data.id) : BigInt(data.id);
-  }
-  return data;
-});
-
-export const insertProductSchema = z.object({
-  idShopify: z.string().min(1, "ID de Shopify requerido"),
-  shopId: z.number().int().min(1).max(2, "Shop ID debe ser 1 o 2"),
-  title: z.string().min(1, "Título requerido"),
-  vendor: z.string().optional(),
-  productType: z.string().optional(),
-  status: z.enum(["active", "draft"]).default("active"),
-  tags: z.array(z.string()).optional().default([]),
-});
-
-export const insertVariantSchema = z.object({
-  idShopify: z.string().min(1, "ID de Shopify requerido"),
-  productId: z.number().int().positive("Product ID requerido"),
-  sku: z.string().optional(),
-  price: z.string().optional(),
-  compareAtPrice: z.string().optional(),
-  barcode: z.string().optional(),
-  inventoryQty: z.number().int().optional(),
-});
-
-export const insertTicketSchema = z.object({
-  ticketNumber: z.string().optional(),
-  orderId: z.coerce.number().int().positive("El ID de la orden debe ser un número positivo"),
-  status: z.string().default("open"),
-  notes: z.string().optional(),
-});
-
-export const createBulkTicketsSchema = z.object({
-  orderIds: z.array(z.union([z.number().int().positive(), z.string().min(1)])).min(1, "Debe seleccionar al menos una orden"),
-  notes: z.string().optional(),
-});
-
-export const insertNoteSchema = z.object({
-  text: z.string().min(1, "El contenido es obligatorio"),
-  date: z.string().optional(),
-});
-
-export interface NoteDTO {
-  id: number;
-  text: string;
-  createdAt: string;
-  author?: string | null;
-}
-
-export interface DashboardMetrics {
-  totalOrders: number;
-  totalSales: number;
-  unmanaged: number;
-  managed: number;
-  byChannel: Array<{ channelId: number; channelName: string; count: number }>;
-  byShop: Array<{ shopId: number; shopName?: string | null; count: number }>;
-}
-
-// Product links para conciliación Catálogo ↔ Shopify
+// =========================================================
+// PRODUCT_LINKS (conciliación catálogo ↔ Shopify)
+// =========================================================
 export const productLinks = pgTable("product_links", {
   id: serial("id").primaryKey(),
   catalogoSku: varchar("catalogo_sku", { length: 100 }).notNull(),
@@ -348,8 +279,8 @@ export const productLinks = pgTable("product_links", {
   shopifyProductId: varchar("shopify_product_id", { length: 100 }),
   variantId: integer("variant_id").references(() => variants.id),
   productId: integer("product_id").references(() => products.id),
-  matchStatus: varchar("match_status", { length: 20 }).default("pending"), // 'matched', 'conflict', 'missing'
-  syncStatus: varchar("sync_status", { length: 20 }).default("pending"), // 'synced', 'error', 'pending'
+  matchStatus: varchar("match_status", { length: 20 }).default("pending"),
+  syncStatus: varchar("sync_status", { length: 20 }).default("pending"),
   errorMessage: text("error_message"),
   lastSyncAt: timestamp("last_sync_at"),
   createdAt: timestamp("created_at").defaultNow(),
@@ -357,41 +288,100 @@ export const productLinks = pgTable("product_links", {
   createdBy: integer("created_by").references(() => users.id),
   updatedBy: integer("updated_by").references(() => users.id),
 });
-
-// Jobs queue para sincronización con Shopify
-export const shopifyJobs = pgTable("shopify_jobs", {
-  id: serial("id").primaryKey(),
-  shopId: integer("shop_id").notNull(),
-  jobType: varchar("job_type", { length: 50 }).notNull(), // 'update_product', 'update_variant', 'create_product'
-  shopifyProductId: varchar("shopify_product_id", { length: 100 }),
-  shopifyVariantId: varchar("shopify_variant_id", { length: 100 }),
-  payload: jsonb("payload").notNull(),
-  status: varchar("status", { length: 20 }).default("pending"), // 'pending', 'processing', 'completed', 'failed'
-  attempts: integer("attempts").default(0),
-  maxAttempts: integer("max_attempts").default(3),
-  errorMessage: text("error_message"),
-  processedAt: timestamp("processed_at"),
-  scheduledFor: timestamp("scheduled_for").defaultNow(),
-  createdAt: timestamp("created_at").defaultNow(),
-});
-
 export type ProductLink = typeof productLinks.$inferSelect;
 export type InsertProductLink = typeof productLinks.$inferInsert;
 
-export type ShopifyJob = typeof shopifyJobs.$inferSelect;
-export type InsertShopifyJob = typeof shopifyJobs.$inferInsert;
+// =========================================================
+// TICKETS
+// =========================================================
+export const tickets = pgTable(
+  "tickets",
+  {
+    id: serial("id").primaryKey(),
+    ticketNumber: serial("ticket_number").notNull(), // SERIAL en la BD
+    orderId: bigint("order_id", { mode: "number" }).notNull().references(() => orders.id),
+    status: text("status").notNull().default("open"),
+    notes: text("notes"),
+    createdAt: timestamp("created_at").defaultNow(),
+    updatedAt: timestamp("updated_at"),
+  },
+  (t) => ({
+    uxTicketNumber: uniqueIndex("tickets_ticket_number_unique").on(t.ticketNumber),
+    idxOrder: index("ix_tickets_order").on(t.orderId),
+    idxStatus: index("ix_tickets_status").on(t.status),
+  }),
+);
+export type Ticket = typeof tickets.$inferSelect;
+export type InsertTicket = typeof tickets.$inferInsert;
 
-// === Alias en español (opcionales) ===
-// Permiten importar en español sin romper los nombres originales.
+// =========================================================
+// Zod Schemas mínimos (alineados al SQL; no fuerzan campos que la BD deja opcionales)
+// =========================================================
+import { z } from "zod";
+
+export const insertOrderSchema = z.object({
+  // La PK es SERIAL, no se envía
+  shopId: z.number().int().optional(), // nullable en BD; se recomienda enviarlo
+  orderId: z.string().min(1),
+  customerName: z.string().optional(),
+  customerEmail: z.string().optional(),
+  subtotalPrice: z.string().optional(),
+  totalAmount: z.string().optional(),
+  currency: z.string().optional(),
+  financialStatus: z.string().optional(),
+  fulfillmentStatus: z.string().optional(),
+  tags: z.array(z.string()).optional(),
+  shipName: z.string().optional(),
+  shipPhone: z.string().optional(),
+  shipAddress1: z.string().optional(),
+  shipCity: z.string().optional(),
+  shipProvince: z.string().optional(),
+  shipCountry: z.string().optional(),
+  shipZip: z.string().optional(),
+  shopifyCreatedAt: z.date().optional(),
+  shopifyUpdatedAt: z.date().optional(),
+  shopifyProcessedAt: z.date().optional(),
+  shopifyClosedAt: z.date().optional(),
+  shopifyCancelledAt: z.date().optional(),
+  cancelReason: z.string().optional(),
+  orderNote: z.string().optional(),
+  noteAttributes: z.any().optional(), // jsonb
+});
+
+export const insertTicketSchema = z.object({
+  orderId: z.coerce.number().int().positive(), // en BD es BIGINT; aquí lo traemos como number
+  status: z.string().default("open"),
+  notes: z.string().optional(),
+});
+
+export const createBulkTicketsSchema = z.object({
+  orderIds: z.array(z.union([z.number().int().positive(), z.string().min(1)])).min(1),
+  notes: z.string().optional(),
+});
+
+export const insertNoteSchema = z.object({
+  content: z.string().min(1),
+});
+
+export interface DashboardMetrics {
+  totalOrders: number;
+  totalSales: number;
+  unmanaged: number;
+  managed: number;
+  byChannel: Array<{ channelId: number; channelName: string; count: number }>; 
+  byShop: Array<{ shopId: number; shopName?: string | null; count: number }>;
+}
+
+// =========================================================
+// Alias opcionales en español
+// =========================================================
 export {
   users as usuarios,
   brands as marcas,
-
   channels as canales,
   carriers as paqueterias,
   orders as ordenes,
   tickets as ticketsTabla,
-  shippingRules as reglasEnvio,
   notes as notas,
 };
 
@@ -400,7 +390,6 @@ export type {
   InsertUser as InsertarUsuario,
   Brand as Marca,
   InsertBrand as InsertarMarca,
-
   Channel as Canal,
   InsertChannel as InsertarCanal,
   Carrier as Paqueteria,
@@ -409,8 +398,6 @@ export type {
   InsertOrder as InsertarOrden,
   Ticket as TicketTipo,
   InsertTicket as InsertarTicket,
-  ShippingRule as ReglaEnvio,
-  InsertShippingRule as InsertarReglaEnvio,
   Note as Nota,
   InsertNote as InsertarNota,
 };
