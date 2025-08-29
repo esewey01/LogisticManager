@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -6,522 +6,288 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
-import { apiRequest } from "@/lib/queryClient";
-import { Search, Package, Plus, Edit3, Trash2, Download, Upload, Filter } from "lucide-react";
-
-// Tipos para el catálogo
-interface ProductCatalog {
-  id: number;
-  nombre: string;
-  sku: string;
-  descripcion?: string;
-  precio?: number;
-  categoria?: string;
-  marca?: string;
-  activo: boolean;
-  inventario?: number;
-  fechaCreacion: string;
-  fechaActualizacion: string;
-}
-
-interface ProductVariant {
-  id: number;
-  productId: number;
-  sku: string;
-  titulo?: string;
-  precio?: number;
-  inventario?: number;
-  activo: boolean;
-}
+import { Search, Download, Upload, X } from "lucide-react";
+import { CatalogoResponse, exportCatalogo, fetchCatalogo, importCatalogo, downloadCatalogTemplate } from "@/lib/api/catalogo";
+import { debounce } from "lodash";
 
 export default function Catalogo() {
-  const [search, setSearch] = useState("");
-  const [categoryFilter, setCategoryFilter] = useState("all");
-  const [statusFilter, setStatusFilter] = useState("all");
-  const [page, setPage] = useState(1);
-  const [pageSize] = useState(25);
-  const [selectedProduct, setSelectedProduct] = useState<ProductCatalog | null>(null);
-  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
-  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
-  const [isSearchFocused, setIsSearchFocused] = useState(false);
-
-  const queryClient = useQueryClient();
   const { toast } = useToast();
+  const queryClient = useQueryClient();
 
-  // Query para obtener productos con paginación y filtros
-  const { data: productsData, isLoading } = useQuery({
-    queryKey: ["/api/products", { page, pageSize, search, categoryFilter, statusFilter }],
-    queryFn: async () => {
-      const params = new URLSearchParams({
-        page: String(page),
-        pageSize: String(pageSize),
-        ...(search && { search }),
-        ...(categoryFilter !== "all" && { categoria: categoryFilter }),
-        ...(statusFilter !== "all" && { activo: statusFilter }),
-      });
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(50);
+  const [q, setQ] = useState("");
+  const [campo, setCampo] = useState<"sku" | "sku_interno" | "nombre">("sku_interno");
+  const [marca, setMarca] = useState<string>("");
+  const [categoria, setCategoria] = useState<string>("");
+  const [stockEq0, setStockEq0] = useState(false);
+  const [stockGte, setStockGte] = useState<number | undefined>(undefined);
+  const [sortField, setSortField] = useState<string>("nombre_producto");
+  const [sortOrder, setSortOrder] = useState<"asc" | "desc">("asc");
 
-      const res = await apiRequest("GET", `/api/products?${params}`);
-      return res.json();
-    },
+  // Debounce for search input
+  const [searchInput, setSearchInput] = useState("");
+  const debounced = useMemo(() => debounce((v: string) => setQ(v), 400), []);
+  useEffect(() => { debounced(searchInput); }, [searchInput]);
+
+  // Reset page on filter change
+  useEffect(() => { setPage(1); }, [q, campo, marca, categoria, stockEq0, stockGte, pageSize, sortField, sortOrder]);
+
+  // Persist filters in URL
+  useEffect(() => {
+    const params = new URLSearchParams();
+    if (q) params.set("q", q);
+    if (campo) params.set("campo", campo);
+    if (marca) params.set("marca", marca);
+    if (categoria) params.set("categoria", categoria);
+    if (stockEq0) params.set("stock_eq0", "1");
+    if (typeof stockGte === 'number') params.set("stock_gte", String(stockGte));
+    if (page > 1) params.set("page", String(page));
+    if (pageSize !== 50) params.set("pageSize", String(pageSize));
+    if (sortField) params.set("sort", `${sortField}:${sortOrder}`);
+    const qs = params.toString();
+    const url = qs ? `/catalogo?${qs}` : "/catalogo";
+    window.history.replaceState(null, "", url);
+  }, [q, campo, marca, categoria, stockEq0, stockGte, page, pageSize, sortField, sortOrder]);
+
+  // Init from URL
+  useEffect(() => {
+    const p = new URLSearchParams(window.location.search);
+    setQ(p.get("q") || "");
+    const c = p.get("campo") as any; if (c) setCampo(c);
+    const m = p.get("marca"); if (m) setMarca(m);
+    const cat = p.get("categoria"); if (cat) setCategoria(cat);
+    const eq0 = p.get("stock_eq0"); if (eq0) setStockEq0(true);
+    const gte = p.get("stock_gte"); if (gte) setStockGte(Number(gte));
+    const pg = p.get("page"); if (pg) setPage(Number(pg));
+    const ps = p.get("pageSize"); if (ps) setPageSize(Number(ps));
+    const srt = p.get("sort"); if (srt) { const [f, d] = srt.split(":"); if (f) setSortField(f); if (d === 'desc' || d === 'asc') setSortOrder(d); }
+    setSearchInput(p.get("q") || "");
+  }, []);
+
+  const { data, isLoading } = useQuery<CatalogoResponse>({
+    queryKey: ["/api/catalogo", { page, pageSize, q, campo, marca, categoria, stockEq0, stockGte, sortField, sortOrder }],
+    queryFn: () => fetchCatalogo({
+      page, pageSize, q, campo,
+      marca: marca || undefined,
+      categoria: categoria || undefined,
+      stock_eq0: stockEq0 || undefined,
+      stock_gte: typeof stockGte === 'number' ? stockGte : undefined,
+      sort: `${sortField}:${sortOrder}`,
+    }),
     refetchInterval: 30000,
   });
 
-  const products = productsData?.rows || [];
-  const totalProducts = productsData?.total || 0;
+  const items = data?.data ?? [];
+  const total = data?.total ?? 0;
+  const totalPages = data?.totalPages ?? Math.max(1, Math.ceil(total / pageSize));
 
-  // Query para obtener categorías disponibles
-  const { data: categories = [] } = useQuery({
-    queryKey: ["/api/products/categories"],
-    queryFn: async () => {
-      const res = await apiRequest("GET", "/api/products/categories");
-      return res.json();
-    },
-  });
-
-  // Mutación para crear producto
-  const createProductMutation = useMutation({
-    mutationFn: async (productData: Partial<ProductCatalog>) => {
-      const res = await apiRequest("POST", "/api/products", productData);
-      return res.json();
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/products"] });
-      toast({
-        title: "Producto creado",
-        description: "El producto se agregó exitosamente al catálogo",
-      });
-      setIsCreateModalOpen(false);
-    },
-    onError: (error: any) => {
-      toast({
-        title: "Error al crear producto",
-        description: error?.message || "No se pudo crear el producto",
-        variant: "destructive",
-      });
-    },
-  });
-
-  // Mutación para actualizar producto
-  const updateProductMutation = useMutation({
-    mutationFn: async ({ id, updates }: { id: number; updates: Partial<ProductCatalog> }) => {
-      const res = await apiRequest("PATCH", `/api/products/${id}`, updates);
-      return res.json();
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/products"] });
-      toast({
-        title: "Producto actualizado",
-        description: "Los cambios se guardaron correctamente",
-      });
-      setIsEditModalOpen(false);
-      setSelectedProduct(null);
-    },
-  });
-
-  // Mutación para eliminar producto
-  const deleteProductMutation = useMutation({
-    mutationFn: async (id: number) => {
-      await apiRequest("DELETE", `/api/products/${id}`);
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/products"] });
-      toast({
-        title: "Producto eliminado",
-        description: "El producto se eliminó del catálogo",
-      });
-    },
-  });
-
-  const handleEditProduct = (product: ProductCatalog) => {
-    setSelectedProduct(product);
-    setIsEditModalOpen(true);
+  const clearFilters = () => {
+    setSearchInput("");
+    setQ("");
+    setCampo("sku_interno");
+    setMarca("");
+    setCategoria("");
+    setStockEq0(false);
+    setStockGte(undefined);
+    setSortField("nombre_producto");
+    setSortOrder("asc");
   };
 
-  const handleDeleteProduct = async (product: ProductCatalog) => {
-    if (confirm(`¿Estás seguro de eliminar el producto "${product.nombre}"?`)) {
-      deleteProductMutation.mutate(product.id);
+  const handleExport = async (format: "csv" | "xlsx") => {
+    try {
+      const blob = await exportCatalogo({ q, campo, marca: marca || undefined, categoria: categoria || undefined, stock_eq0: stockEq0 || undefined, stock_gte: stockGte, sort: `${sortField}:${sortOrder}`, format });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `catalogo_${new Date().toISOString().slice(0,10)}.${format}`;
+      document.body.appendChild(a);
+      a.click();
+      URL.revokeObjectURL(url);
+      a.remove();
+      toast({ title: "Exportación lista" });
+    } catch (e: any) {
+      toast({ variant: "destructive", title: "Error al exportar", description: e?.message || "" });
     }
   };
 
-  if (isLoading) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-primary"></div>
-      </div>
-    );
-  }
+  const importMutation = useMutation({
+    mutationFn: async (file: File) => importCatalogo(file),
+    onSuccess: (resp) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/catalogo"] });
+      toast({ title: "Importación completada", description: `Insertados: ${resp.inserted} • Actualizados: ${resp.updated} • Errores: ${resp.errors}` });
+      if (resp.reportBase64) {
+        const a = document.createElement('a');
+        a.href = `data:text/csv;base64,${resp.reportBase64}`;
+        a.download = `catalogo_import_errores_${new Date().toISOString().slice(0,10)}.csv`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+      }
+    },
+  });
+
+  const onFilePick = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    if (f.size > 20 * 1024 * 1024) { toast({ variant: 'destructive', title: 'Archivo demasiado grande (máx 20MB)' }); e.currentTarget.value = ""; return; }
+    const ok = ["text/csv","application/csv","application/vnd.openxmlformats-officedocument.spreadsheetml.sheet","application/vnd.ms-excel"].includes(f.type);
+    if (!ok) { toast({ variant: 'destructive', title: 'Tipo no soportado', description: 'Usa CSV o XLSX' }); e.currentTarget.value = ""; return; }
+    importMutation.mutate(f);
+    e.currentTarget.value = "";
+  };
 
   return (
-    <div className="min-h-screen bg-gray-50 p-6">
-      <div className="max-w-7xl mx-auto">
-        {/* Header */}
-        <div className="mb-8">
-          <h1 className="text-3xl font-bold text-gray-800">Catálogo de Productos</h1>
-          <p className="text-gray-600 mt-1">Gestiona productos, variantes e inventario</p>
+    <div className="p-6">
+      <div className="max-w-7xl mx-auto space-y-4">
+        <div className="flex items-center justify-between">
+          <h1 className="text-2xl font-semibold">Catálogo de productos</h1>
         </div>
 
-        {/* Filtros y acciones */}
-        <Card className="mb-6">
-          <CardContent className="p-6">
-            <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between space-y-4 lg:space-y-0 lg:space-x-4">
-              <div className="flex flex-col sm:flex-row space-y-4 sm:space-y-0 sm:space-x-4 flex-1">
-                <div className="flex-1 relative">
-                  <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
-                  <Input
-                    placeholder="Buscar por nombre, SKU o descripción..."
-                    value={search}
-                    onChange={(e) => setSearch(e.target.value)}
-                    className="pl-10"
-                    data-testid="input-search-products"
-                  />
-                </div>
+        {/* Toolbar */}
+        <Card>
+          <CardContent className="p-4 flex flex-col gap-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="relative">
+                <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+                <Input
+                  value={searchInput}
+                  onChange={(e) => setSearchInput(e.target.value)}
+                  placeholder="Buscar..."
+                  className="pl-9 w-64"
+                />
+              </div>
+              <Select value={campo} onValueChange={(v: any) => setCampo(v)}>
+                <SelectTrigger className="w-40"><SelectValue placeholder="Campo" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="sku_interno">SKU Interno</SelectItem>
+                  <SelectItem value="sku">SKU Externo</SelectItem>
+                  <SelectItem value="nombre">Producto</SelectItem>
+                </SelectContent>
+              </Select>
 
-                <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-                  <SelectTrigger className="w-full sm:w-56">
-                    <SelectValue placeholder="Filtrar por categoría" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">Todas las categorías</SelectItem>
-                    {categories.map((category: string) => (
-                      <SelectItem key={category} value={category}>
-                        {category}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+              <Input placeholder="Marca" value={marca} onChange={(e) => setMarca(e.target.value)} className="w-40" />
+              <Input placeholder="Categoría" value={categoria} onChange={(e) => setCategoria(e.target.value)} className="w-40" />
 
-                <Select value={statusFilter} onValueChange={setStatusFilter}>
-                  <SelectTrigger className="w-full sm:w-48">
-                    <SelectValue placeholder="Estado" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">Todos</SelectItem>
-                    <SelectItem value="true">Activos</SelectItem>
-                    <SelectItem value="false">Inactivos</SelectItem>
-                  </SelectContent>
-                </Select>
+              <div className="flex items-center gap-2">
+                <Label htmlFor="stk0" className="text-sm">Stock=0</Label>
+                <input id="stk0" type="checkbox" checked={stockEq0} onChange={(e) => { setStockEq0(e.target.checked); if (e.target.checked) setStockGte(undefined); }} />
+              </div>
+              <div className="flex items-center gap-2">
+                <Label htmlFor="stkg" className="text-sm">Stock ≥</Label>
+                <Input id="stkg" type="number" className="w-24"
+                  value={stockGte ?? ""}
+                  onChange={(e) => { const v = e.target.value === '' ? undefined : Number(e.target.value); setStockGte(Number.isFinite(v as any) ? v as any : undefined); if (v !== undefined) setStockEq0(false); }} />
               </div>
 
-              <div className="flex space-x-2">
-                <Button
-                  onClick={() => setIsCreateModalOpen(true)}
-                  className="bg-blue-600 hover:bg-blue-700"
-                  data-testid="button-create-product"
-                >
-                  <Plus className="mr-2 h-4 w-4" />
-                  Nuevo Producto
-                </Button>
+              <Select value={`${sortField}:${sortOrder}`} onValueChange={(v) => { const [f, d] = v.split(":"); setSortField(f); setSortOrder(d as any); }}>
+                <SelectTrigger className="w-44"><SelectValue placeholder="Ordenar" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="nombre_producto:asc">Producto ↑</SelectItem>
+                  <SelectItem value="nombre_producto:desc">Producto ↓</SelectItem>
+                  <SelectItem value="sku:asc">SKU Externo ↑</SelectItem>
+                  <SelectItem value="sku:desc">SKU Externo ↓</SelectItem>
+                </SelectContent>
+              </Select>
 
-                <Button variant="outline">
-                  <Upload className="mr-2 h-4 w-4" />
-                  Importar CSV
-                </Button>
+              <Button variant="outline" onClick={clearFilters}>Limpiar</Button>
 
-                <Button variant="outline">
-                  <Download className="mr-2 h-4 w-4" />
-                  Exportar
+              <div className="ml-auto flex items-center gap-2">
+                <input id="file-catalogo" type="file" className="hidden" onChange={onFilePick} />
+                <Button variant="outline" onClick={() => document.getElementById('file-catalogo')?.click()} disabled={importMutation.isPending}>
+                  <Upload className="h-4 w-4 mr-1" /> Importar
                 </Button>
+                <Button variant="outline" onClick={() => handleExport('csv')}><Download className="h-4 w-4 mr-1" />CSV</Button>
+                <Button variant="outline" onClick={() => handleExport('xlsx')}>XLSX</Button>
+                <Button variant="ghost" onClick={() => downloadCatalogTemplate('csv')}>Plantilla</Button>
               </div>
+            </div>
+
+            {/* Badges de filtros activos */}
+            <div className="flex flex-wrap gap-2">
+              {q && (
+                <Badge variant="secondary">Buscar: {q}<button className="ml-2" onClick={() => { setSearchInput(""); setQ(""); }}><X className="h-3 w-3" /></button></Badge>
+              )}
+              {marca && (<Badge variant="secondary">Marca: {marca}<button className="ml-2" onClick={() => setMarca("") }><X className="h-3 w-3" /></button></Badge>)}
+              {categoria && (<Badge variant="secondary">Categoría: {categoria}<button className="ml-2" onClick={() => setCategoria("") }><X className="h-3 w-3" /></button></Badge>)}
+              {stockEq0 && (<Badge variant="secondary">Stock=0<button className="ml-2" onClick={() => setStockEq0(false)}><X className="h-3 w-3" /></button></Badge>)}
+              {typeof stockGte === 'number' && (<Badge variant="secondary">Stock ≥ {stockGte}<button className="ml-2" onClick={() => setStockGte(undefined)}><X className="h-3 w-3" /></button></Badge>)}
             </div>
           </CardContent>
         </Card>
 
-        {/* Tabla de productos */}
+        {/* Tabla */}
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center justify-between">
-              <span>Productos ({totalProducts})</span>
-              <div className="text-sm text-gray-500">
-                Página {page} de {Math.ceil(totalProducts / pageSize) || 1}
-              </div>
+              <span>Productos ({total})</span>
+              <div className="text-sm text-muted-foreground">Página {page} de {totalPages}</div>
             </CardTitle>
           </CardHeader>
-          <CardContent>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Producto</TableHead>
-                  <TableHead>SKU</TableHead>
-                  <TableHead>Categoría</TableHead>
-                  <TableHead>Precio</TableHead>
-                  <TableHead>Inventario</TableHead>
-                  <TableHead>Estado</TableHead>
-                  <TableHead>Acciones</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {products.map((product: ProductCatalog) => (
-                  <TableRow key={product.id}>
-                    <TableCell>
-                      <div>
-                        <div className="font-medium">{product.nombre}</div>
-                        {product.descripcion && (
-                          <div className="text-sm text-gray-500 truncate max-w-xs">
-                            {product.descripcion}
-                          </div>
-                        )}
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant="outline">{product.sku}</Badge>
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant="secondary">{product.categoria || "Sin categoría"}</Badge>
-                    </TableCell>
-                    <TableCell>
-                      {product.precio ? `$${product.precio.toLocaleString()} MXN` : "No definido"}
-                    </TableCell>
-                    <TableCell>
-                      <Badge 
-                        variant={
-                          !product.inventario ? "destructive" : 
-                          product.inventario < 10 ? "outline" : "default"
-                        }
-                      >
-                        {product.inventario || 0}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant={product.activo ? "default" : "secondary"}>
-                        {product.activo ? "Activo" : "Inactivo"}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex space-x-2">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleEditProduct(product)}
-                          data-testid={`button-edit-${product.id}`}
-                        >
-                          <Edit3 className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleDeleteProduct(product)}
-                          className="text-red-600 hover:text-red-700"
-                          data-testid={`button-delete-${product.id}`}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    </TableCell>
+          <CardContent className="p-0">
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Sku Externo</TableHead>
+                    <TableHead>Sku Interno</TableHead>
+                    <TableHead>Producto</TableHead>
+                    <TableHead>Costo</TableHead>
+                    <TableHead>Inventario</TableHead>
+                    <TableHead>Estado</TableHead>
+                    <TableHead>Acciones</TableHead>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+                </TableHeader>
+                <TableBody>
+                  {isLoading ? (
+                    <TableRow><TableCell colSpan={7} className="p-6 text-center text-muted-foreground">Cargando...</TableCell></TableRow>
+                  ) : items.length === 0 ? (
+                    <TableRow><TableCell colSpan={7} className="p-6 text-center text-muted-foreground">Sin resultados</TableCell></TableRow>
+                  ) : items.map((p) => (
+                    <TableRow key={`${p.sku || ''}-${p.sku_interno || ''}`}>
+                      <TableCell className="font-mono text-sm">{p.sku}</TableCell>
+                      <TableCell className="font-mono text-sm">{p.sku_interno}</TableCell>
+                      <TableCell className="max-w-xs truncate">{p.nombre_producto}</TableCell>
+                      <TableCell>${typeof p.costo === 'number' ? p.costo.toFixed(2) : '0.00'}</TableCell>
+                      <TableCell><Badge variant={(p.stock ?? 0) > 0 ? 'default' : 'destructive'}>{p.stock ?? 0}</Badge></TableCell>
+                      <TableCell>
+                        {((p.estado ?? ((p.stock ?? 0) > 0 ? 'ACTIVO' : 'INACTIVO')) === 'ACTIVO') ? (
+                          <Badge variant="default">ACTIVO</Badge>
+                        ) : (
+                          <Badge variant="secondary">INACTIVO</Badge>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        <Button size="sm" variant="ghost">Ver</Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
 
             {/* Paginación */}
-            {totalProducts > pageSize && (
-              <div className="flex items-center justify-between mt-4">
-                <div className="text-sm text-gray-500">
-                  Mostrando {((page - 1) * pageSize) + 1} a {Math.min(page * pageSize, totalProducts)} de {totalProducts} productos
-                </div>
-                <div className="flex space-x-2">
-                  <Button
-                    variant="outline"
-                    onClick={() => setPage(page - 1)}
-                    disabled={page <= 1}
-                    data-testid="button-prev-page"
-                  >
-                    Anterior
-                  </Button>
-                  <Button
-                    variant="outline"
-                    onClick={() => setPage(page + 1)}
-                    disabled={page >= Math.ceil(totalProducts / pageSize)}
-                    data-testid="button-next-page"
-                  >
-                    Siguiente
-                  </Button>
-                </div>
+            <div className="flex items-center justify-between p-4">
+              <div className="text-sm text-muted-foreground">Mostrando {items.length === 0 ? 0 : Math.min((page-1)*pageSize + 1, total)} - {Math.min(page*pageSize, total)} de {total}</div>
+              <div className="flex items-center gap-2">
+                <Select value={String(pageSize)} onValueChange={(v) => setPageSize(Number(v))}>
+                  <SelectTrigger className="w-20"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="50">50</SelectItem>
+                    <SelectItem value="100">100</SelectItem>
+                    <SelectItem value="150">150</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Button variant="outline" size="sm" onClick={() => setPage((p) => Math.max(1, p-1))} disabled={page === 1}>Prev</Button>
+                <Button variant="outline" size="sm" onClick={() => setPage((p) => Math.min(totalPages, p+1))} disabled={page >= totalPages}>Next</Button>
               </div>
-            )}
+            </div>
           </CardContent>
         </Card>
-
-        {/* Modal de creación/edición */}
-        <ProductModal
-          isOpen={isCreateModalOpen || isEditModalOpen}
-          onClose={() => {
-            setIsCreateModalOpen(false);
-            setIsEditModalOpen(false);
-            setSelectedProduct(null);
-          }}
-          product={selectedProduct}
-          onSubmit={(data) => {
-            if (selectedProduct) {
-              updateProductMutation.mutate({ id: selectedProduct.id, updates: data });
-            } else {
-              createProductMutation.mutate(data);
-            }
-          }}
-          isLoading={createProductMutation.isPending || updateProductMutation.isPending}
-        />
       </div>
     </div>
   );
 }
 
-// Componente del modal para crear/editar productos
-interface ProductModalProps {
-  isOpen: boolean;
-  onClose: () => void;
-  product?: ProductCatalog | null;
-  onSubmit: (data: Partial<ProductCatalog>) => void;
-  isLoading: boolean;
-}
-
-function ProductModal({ isOpen, onClose, product, onSubmit, isLoading }: ProductModalProps) {
-  const [formData, setFormData] = useState<Partial<ProductCatalog>>({
-    nombre: "",
-    sku: "",
-    descripcion: "",
-    precio: 0,
-    categoria: "",
-    marca: "",
-    activo: true,
-    inventario: 0,
-  });
-
-  React.useEffect(() => {
-    if (product) {
-      setFormData(product);
-    } else {
-      setFormData({
-        nombre: "",
-        sku: "",
-        descripcion: "",
-        precio: 0,
-        categoria: "",
-        marca: "",
-        activo: true,
-        inventario: 0,
-      });
-    }
-  }, [product]);
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    onSubmit(formData);
-  };
-
-  return (
-    <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="max-w-md">
-        <DialogHeader>
-          <DialogTitle>
-            {product ? "Editar Producto" : "Nuevo Producto"}
-          </DialogTitle>
-        </DialogHeader>
-
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <Label htmlFor="nombre">Nombre *</Label>
-            <Input
-              id="nombre"
-              value={formData.nombre || ""}
-              onChange={(e) => setFormData(prev => ({ ...prev, nombre: e.target.value }))}
-              required
-              data-testid="input-product-name"
-            />
-          </div>
-
-          <div>
-            <Label htmlFor="sku">SKU *</Label>
-            <Input
-              id="sku"
-              value={formData.sku || ""}
-              onChange={(e) => setFormData(prev => ({ ...prev, sku: e.target.value }))}
-              required
-              data-testid="input-product-sku"
-            />
-          </div>
-
-          <div>
-            <Label htmlFor="descripcion">Descripción</Label>
-            <Textarea
-              id="descripcion"
-              value={formData.descripcion || ""}
-              onChange={(e) => setFormData(prev => ({ ...prev, descripcion: e.target.value }))}
-              rows={3}
-              data-testid="textarea-product-description"
-            />
-          </div>
-
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <Label htmlFor="precio">Precio</Label>
-              <Input
-                id="precio"
-                type="number"
-                step="0.01"
-                value={formData.precio || ""}
-                onChange={(e) => setFormData(prev => ({ ...prev, precio: parseFloat(e.target.value) || 0 }))}
-                data-testid="input-product-price"
-              />
-            </div>
-
-            <div>
-              <Label htmlFor="inventario">Inventario</Label>
-              <Input
-                id="inventario"
-                type="number"
-                value={formData.inventario || ""}
-                onChange={(e) => setFormData(prev => ({ ...prev, inventario: parseInt(e.target.value) || 0 }))}
-                data-testid="input-product-inventory"
-              />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <Label htmlFor="categoria">Categoría</Label>
-              <Input
-                id="categoria"
-                value={formData.categoria || ""}
-                onChange={(e) => setFormData(prev => ({ ...prev, categoria: e.target.value }))}
-                data-testid="input-product-category"
-              />
-            </div>
-
-            <div>
-              <Label htmlFor="marca">Marca</Label>
-              <Input
-                id="marca"
-                value={formData.marca || ""}
-                onChange={(e) => setFormData(prev => ({ ...prev, marca: e.target.value }))}
-                data-testid="input-product-brand"
-              />
-            </div>
-          </div>
-
-          <div className="flex items-center space-x-2">
-            <input
-              type="checkbox"
-              id="activo"
-              checked={formData.activo || false}
-              onChange={(e) => setFormData(prev => ({ ...prev, activo: e.target.checked }))}
-              data-testid="checkbox-product-active"
-            />
-            <Label htmlFor="activo">Producto activo</Label>
-          </div>
-
-          <div className="flex justify-end space-x-2 pt-4">
-            <Button type="button" variant="outline" onClick={onClose}>
-              Cancelar
-            </Button>
-            <Button type="submit" disabled={isLoading}>
-              {isLoading ? "Guardando..." : product ? "Actualizar" : "Crear"}
-            </Button>
-          </div>
-        </form>
-      </DialogContent>
-    </Dialog>
-  );
-}

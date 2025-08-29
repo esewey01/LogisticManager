@@ -1585,6 +1585,19 @@ var init_storage = __esm({
       COALESCE(o.shopify_created_at, o.created_at, NOW()) as "createdAt",
       COALESCE(COUNT(oi.id), 0) as "itemsCount",
       COALESCE(ARRAY_AGG(oi.sku) FILTER (WHERE oi.sku IS NOT NULL), ARRAY[]::text[]) as skus,
+      COALESCE(
+        JSON_AGG(
+          JSON_BUILD_OBJECT(
+            'sku', oi.sku,
+            'quantity', oi.quantity,
+            'price', oi.price,
+            'vendorFromShop', p.vendor,
+            'catalogBrand', cp.marca,
+            'stockFromCatalog', cp.stock
+          )
+        ) FILTER (WHERE oi.id IS NOT NULL),
+        '[]'::json
+      ) as items,
       CASE
         WHEN LOWER(COALESCE(o.fulfillment_status, '')) IN ('', 'unfulfilled') THEN 'SIN_GESTIONAR'
         WHEN LOWER(COALESCE(o.fulfillment_status, '')) = 'fulfilled' THEN 'GESTIONADA'
@@ -1598,6 +1611,8 @@ var init_storage = __esm({
       END as "isManaged"
     FROM orders o
     LEFT JOIN order_items oi ON oi.order_id = o.id
+    LEFT JOIN products p ON p.id_shopify = oi.shopify_product_id AND p.shop_id = o.shop_id
+    LEFT JOIN catalogo_productos cp ON cp.sku_interno = oi.sku
     ${whereClause ? sql`WHERE ${whereClause}` : sql``}
     GROUP BY o.id, o.order_id, o.name, o.customer_name, o.total_amount, 
              o.fulfillment_status, o.shopify_created_at, o.created_at, o.shop_id
@@ -1788,69 +1803,135 @@ var init_storage = __esm({
         return { ok: true };
       }
       async importOrdersFromRows(rows) {
+        const toDecimal = (v) => v == null || v === "" ? null : typeof v === "number" ? v : Number(String(v).replace(/,/g, ""));
+        const toDate = (v) => v ? new Date(String(v)) : null;
+        const toArray = (v) => Array.isArray(v) ? v : typeof v === "string" ? v.split(",").map((s) => s.trim()).filter(Boolean) : null;
         const results = [];
-        let ok = 0, skipped = 0, errors = 0;
+        const groups = /* @__PURE__ */ new Map();
+        const mark = (rowIndex, status, extra = {}) => {
+          results.push({ rowIndex, status, ...extra });
+        };
         for (let i = 0; i < rows.length; i++) {
           const row = rows[i];
-          try {
-            const shopIdRaw = row["shopId"];
-            const orderIdRaw = row["orderId"];
-            if (shopIdRaw == null || orderIdRaw == null) {
-              skipped++;
-              results.push({
-                rowIndex: i,
-                status: "skipped",
-                message: "Faltan columnas obligatorias: shopId y/o orderId"
-              });
-              continue;
-            }
-            const shopId = Number(shopIdRaw);
-            const orderId = String(orderIdRaw).trim();
-            if (!Number.isInteger(shopId) || !orderId) {
-              skipped++;
-              results.push({
-                rowIndex: i,
-                status: "skipped",
-                message: "Valores inv\xE1lidos en shopId/orderId",
-                field: !Number.isInteger(shopId) ? "shopId" : "orderId",
-                value: !Number.isInteger(shopId) ? shopIdRaw : orderIdRaw
-              });
-              continue;
-            }
-            const existente = await this.getOrderByShopifyId(orderId, shopId);
-            const toDecimal = (v) => v == null || v === "" ? null : typeof v === "number" ? v : Number(String(v).replace(/,/g, ""));
-            const toDate = (v) => v ? new Date(String(v)) : null;
-            const toArray = (v) => Array.isArray(v) ? v : typeof v === "string" ? v.split(",").map((s) => s.trim()).filter(Boolean) : null;
-            const payload = {
+          const shopIdRaw = row["shopId"];
+          const orderIdRaw = row["orderId"];
+          if (shopIdRaw == null || orderIdRaw == null) {
+            mark(i, "skipped", { message: "Faltan columnas obligatorias: shopId y/o orderId" });
+            continue;
+          }
+          const shopId = Number(shopIdRaw);
+          const orderId = String(orderIdRaw).trim();
+          if (!Number.isInteger(shopId) || !orderId) {
+            mark(i, "skipped", {
+              message: "Valores inv\xE1lidos en shopId/orderId",
+              field: !Number.isInteger(shopId) ? "shopId" : "orderId",
+              value: !Number.isInteger(shopId) ? shopIdRaw : orderIdRaw
+            });
+            continue;
+          }
+          const key = `${shopId}::${orderId}`;
+          if (!groups.has(key)) {
+            groups.set(key, {
               shopId,
               orderId,
-              name: row["name"] ?? null,
-              orderNumber: row["orderNumber"] ?? null,
-              customerName: row["customerName"] ?? null,
-              customerEmail: row["customerEmail"] ?? null,
-              subtotalPrice: toDecimal(row["subtotalPrice"]),
-              totalAmount: toDecimal(row["totalAmount"]),
-              currency: row["currency"] ?? null,
-              financialStatus: row["financialStatus"] ?? null,
-              fulfillmentStatus: row["fulfillmentStatus"] ?? null,
-              tags: toArray(row["tags"]),
-              createdAt: toDate(row["createdAt"]) ?? void 0,
-              shopifyCreatedAt: toDate(row["shopifyCreatedAt"]) ?? void 0
-            };
-            if (existente) {
-              await this.updateOrder(Number(existente.id), payload);
-            } else {
-              await this.createOrder(payload);
-            }
-            ok++;
-            results.push({ rowIndex: i, status: "ok", orderId });
-          } catch (e) {
-            errors++;
-            results.push({
-              rowIndex: i,
-              status: "error",
-              message: e?.message || "Error no identificado"
+              rows: [],
+              payload: {
+                shopId,
+                orderId
+              },
+              items: []
             });
+          }
+          const g = groups.get(key);
+          g.rows.push(i);
+          const mergeField = (k, v) => {
+            if (v === void 0) return;
+            const cur = g.payload[k];
+            if (cur === void 0 || cur === null) g.payload[k] = v;
+          };
+          mergeField("name", row["name"] ?? null);
+          mergeField("orderNumber", row["orderNumber"] ?? null);
+          mergeField("customerName", row["customerName"] ?? null);
+          mergeField("customerEmail", row["customerEmail"] ?? null);
+          mergeField("subtotalPrice", toDecimal(row["subtotalPrice"]));
+          mergeField("totalAmount", toDecimal(row["totalAmount"]));
+          mergeField("currency", row["currency"] ?? null);
+          mergeField("financialStatus", row["financialStatus"] ?? null);
+          mergeField("fulfillmentStatus", row["fulfillmentStatus"] ?? null);
+          mergeField("tags", toArray(row["tags"]));
+          mergeField("createdAt", toDate(row["createdAt"]) ?? void 0);
+          mergeField("shopifyCreatedAt", toDate(row["shopifyCreatedAt"]) ?? void 0);
+          if (row.hasOwnProperty("items") && row["items"] != null && String(row["items"]).trim() !== "") {
+            try {
+              const arr = Array.isArray(row["items"]) ? row["items"] : JSON.parse(String(row["items"]));
+              if (Array.isArray(arr)) {
+                for (const it of arr) {
+                  const sku = String(it?.sku ?? "").trim();
+                  const qty = Number(it?.quantity ?? it?.qty ?? 0);
+                  if (!sku || !Number.isFinite(qty) || qty <= 0) continue;
+                  const price = toDecimal(it?.price);
+                  const title = it?.title != null ? String(it.title) : null;
+                  g.items.push({ sku, quantity: qty, price, title });
+                }
+              }
+            } catch (e) {
+              mark(i, "error", { message: "items JSON inv\xE1lido" });
+            }
+          }
+          if (row.hasOwnProperty("sku") || row.hasOwnProperty("quantity")) {
+            const sku = (row["sku"] != null ? String(row["sku"]) : "").trim();
+            const qty = Number(row["quantity"] ?? 0);
+            if (sku && Number.isFinite(qty) && qty > 0) {
+              const price = toDecimal(row["price"]);
+              const title = row["title"] != null ? String(row["title"]) : null;
+              g.items.push({ sku, quantity: qty, price, title });
+            }
+          }
+        }
+        let ok = 0, skipped = results.filter((r) => r.status === "skipped").length, errors = results.filter((r) => r.status === "error").length;
+        for (const [, g] of groups) {
+          try {
+            const existente = await this.getOrderByShopifyId(g.orderId, g.shopId);
+            let orderPk;
+            if (existente) {
+              await this.updateOrder(Number(existente.id), g.payload);
+              orderPk = Number(existente.id);
+            } else {
+              const created = await this.createOrder(g.payload);
+              orderPk = Number(created.id);
+            }
+            const run = async () => {
+              await db.delete(orderItems).where(eq2(orderItems.orderId, orderPk));
+              if (g.items.length > 0) {
+                const values = g.items.map((it) => ({
+                  orderId: orderPk,
+                  sku: it.sku,
+                  quantity: it.quantity,
+                  price: it.price,
+                  title: it.title ?? null
+                }));
+                await db.insert(orderItems).values(values);
+              }
+            };
+            const txAny = db;
+            if (typeof txAny.transaction === "function") {
+              await txAny.transaction(async () => {
+                await run();
+              });
+            } else {
+              await run();
+            }
+            ok += g.rows.length;
+            for (const idx of g.rows) {
+              if (!results.find((r) => r.rowIndex === idx)) {
+                mark(idx, "ok", { orderId: g.orderId });
+              }
+            }
+          } catch (e) {
+            errors += g.rows.length;
+            for (const idx of g.rows) {
+              mark(idx, "error", { message: e?.message || "Error al guardar orden/\xEDtems", orderId: g.orderId });
+            }
           }
         }
         return {
@@ -2433,37 +2514,27 @@ var cancelOrder_exports = {};
 __export(cancelOrder_exports, {
   cancelShopifyOrderAndWait: () => cancelShopifyOrderAndWait
 });
-import fetch2 from "node-fetch";
 async function cancelShopifyOrderAndWait(args) {
   const { shop, token, apiVersion } = getShopifyCredentials(String(args.shopId));
-  const reasonEff = args.reason && String(args.reason).trim() ? args.reason : "OTHER";
-  const restockEff = typeof args.restock === "boolean" ? args.restock : true;
-  const notifyEff = !!args.email;
-  const refundMethod = args.refund ? { originalPaymentMethodsRefund: true } : void 0;
-  const staffNote = args.staffNote ? String(args.staffNote).slice(0, 255) : null;
-  const r = await fetch2(`https://${shop}/admin/api/${apiVersion}/graphql.json`, {
+  const r = await fetch(`https://${shop}/admin/api/${apiVersion}/graphql.json`, {
     method: "POST",
     headers: { "Content-Type": "application/json", "X-Shopify-Access-Token": token },
     body: JSON.stringify({
       query: ORDER_CANCEL_MUTATION,
       variables: {
         orderId: args.orderGid,
-        notifyCustomer: notifyEff,
-        refundMethod,
-        // opcional
-        restock: restockEff,
-        // Boolean!
-        reason: reasonEff,
-        // OrderCancelReason!
-        staffNote
-        // opcional
+        reason: args.reason || "OTHER",
+        staffNote: args.staffNote || null,
+        notifyCustomer: args.notifyCustomer === void 0 ? true : !!args.notifyCustomer,
+        restock: args.restock === void 0 ? true : !!args.restock,
+        refundMethod: args.refundToOriginal ? { originalPaymentMethodsRefund: true } : null
       }
     })
   });
   const data = await r.json();
-  const gqlErrors = data?.data?.orderCancel?.orderCancelUserErrors?.length ? data.data.orderCancel.orderCancelUserErrors : data?.data?.orderCancel?.userErrors?.length ? data.data.orderCancel.userErrors : data?.errors;
-  if (!r.ok || gqlErrors && gqlErrors.length) {
-    return { ok: false, stage: "request", errors: gqlErrors || [{ message: "Shopify cancel failed" }] };
+  const userErrors = data?.data?.orderCancel?.userErrors || data?.errors;
+  if (!r.ok || userErrors && userErrors.length) {
+    return { ok: false, stage: "request", errors: userErrors || [{ message: "Shopify cancel failed" }] };
   }
   const jobId = data?.data?.orderCancel?.job?.id;
   if (!jobId) {
@@ -2473,7 +2544,7 @@ async function cancelShopifyOrderAndWait(args) {
   const deadlineMs = 2e4;
   let delay = 500;
   while (Date.now() - started < deadlineMs) {
-    const jr = await fetch2(`https://${shop}/admin/api/${apiVersion}/graphql.json`, {
+    const jr = await fetch(`https://${shop}/admin/api/${apiVersion}/graphql.json`, {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-Shopify-Access-Token": token },
       body: JSON.stringify({ query: JOB_QUERY, variables: { id: jobId } })
@@ -2484,7 +2555,7 @@ async function cancelShopifyOrderAndWait(args) {
     await new Promise((res) => setTimeout(res, delay));
     delay = Math.min(delay + 250, 1500);
   }
-  const or3 = await fetch2(`https://${shop}/admin/api/${apiVersion}/graphql.json`, {
+  const or3 = await fetch(`https://${shop}/admin/api/${apiVersion}/graphql.json`, {
     method: "POST",
     headers: { "Content-Type": "application/json", "X-Shopify-Access-Token": token },
     body: JSON.stringify({ query: ORDER_QUERY, variables: { id: args.orderGid } })
@@ -2502,7 +2573,7 @@ var init_cancelOrder = __esm({
     "use strict";
     init_shopifyEnv();
     ORDER_CANCEL_MUTATION = `
-mutation OrderCancel(
+mutation orderCancel(
   $orderId: ID!,
   $notifyCustomer: Boolean,
   $refundMethod: OrderCancelRefundMethodInput,
@@ -2517,9 +2588,8 @@ mutation OrderCancel(
     restock: $restock,
     reason: $reason,
     staffNote: $staffNote
-  ) {
-    job { id done }
-    orderCancelUserErrors { field message code }
+  ){
+    job { id }
     userErrors { field message }
   }
 }`;
@@ -4883,9 +4953,9 @@ async function registerRoutes(app) {
           orderGid: gid,
           reason: reasonEff,
           staffNote: staffNoteEff,
-          email: notifyCustomerEff,
+          notifyCustomer: notifyCustomerEff,
           restock: restockEff,
-          refund: refundEff
+          refundToOriginal: refundEff
         });
         if (!result.ok) {
           console.warn("[cancel-order] shopify failed", result);
@@ -4929,10 +4999,16 @@ async function registerRoutes(app) {
   });
   const upload = multer({
     storage: multer.memoryStorage(),
-    limits: { fileSize: 5 * 1024 * 1024 },
+    limits: { fileSize: 10 * 1024 * 1024 },
     fileFilter: (_req, file, cb) => {
-      const ok = file.mimetype === "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" || file.mimetype === "application/vnd.ms-excel";
-      if (!ok) return cb(new Error("Formato de archivo no permitido. Sube un .xlsx/.xls"));
+      const allowed = /* @__PURE__ */ new Set([
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "application/vnd.ms-excel",
+        "text/csv",
+        "application/csv"
+      ]);
+      const ok = allowed.has(file.mimetype);
+      if (!ok) return cb(new Error("415: Tipo de archivo no soportado. Sube CSV o Excel (.xlsx/.xls)."));
       cb(null, true);
     }
   });
@@ -4949,6 +5025,35 @@ async function registerRoutes(app) {
         const ws = wb.Sheets[wb.SheetNames[0]];
         if (!ws) return res.status(400).json({ message: "El Excel no tiene hojas" });
         const rawRows = xlsx.utils.sheet_to_json(ws, { defval: null, raw: true });
+        {
+          const firstRow2 = rawRows[0] ?? {};
+          const modeA = Object.prototype.hasOwnProperty.call(firstRow2, "items");
+          const requiredA = ["shopId", "orderId", "items"];
+          const requiredB = ["shopId", "orderId", "sku", "quantity"];
+          const required = modeA ? requiredA : requiredB;
+          const missing2 = required.filter((c) => !(c in firstRow2));
+          if (missing2.length) {
+            return res.status(400).json({
+              message: "Faltan columnas obligatorias",
+              missing: missing2,
+              requiredTemplate: (modeA ? requiredA : requiredB).concat([
+                "name",
+                "orderNumber",
+                "customerName",
+                "customerEmail",
+                "subtotalPrice",
+                "totalAmount",
+                "currency",
+                "financialStatus",
+                "fulfillmentStatus",
+                "tags",
+                "createdAt",
+                "shopifyCreatedAt",
+                ...modeA ? [] : ["price", "cost", "itemCurrency", "title"]
+              ])
+            });
+          }
+        }
         const requiredColumns = ["shopId", "orderId"];
         const firstRow = rawRows[0] ?? {};
         const missing = requiredColumns.filter((c) => !(c in firstRow));

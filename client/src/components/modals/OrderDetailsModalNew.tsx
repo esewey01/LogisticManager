@@ -431,7 +431,7 @@ export default function OrderDetailsModalNew({ orderId, isOpen, onClose }: Order
                                 <span className="font-medium truncate">
                                   {it.title || it.nombreProducto || "Producto"}
                                 </span>
-                                <div className="flex flex-wrap items-center gap-2 mt-1 text-xs text-gray-600">
+                                <div className="flex flex-wrap items-center gap-2 mt-1 text-xs">
                                   {it.vendor && <Badge variant="outline">{it.vendor}</Badge>}
                                   {it.productType && <Badge variant="outline">{it.productType}</Badge>}
                                   {it.barcode && (
@@ -529,29 +529,29 @@ export default function OrderDetailsModalNew({ orderId, isOpen, onClose }: Order
               </CardHeader>
               <CardContent className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 <div className="space-y-1">
-                  <span className="font-semibold text-gray-600">ID pedido:</span>
+                  <span className="font-semibold ">ID pedido:</span>
                   <p className="text-gray-900 font-mono">{order.orderId}</p>
                 </div>
                 <div className="space-y-1">
-                  <span className="font-semibold text-gray-600">Canal:</span>
+                  <span className="font-semibold ">Canal:</span>
                   <div className="flex items-center gap-2">
                     <Store className="w-4 h-4 text-purple-600" />
                     <span>{getChannelName(order.shopId)}</span>
                   </div>
                 </div>
                 <div className="space-y-1">
-                  <span className="font-semibold text-gray-600">Cliente:</span>
+                  <span className="font-semibold ">Cliente:</span>
                   <p className="text-gray-900">{order.customerName || "No especificado"}</p>
                 </div>
                 <div className="space-y-1">
-                  <span className="font-semibold text-gray-600">Fecha:</span>
+                  <span className="font-semibold ">Fecha:</span>
                   <div className="flex items-center gap-2">
                     <Calendar className="w-4 h-4 text-green-600" />
                     <span>{new Date(order.shopifyCreatedAt || order.createdAt).toLocaleString("es-MX")}</span>
                   </div>
                 </div>
                 <div className="space-y-1 lg:col-span-2">
-                  <span className="font-semibold text-gray-600">Dirección:</span>
+                  <span className="font-semibold ">Dirección:</span>
                   <div className="flex items-start gap-2">
                     <MapPin className="w-4 h-4 text-red-600 mt-0.5" />
                     <span className="text-sm">
@@ -588,7 +588,7 @@ export default function OrderDetailsModalNew({ orderId, isOpen, onClose }: Order
                 <CardContent className="space-y-3">
                   {order.subtotalPrice && (
                     <div className="flex justify-between">
-                      <span className="text-gray-600">Subtotal:</span>
+                      <span className="">Subtotal:</span>
                       <span className="font-mono">
                         {formatCurrency(order.subtotalPrice, order.currency ?? "MXN")}
                       </span>
@@ -616,18 +616,18 @@ export default function OrderDetailsModalNew({ orderId, isOpen, onClose }: Order
                 </CardHeader>
                 <CardContent className="space-y-4">
                   <div>
-                    <span className="font-semibold text-gray-600 block mb-2">Estado de gestión:</span>
+                    <span className="font-semibold  block mb-2">Estado de gestión:</span>
                     {getStatusBadge(order.fulfillmentStatus)}
                   </div>
                   {order.financialStatus && (
                     <div>
-                      <span className="font-semibold text-gray-600 block mb-2">Estado financiero:</span>
+                      <span className="font-semibold  block mb-2">Estado financiero:</span>
                       <Badge variant="outline">{order.financialStatus}</Badge>
                     </div>
                   )}
                   {(order.hasTicket || order.ticketNumber) && (
                     <div>
-                      <span className="font-semibold text-gray-600 block mb-2">Ticket:</span>
+                      <span className="font-semibold  block mb-2">Ticket:</span>
                       <Badge className="gap-1 bg-indigo-50 text-indigo-700">
                         <Ticket className="h-3.5 w-3.5" />
                         {order.ticketNumber || "Registrado"}
@@ -636,7 +636,7 @@ export default function OrderDetailsModalNew({ orderId, isOpen, onClose }: Order
                   )}
                   {order.tags && order.tags.length > 0 && (
                     <div>
-                      <span className="font-semibold text-gray-600 block mb-2">Etiquetas:</span>
+                      <span className="font-semibold  block mb-2">Etiquetas:</span>
                       <div className="flex flex-wrap gap-1">
                         {order.tags.map((tag, i) => (
                           <Badge key={i} variant="secondary" className="text-xs">{tag}</Badge>
@@ -646,7 +646,7 @@ export default function OrderDetailsModalNew({ orderId, isOpen, onClose }: Order
                   )}
                   {order.orderNote && (
                     <div>
-                      <span className="font-semibold text-gray-600 block mb-2">Nota:</span>
+                      <span className="font-semibold  block mb-2">Nota:</span>
                       <p className="text-sm bg-gray-50 p-3 rounded border">{order.orderNote}</p>
                     </div>
                   )}

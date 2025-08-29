@@ -1,6 +1,20 @@
+import * as React from "react";
 import { useState, useRef, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { RefreshCw, ChevronLeft, ChevronRight, MoreHorizontal, Plus } from "lucide-react";
+import {
+  RefreshCw,
+  ChevronLeft,
+  ChevronRight,
+  MoreHorizontal,
+  Plus,
+  Filter,
+  Search,
+  X,
+  Eye,
+  Ticket,
+  Trash2,
+} from "lucide-react";
+
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -9,52 +23,43 @@ import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
-
 import OrderDetailsModalNew from "@/components/modals/OrderDetailsModalNew";
 import CancelOrderModal from "@/components/modals/CancelOrderModal";
 import ImportOrdersModal from "@/components/modals/ImportOrdersModal";
-import * as React from "react";
-import { Filter, Search, X } from "lucide-react";
-import { Eye, Ticket, Trash2 } from "lucide-react";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
-//import { MlgPingBox } from "@/components/MlgPingBox"; // MLG-INTEGRATION
-//import { MlgTestPanel } from "@/components/MlgTestPanel"; // MLG-INTEGRATION
-
-import {
-  Popover,
-  PopoverTrigger,
-  PopoverContent,
-} from "@/components/ui/popover";
+import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
 import { Separator } from "@/components/ui/separator";
 import { Label } from "@/components/ui/label";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
+// =================== Tipos ===================
+type OrderItemEnriched = {
+  sku?: string | null;
+  price?: number | null;
+  quantity?: number | null;
+  vendorFromShop?: string | null;   // products.vendor
+  catalogBrand?: string | null;     // catalogo_productos.marca
+  stockFromCatalog?: number | null; // catalogo_productos.stock
+  stockState?: "Stock Out" | "Apartar" | "OK" | "Desconocido";
+};
 
 type OrderRow = {
-  id: number | string
-  name: string
-  customerName: string | null
-  channelId: number | null
-  totalAmount: number | null
-  fulfillmentStatus: "FULFILLED" | "UNFULFILLED" | string | null
-  createdAt: string
-  uiStatus: "SIN_GESTIONAR" | "GESTIONADA" | "ERROR"
-  itemsCount: number
-  skus: string[]
+  id: number | string;
+  name: string;
+  customerName: string | null;
+  channelId: number | string | null;
+  totalAmount: number | null;
+  fulfillmentStatus: string | null; // "FULFILLED" | "UNFULFILLED" | "restocked" | ...
+  createdAt: string;
+  items?: OrderItemEnriched[] | string;
+  uiStatus?: "SIN_GESTIONAR" | "GESTIONADA" | "ERROR";
 };
 
 type OrdersResp = {
-  rows: OrderRow[]
-  total: number
-  page: number
-  pageSize: number
+  rows: OrderRow[];
+  total: number;
+  page: number;
+  pageSize: number;
 };
 
 type Channel = { id: number | string; name: string; code?: string; color?: string; icon?: string };
@@ -66,7 +71,7 @@ const Pagination = ({
   onPageChange,
   pageSize,
   onPageSizeChange,
-  totalItems
+  totalItems,
 }: {
   currentPage: number;
   totalPages: number;
@@ -84,20 +89,13 @@ const Pagination = ({
     for (let i = Math.max(2, currentPage - delta); i <= Math.min(totalPages - 1, currentPage + delta); i++) {
       range.push(i);
     }
-
-    if (currentPage - delta > 2) {
-      rangeWithDots.push(1, '...');
-    } else {
-      rangeWithDots.push(1);
-    }
+    if (currentPage - delta > 2) rangeWithDots.push(1, "...");
+    else rangeWithDots.push(1);
 
     rangeWithDots.push(...range);
 
-    if (currentPage + delta < totalPages - 1) {
-      rangeWithDots.push('...', totalPages);
-    } else if (totalPages > 1) {
-      rangeWithDots.push(totalPages);
-    }
+    if (currentPage + delta < totalPages - 1) rangeWithDots.push("...", totalPages);
+    else if (totalPages > 1) rangeWithDots.push(totalPages);
 
     return rangeWithDots;
   };
@@ -106,15 +104,15 @@ const Pagination = ({
     <div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-4">
       <div className="flex items-center gap-2">
         <span className="text-sm text-gray-700">
-          Mostrando {totalItems === 0 ? 0 : Math.min((currentPage - 1) * pageSize + 1, totalItems)} - {Math.min(currentPage * pageSize, totalItems)} de {totalItems} resultados
+          Mostrando {totalItems === 0 ? 0 : Math.min((currentPage - 1) * pageSize + 1, totalItems)} -{" "}
+          {Math.min(currentPage * pageSize, totalItems)} de {totalItems} resultados
         </span>
       </div>
-
       <div className="flex flex-col sm:flex-row items-center gap-4">
         <div className="flex items-center gap-2">
           <span className="text-sm text-gray-700">Filas por página:</span>
           <Select value={pageSize.toString()} onValueChange={(value) => onPageSizeChange(Number(value))}>
-            <SelectTrigger className="w-[80px]">
+            <SelectTrigger className="h-8 w-[80px]">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -124,7 +122,6 @@ const Pagination = ({
             </SelectContent>
           </Select>
         </div>
-
         <div className="flex items-center gap-1">
           <Button
             variant="outline"
@@ -135,25 +132,23 @@ const Pagination = ({
           >
             <ChevronLeft className="h-4 w-4" />
           </Button>
-
-          {getPageNumbers().map((page, index) => (
-            typeof page === 'number' ? (
+          {getPageNumbers().map((p, index) =>
+            typeof p === "number" ? (
               <Button
                 key={index}
-                variant={currentPage === page ? "default" : "outline"}
+                variant={currentPage === p ? "default" : "outline"}
                 size="sm"
-                onClick={() => onPageChange(page)}
+                onClick={() => onPageChange(p)}
                 className="h-8 w-8 p-0"
               >
-                {page}
+                {p}
               </Button>
             ) : (
               <div key={index} className="h-8 w-8 flex items-center justify-center text-gray-500">
                 <MoreHorizontal className="h-4 w-4" />
               </div>
             )
-          ))}
-
+          )}
           <Button
             variant="outline"
             size="sm"
@@ -173,43 +168,47 @@ const Pagination = ({
 export default function Pedidos() {
   const [search, setSearch] = useState("");
   const [searchType, setSearchType] = useState<"all" | "sku" | "customer" | "product">("all");
-  const [statusFilter, setStatusFilter] = useState<"unmanaged" | "managed" | "all">("unmanaged");
+  const [statusFilter, setStatusFilter] = useState<"unmanaged" | "managed" | "all" | "cancelled">("unmanaged");
   const [channelFilter, setChannelFilter] = useState<string>("all");
+  const [brandFilter, setBrandFilter] = useState<string>("all");
+  const [stockFilter, setStockFilter] = useState<"all" | "out" | "apartar" | "ok">("all");
   const [selectedOrders, setSelectedOrders] = useState<Array<number | string>>([]);
-  const [selectedOrder, setSelectedOrder] = useState<OrderRow | null>(null);
   const [selectedOrderId, setSelectedOrderId] = useState<number | null>(null);
   const [cancelOrderId, setCancelOrderId] = useState<number | string | null>(null);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
+  const [sortField, setSortField] = useState<keyof OrderRow | null>(null);
+  const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
+  const [showImportModal, setShowImportModal] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   const queryClient = useQueryClient();
   const { toast } = useToast();
-  const [sortField, setSortField] = useState<keyof OrderRow | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const [showImportModal, setShowImportModal] = useState(false);
-  const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
 
-  // reset página y selección al cambiar filtros/busqueda
+  // reset página y selección al cambiar filtros/búsqueda
   useEffect(() => {
     setPage(1);
     setSelectedOrders([]);
-  }, [search, searchType, statusFilter, channelFilter, pageSize, sortField, sortOrder]);
+  }, [search, searchType, statusFilter, channelFilter, brandFilter, stockFilter, pageSize, sortField, sortOrder]);
 
   // ======= DATA =======
   const { data: ordersResp, isLoading } = useQuery<OrdersResp>({
-    queryKey: ["/api/orders", { page, pageSize, search, searchType, statusFilter, channelFilter, sortField, sortOrder }],
+    queryKey: [
+      "/api/orders",
+      { page, pageSize, search, searchType, statusFilter, channelFilter, brandFilter, stockFilter, sortField, sortOrder },
+    ],
     queryFn: async () => {
       const params = new URLSearchParams({
         page: page.toString(),
         pageSize: pageSize.toString(),
         ...(search && { search }),
-        ...(searchType !== 'all' && { searchType }),
-        // ✅ siempre envía el statusFilter para que no haya ambigüedad
-        ...(statusFilter && { statusFilter }),
-        // ✅ enviar 'channelId' que es lo que el backend espera
-        ...(channelFilter !== 'all' && { channelId: String(channelFilter) }),
+        ...(searchType !== "all" && { searchType }),
+        ...(statusFilter && { statusFilter }), // explícito
+        ...(channelFilter !== "all" && { channelId: String(channelFilter) }),
+        ...(brandFilter !== "all" && brandFilter ? { brand: brandFilter } : {}),
+        ...(stockFilter !== "all" ? { stock_state: stockFilter } : {}),
         ...(sortField && { sortField: String(sortField), sortOrder }),
       });
-
       const res = await apiRequest("GET", `/api/orders?${params}`);
       return res.json();
     },
@@ -225,12 +224,21 @@ export default function Pedidos() {
     queryFn: async () => {
       const res = await apiRequest("GET", "/api/channels");
       return res.json();
-    }
+    },
   });
 
-  //
-  // ======= MUTATIONS =======
+  const { data: brands = [] } = useQuery<string[]>({
+    queryKey: ["/api/orders/brands", { channelFilter }],
+    queryFn: async () => {
+      const params = new URLSearchParams({
+        ...(channelFilter !== "all" ? { shopId: String(channelFilter) } : {}),
+      });
+      const res = await apiRequest("GET", `/api/orders/brands?${params}`);
+      return res.json();
+    },
+  });
 
+  // ======= MUTATIONS =======
   const updateOrderMutation = useMutation({
     mutationFn: async ({ orderId, updates }: { orderId: number | string; updates: Partial<OrderRow> }) => {
       await apiRequest("PATCH", `/api/orders/${orderId}`, updates);
@@ -241,31 +249,6 @@ export default function Pedidos() {
     },
   });
 
-  const filteredOrders = orders;
-
-  const getChannelInfo = (channelId: number | string) => {
-    const channel = channels.find((c: Channel) => String(c.id) === String(channelId));
-    return channel || { code: "N/A", name: "Desconocido", color: "#6B7280", icon: "fas fa-circle" };
-  };
-
-  const handleSelectOrder = (orderId: number | string, checked: boolean) => {
-    setSelectedOrders(prev =>
-      checked
-        ? Array.from(new Set([...prev, orderId]))
-        : prev.filter(id => id !== orderId)
-    );
-  };
-
-  const handleSelectAll = (checked: boolean) => {
-    if (checked) {
-      setSelectedOrders(filteredOrders.map((order: any) => order.id));
-    } else {
-      setSelectedOrders([]);
-    }
-  };
-
-  // ======= TICKETS =======
-  // 1) Masivo
   const createBulkTicketsMutation = useMutation({
     mutationFn: async (orderIds: (number | string)[]) => {
       const response = await apiRequest("POST", "/api/tickets/bulk", {
@@ -293,12 +276,6 @@ export default function Pedidos() {
     },
   });
 
-  const handleCreateTickets = () => {
-    if (selectedOrders.length === 0) return;
-    createBulkTicketsMutation.mutate(selectedOrders);
-  };
-
-  // 2) Individual
   const createTicketMutation = useMutation({
     mutationFn: async ({ orderId, notes }: { orderId: number | string; notes?: string }) => {
       const response = await apiRequest("POST", "/api/tickets", { orderId, notes });
@@ -315,10 +292,9 @@ export default function Pedidos() {
         description: error?.message || "No se pudo crear el ticket",
         variant: "destructive",
       });
-    }
+    },
   });
 
-  // ======= SYNC / EXPORT / IMPORT =======
   const syncOrdersMutation = useMutation({
     mutationFn: async () => {
       const response = await apiRequest("POST", "/api/integrations/shopify/sync-now");
@@ -344,24 +320,23 @@ export default function Pedidos() {
   const exportMutation = useMutation({
     mutationFn: async () => {
       const filters = {
-        statusFilter, // ✅ explícito
-        channelId: channelFilter !== 'all' ? String(channelFilter) : undefined, // ✅ unificado
+        statusFilter,
+        channelId: channelFilter !== "all" ? String(channelFilter) : undefined,
         search: search.trim() || undefined,
-        searchType: searchType !== 'all' ? searchType : undefined,
+        searchType: searchType !== "all" ? searchType : undefined,
       };
       const response = await apiRequest("POST", "/api/orders/export", filters);
       return response.blob();
     },
     onSuccess: (blob: Blob) => {
       const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
+      const a = document.createElement("a");
       a.href = url;
-      a.download = `ordenes_${new Date().toISOString().split('T')[0]}.xlsx`;
+      a.download = `ordenes_${new Date().toISOString().split("T")[0]}.xlsx`;
       document.body.appendChild(a);
       a.click();
       window.URL.revokeObjectURL(url);
       document.body.removeChild(a);
-
       toast({ title: "Exportación Completada", description: "Archivo Excel descargado exitosamente" });
     },
     onError: (error: any) => {
@@ -376,15 +351,12 @@ export default function Pedidos() {
   const importMutation = useMutation({
     mutationFn: async (file: File) => {
       const formData = new FormData();
-      formData.append('file', file);
-
-      const response = await fetch('/api/orders/import', {
-        method: 'POST',
+      formData.append("file", file);
+      const response = await fetch("/api/orders/import", {
+        method: "POST",
         body: formData,
       });
-
-      if (!response.ok) throw new Error('Error en la importación');
-
+      if (!response.ok) throw new Error("Error en la importación");
       return response.json();
     },
     onSuccess: (data: any) => {
@@ -392,7 +364,7 @@ export default function Pedidos() {
       queryClient.invalidateQueries({ queryKey: ["/api/dashboard/metrics"] });
       toast({
         title: "Importación Completada",
-        description: `${data.processed} órdenes procesadas. ${data.errors > 0 ? `${data.errors} errores encontrados.` : ''}`,
+        description: `${data.processed} órdenes procesadas. ${data.errors > 0 ? `${data.errors} errores encontrados.` : ""}`,
       });
     },
     onError: (error: any) => {
@@ -410,8 +382,76 @@ export default function Pedidos() {
     const file = event.target.files?.[0];
     if (file) {
       importMutation.mutate(file);
-      event.target.value = '';
+      event.target.value = "";
     }
+  };
+
+  const filteredOrders = orders;
+
+  const getChannelInfo = (channelId: number | string) => {
+    const channel = (channels as Channel[]).find((c) => String(c.id) === String(channelId));
+    return channel || { code: "N/A", name: "Desconocido", color: "#6B7280", icon: "fas fa-circle" };
+  };
+
+  const handleSelectOrder = (orderId: number | string, checked: boolean) => {
+    setSelectedOrders((prev) => (checked ? Array.from(new Set([...prev, orderId])) : prev.filter((id) => id !== orderId)));
+  };
+
+  const handleSelectAll = (checked: boolean) => {
+    if (checked) setSelectedOrders(filteredOrders.map((order: any) => order.id));
+    else setSelectedOrders([]);
+  };
+
+  const parseItems = (raw: any): OrderItemEnriched[] => {
+    if (Array.isArray(raw)) return raw as OrderItemEnriched[];
+    if (typeof raw === "string") {
+      try { return JSON.parse(raw) as OrderItemEnriched[]; } catch { return []; }
+    }
+    return [];
+  };
+
+  // === NUEVO: obtener estado de cumplimiento desde 3 fuentes (camel, snake, uiStatus)
+  const getFulfillmentFromOrder = (o: OrderRow): string | null => {
+    const camel = o?.fulfillmentStatus ?? null;
+    const snake = (o as any)?.fulfillment_status ?? null;
+    if (camel) return camel;
+    if (snake) return snake;
+    // fallback desde uiStatus para respetar lo que tenías antes
+    if (o?.uiStatus === "GESTIONADA") return "FULFILLED";
+    if (o?.uiStatus === "SIN_GESTIONAR") return "UNFULFILLED";
+    return null;
+  };
+
+  // === Estado: mapeo visual restaurado + "Cancelada"
+  const renderStatusBadge = (status?: string | null) => {
+    const raw = (status ?? "").toString();
+    const s = raw.toUpperCase();
+    if (raw.toLowerCase() === "restocked") {
+      return (
+        <Badge variant="outline" className="text-xs px-2 py-0.5 bg-orange-100 text-orange-800 border-orange-200">
+          Cancelada
+        </Badge>
+      );
+    }
+    if (s === "FULFILLED") {
+      return (
+        <Badge variant="outline" className="text-xs px-2 py-0.5 bg-green-100 text-green-800 border-green-200">
+          Gestionada
+        </Badge>
+      );
+    }
+    if (s === "UNFULFILLED" || !raw) {
+      return (
+        <Badge variant="outline" className="text-xs px-2 py-0.5 bg-blue-100 text-blue-800 border-blue-200">
+          Sin gestionar
+        </Badge>
+      );
+    }
+    return (
+      <Badge variant="outline" className="text-xs px-2 py-0.5 bg-gray-100 text-gray-800 border-gray-200">
+        {raw}
+      </Badge>
+    );
   };
 
   if (isLoading) {
@@ -427,20 +467,13 @@ export default function Pedidos() {
       <div>
         {/* Page Header */}
         <div className="mb-8">
-          <h1 className="text-2xl font-semibold text-gray-900 mb-2">Gestión de Pedidos</h1>
-          <p className="text-gray-600">Administra y procesa los pedidos del sistema</p>
-          
-          {/* MLG-INTEGRATION: Testing components 
-          <div className="mt-4 space-y-4">
-            <MlgPingBox />
-            <MlgTestPanel />
-          </div>*/}
+          <h1 className="text-2xl font-semibold mb-2">Gestión de Pedidos</h1>
+          <p className="text">Administra y procesa los pedidos del sistema</p>
         </div>
 
         {/* Filters and Actions */}
         <Card className="mb-6">
           <CardContent className="p-4 sm:p-6">
-            {/* Toolbar principal */}
             <div className="flex flex-col gap-3">
               {/* Search + Filtros avanzados */}
               <div className="flex w-full items-center gap-2">
@@ -472,26 +505,22 @@ export default function Pedidos() {
                           size="sm"
                           onClick={() => {
                             setSearchType("all");
-                            setStatusFilter("unmanaged");  // ✅ respeta “sin gestionar” por defecto
+                            setStatusFilter("unmanaged");
                             setChannelFilter("all");
+                            setBrandFilter("all");
+                            setStockFilter("all");
                           }}
                         >
                           Limpiar
                         </Button>
-
                       </div>
-
                       <Separator className="my-2" />
-
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                         {/* Tipo de búsqueda */}
                         <div className="space-y-1.5">
                           <Label className="text-xs">Tipo de búsqueda</Label>
-                          <Select
-                            value={searchType}
-                            onValueChange={(value) => setSearchType(value as any)}
-                          >
-                            <SelectTrigger>
+                          <Select value={searchType} onValueChange={(value) => setSearchType(value as any)}>
+                            <SelectTrigger className="h-8">
                               <SelectValue placeholder="Tipo de búsqueda" />
                             </SelectTrigger>
                             <SelectContent>
@@ -502,39 +531,67 @@ export default function Pedidos() {
                             </SelectContent>
                           </Select>
                         </div>
-
                         {/* Estado */}
                         <div className="space-y-1.5">
                           <Label className="text-xs">Estado</Label>
-                          <Select
-                            value={statusFilter}
-                            onValueChange={(value) => setStatusFilter(value as any)}
-                          >
-                            <SelectTrigger>
+                          <Select value={statusFilter} onValueChange={(value) => setStatusFilter(value as any)}>
+                            <SelectTrigger className="h-8">
                               <SelectValue placeholder="Filtrar por estado" />
                             </SelectTrigger>
                             <SelectContent>
                               <SelectItem value="all">Todos</SelectItem>
                               <SelectItem value="unmanaged">Sin gestionar</SelectItem>
                               <SelectItem value="managed">Gestionadas</SelectItem>
+                              <SelectItem value="cancelled">Canceladas</SelectItem>
                             </SelectContent>
                           </Select>
                         </div>
-
                         {/* Canal */}
                         <div className="space-y-1.5 sm:col-span-2">
                           <Label className="text-xs">Canal</Label>
                           <Select value={channelFilter} onValueChange={setChannelFilter}>
-                            <SelectTrigger>
+                            <SelectTrigger className="h-8">
                               <SelectValue placeholder="Filtrar por canal" />
                             </SelectTrigger>
                             <SelectContent>
                               <SelectItem value="all">Todos los canales</SelectItem>
-                              {channels.map((channel: any) => (
+                              {(channels as Channel[]).map((channel) => (
                                 <SelectItem key={channel.id} value={String(channel.id)}>
                                   {channel.name}
                                 </SelectItem>
                               ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        {/* Marca */}
+                        <div className="space-y-1.5 sm:col-span-2">
+                          <Label className="text-xs">Marca</Label>
+                          <Select value={brandFilter} onValueChange={setBrandFilter}>
+                            <SelectTrigger className="h-8">
+                              <SelectValue placeholder="Todas las marcas" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="all">Todas</SelectItem>
+                              {brands.map((b: string) => (
+                                <SelectItem key={b} value={b}>
+                                  {b}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        {/* Stock */}
+                        <div className="space-y-1.5">
+                          <Label className="text-xs">Stock</Label>
+                          <Select value={stockFilter} onValueChange={(v) => setStockFilter(v as any)}>
+                            <SelectTrigger className="h-8">
+                              <SelectValue placeholder="Todos" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="all">Todos</SelectItem>
+                              <SelectItem value="out">Stock Out</SelectItem>
+                              <SelectItem value="apartar">Apartar</SelectItem>
+                              <SelectItem value="ok">OK</SelectItem>
                             </SelectContent>
                           </Select>
                         </div>
@@ -543,7 +600,7 @@ export default function Pedidos() {
                   </Popover>
                 </div>
 
-                {/* Acciones rápidas (compactas) */}
+                {/* Acciones rápidas */}
                 <div className="flex items-center gap-2">
                   <Button
                     onClick={() => syncOrdersMutation.mutate()}
@@ -554,7 +611,7 @@ export default function Pedidos() {
                     title="Sincronizar ahora"
                     data-testid="button-sync-orders"
                   >
-                    <RefreshCw className={`h-4 w-4 ${syncOrdersMutation.isPending ? 'animate-spin' : ''}`} />
+                    <RefreshCw className={`h-4 w-4 ${syncOrdersMutation.isPending ? "animate-spin" : ""}`} />
                   </Button>
 
                   <Button
@@ -564,8 +621,8 @@ export default function Pedidos() {
                     className="hidden sm:inline-flex"
                     data-testid="button-import-excel"
                   >
-                    <i className={`fas fa-upload mr-2 ${importMutation.isPending ? 'animate-pulse' : ''}`} />
-                    {importMutation.isPending ? 'Importando...' : 'Importar'}
+                    <i className={`fas fa-upload mr-2 ${importMutation.isPending ? "animate-pulse" : ""}`} />
+                    {importMutation.isPending ? "Importando..." : "Importar"}
                   </Button>
 
                   <Button
@@ -575,15 +632,15 @@ export default function Pedidos() {
                     className="hidden sm:inline-flex"
                     data-testid="button-export-excel"
                   >
-                    <i className={`fas fa-download mr-2 ${exportMutation.isPending ? 'animate-pulse' : ''}`} />
-                    {exportMutation.isPending ? 'Exportando...' : 'Exportar'}
+                    <i className={`fas fa-download mr-2 ${exportMutation.isPending ? "animate-pulse" : ""}`} />
+                    {exportMutation.isPending ? "Exportando..." : "Exportar"}
                   </Button>
                 </div>
 
                 <input
                   type="file"
                   ref={fileInputRef}
-                  style={{ display: 'none' }}
+                  style={{ display: "none" }}
                   accept=".xlsx,.xls,.csv"
                   onChange={handleFileSelect}
                 />
@@ -592,17 +649,18 @@ export default function Pedidos() {
               {/* Barra de selección masiva */}
               {selectedOrders.length > 0 && (
                 <div className="flex items-center justify-between rounded-md border p-2 bg-muted/40">
-                  <div className="text-sm text-gray-700">
-                    {selectedOrders.length} seleccionado(s)
-                  </div>
+                  <div className="text-sm text-gray-700">{selectedOrders.length} seleccionado(s)</div>
                   <div className="flex items-center gap-2">
                     <Button
-                      onClick={handleCreateTickets}
+                      onClick={() => {
+                        if (selectedOrders.length === 0) return;
+                        createBulkTicketsMutation.mutate(selectedOrders);
+                      }}
                       disabled={createBulkTicketsMutation.isPending}
                       data-testid="button-create-bulk-tickets"
                     >
                       <Plus className="h-4 w-4 mr-1" />
-                      {createBulkTicketsMutation.isPending ? 'Creando...' : `Crear Tickets (${selectedOrders.length})`}
+                      {createBulkTicketsMutation.isPending ? "Creando..." : `Crear Tickets (${selectedOrders.length})`}
                     </Button>
                     <Button variant="ghost" size="sm" onClick={() => setSelectedOrders([])}>
                       Limpiar selección
@@ -614,55 +672,60 @@ export default function Pedidos() {
               {/* Chips de filtros activos */}
               <div className="flex flex-wrap gap-2 mt-2">
                 {!!search && (
-                  <Badge variant="secondary" className="flex items-center gap-1">
+                  <Badge variant="secondary" className="flex items-center gap-1 text-xs px-2 py-0.5">
                     Buscar: "{search}"
-                    <button
-                      aria-label="Quitar búsqueda"
-                      onClick={() => setSearch("")}
-                      className="ml-1 hover:opacity-70"
-                    >
-                      <X className="h-3.5 w-3.5" />
-                    </button>
-                  </Badge>
-                )}
-                {searchType !== "all" && (
-                  <Badge variant="secondary" className="flex items-center gap-1">
-                    Tipo: {searchType}
-                    <button
-                      aria-label="Quitar tipo"
-                      onClick={() => setSearchType("all")}
-                      className="ml-1 hover:opacity-70"
-                    >
-                      <X className="h-3.5 w-3.5" />
-                    </button>
-                  </Badge>
-                )}
-                {statusFilter !== "all" && (
-                  <Badge variant="secondary" className="flex items-center gap-1">
-                    Estado: {statusFilter === "unmanaged" ? "Sin gestionar" : "Gestionadas"}
-                    <button
-                      aria-label="Quitar estado"
-                      onClick={() => setStatusFilter("all")}
-                      className="ml-1 hover:opacity-70"
-                    >
-                      <X className="h-3.5 w-3.5" />
-                    </button>
-                  </Badge>
-                )}
-                {channelFilter !== "all" && (
-                  <Badge variant="secondary" className="flex items-center gap-1">
-                    Canal: {channels.find((c: Channel) => String(c.id) === String(channelFilter))?.name ?? channelFilter}
-                    <button
-                      aria-label="Quitar canal"
-                      onClick={() => setChannelFilter("all")}
-                      className="ml-1 hover:opacity-70"
-                    >
+                    <button aria-label="Quitar búsqueda" onClick={() => setSearch("")} className="ml-1 hover:opacity-70">
                       <X className="h-3.5 w-3.5" />
                     </button>
                   </Badge>
                 )}
 
-                {(search || searchType !== "all" || statusFilter !== "all" || channelFilter !== "all") && (
+                {searchType !== "all" && (
+                  <Badge variant="secondary" className="flex items-center gap-1 text-xs px-2 py-0.5">
+                    Tipo: {searchType}
+                    <button aria-label="Quitar tipo" onClick={() => setSearchType("all")} className="ml-1 hover:opacity-70">
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  </Badge>
+                )}
+
+                {statusFilter !== "all" && (
+                  <Badge variant="secondary" className="flex items-center gap-1 text-xs px-2 py-0.5">
+                    Estado: {statusFilter === "unmanaged" ? "Sin gestionar" : statusFilter === "managed" ? "Gestionadas" : "Canceladas"}
+                    <button aria-label="Quitar estado" onClick={() => setStatusFilter("all")} className="ml-1 hover:opacity-70">
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  </Badge>
+                )}
+
+                {channelFilter !== "all" && (
+                  <Badge variant="secondary" className="flex items-center gap-1 text-xs px-2 py-0.5">
+                    Canal: {(channels as Channel[]).find((c) => String(c.id) === String(channelFilter))?.name ?? channelFilter}
+                    <button aria-label="Quitar canal" onClick={() => setChannelFilter("all")} className="ml-1 hover:opacity-70">
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  </Badge>
+                )}
+
+                {brandFilter !== "all" && (
+                  <Badge variant="secondary" className="flex items-center gap-1 text-xs px-2 py-0.5">
+                    Marca: {brandFilter}
+                    <button aria-label="Quitar marca" onClick={() => setBrandFilter("all")} className="ml-1 hover:opacity-70">
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  </Badge>
+                )}
+
+                {stockFilter !== "all" && (
+                  <Badge variant="secondary" className="flex items-center gap-1 text-xs px-2 py-0.5">
+                    Stock: {stockFilter === "out" ? "Stock Out" : stockFilter === "apartar" ? "Apartar" : "OK"}
+                    <button aria-label="Quitar stock" onClick={() => setStockFilter("all")} className="ml-1 hover:opacity-70">
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  </Badge>
+                )}
+
+                {(search || searchType !== "all" || statusFilter !== "all" || channelFilter !== "all" || brandFilter !== "all" || stockFilter !== "all") && (
                   <Button
                     variant="ghost"
                     size="sm"
@@ -670,13 +733,14 @@ export default function Pedidos() {
                     onClick={() => {
                       setSearch("");
                       setSearchType("all");
-                      setStatusFilter("unmanaged");  // ✅
+                      setStatusFilter("unmanaged");
                       setChannelFilter("all");
+                      setBrandFilter("all");
+                      setStockFilter("all");
                     }}
                   >
-                    Limpiar todo
+                    Limpiar filtros
                   </Button>
-
                 )}
               </div>
             </div>
@@ -686,9 +750,7 @@ export default function Pedidos() {
         {/* Orders Table */}
         <Card>
           <CardHeader>
-            <CardTitle>
-              Pedidos Cargados ({total})
-            </CardTitle>
+            <CardTitle>Pedidos Cargados ({total})</CardTitle>
           </CardHeader>
           <CardContent>
             <Table>
@@ -714,94 +776,132 @@ export default function Pedidos() {
                       }}
                     >
                       Orden
-                      {sortField === "name" && (
-                        <span className="ml-1">
-                          {sortOrder === "asc" ? " 🔼" : " 🔽"}
-                        </span>
-                      )}
+                      {sortField === "name" && <span className="ml-1">{sortOrder === "asc" ? " 🔼" : " 🔽"}</span>}
                     </Button>
                   </TableHead>
-                  <TableHead>SKU's del Canal</TableHead>
                   <TableHead>Canal</TableHead>
-                  <TableHead>Productos</TableHead>
+                  <TableHead>Marca Canal / Marca Catálogo</TableHead>
+                  <TableHead>Stock</TableHead>
                   <TableHead>Monto</TableHead>
                   <TableHead>Estado</TableHead>
                   <TableHead>Fecha</TableHead>
                   <TableHead>Acciones</TableHead>
                 </TableRow>
               </TableHeader>
+
               <TableBody>
-                {filteredOrders.map((order: any) => {
-                  const channel = getChannelInfo(order.channelId);
+                {filteredOrders.map((order: OrderRow) => {
+                  const channel = order.channelId != null ? getChannelInfo(order.channelId) : getChannelInfo("N/A");
+                  const items = parseItems(order.items);
+                  const fulfillment = getFulfillmentFromOrder(order);
 
                   return (
-                    <TableRow key={order.id} className={order.status === 'DELETED' ? 'opacity-60 line-through' : ''}>
+                    <TableRow key={order.id} className={(order as any).status === "DELETED" ? "opacity-60 line-through" : ""}>
+                      {/* Select */}
                       <TableCell>
                         <Checkbox
                           checked={selectedOrders.includes(order.id)}
                           onCheckedChange={(checked) => handleSelectOrder(order.id, Boolean(checked))}
                         />
                       </TableCell>
-                      <TableCell className="font-medium">
-                        {order.name ?? String(order.id)}
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex flex-wrap gap-1">
-                          {order.skus.slice(0, 4).map((sku: string) => (
-                            <Badge key={sku} variant="outline">
-                              {sku}
-                            </Badge>
-                          ))}
-                          {order.skus.length > 4 && (
-                            <Badge variant="secondary">+{order.skus.length - 4} más</Badge>
-                          )}
-                        </div>
-                      </TableCell>
+
+                      {/* Orden */}
+                      <TableCell className="font-medium">{order.name ?? String(order.id)}</TableCell>
+
+                      {/* Canal */}
                       <TableCell>
                         <div className="flex items-center space-x-2">
-                          <div
-                            className="w-3 h-3 rounded-full"
-                            style={{ backgroundColor: channel.color }}
-                          />
-                          <span className="font-medium">{channel.code}</span>
+                          <div className="w-3 h-3 rounded-full" style={{ backgroundColor: (channel as any).color }} />
+                          <span className="font-medium">{(channel as any).code ?? "N/A"}</span>
                         </div>
                       </TableCell>
+
+                      {/* Marca (vendor / catálogo) */}
                       <TableCell>
-                        <span className="text-sm font-medium">{order.itemsCount}</span>
-                        <span className="text-xs text-gray-500 ml-1">productos</span>
+                        {items.length === 0 ? (
+                          <span className="text-gray-400">—</span>
+                        ) : (
+                          <div className="flex flex-col gap-1">
+                            {items.map((it, idx) => {
+                              const vendor = (it?.vendorFromShop ?? "").trim();
+                              const catBrand = (it?.catalogBrand ?? "").trim();
+                              const hasVendor = vendor.length > 0;
+                              const hasCat = catBrand.length > 0;
+                              if (!hasVendor && !hasCat) {
+                                return (
+                                  <span key={idx} className="text-gray-400">
+                                    —
+                                  </span>
+                                );
+                              }
+                              return (
+                                <div key={idx} className="text-sm">
+                                  {hasVendor && <span className="font-medium">{vendor}</span>}
+                                  {hasVendor && hasCat && <span> · </span>}
+                                  {hasCat && <span className="text-gray-600">{catBrand}</span>}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
                       </TableCell>
+
+                      {/* Stock (badge por ítem, con tooltip del número) */}
+                      <TableCell>
+                        {items.length === 0 ? (
+                          <span className="text-gray-400">—</span>
+                        ) : (
+                          <div className="flex flex-col gap-1">
+                            {items.map((it, idx) => {
+                              const stock = it?.stockFromCatalog ?? null;
+                              let label = "Desconocido";
+                              let cls = "text-xs px-2 py-0.5 bg-gray-100 text-gray-800 border-gray-200";
+                              if (stock === 0) {
+                                label = "Stock Out";
+                                cls = "text-xs px-2 py-0.5 bg-red-100 text-red-800 border-red-200";
+                              } else if (typeof stock === "number" && stock > 0 && stock <= 15) {
+                                label = "Apartar";
+                                cls = "text-xs px-2 py-0.5 bg-yellow-100 text-yellow-800 border-yellow-200";
+                              } else if (typeof stock === "number" && stock > 15) {
+                                label = "OK";
+                                cls = "text-xs px-2 py-0.5 bg-green-100 text-green-800 border-green-200";
+                              }
+                              return (
+                                <Tooltip key={idx}>
+                                  <TooltipTrigger asChild>
+                                    <div>
+                                      <Badge variant="outline" className={cls}>
+                                        {label}
+                                      </Badge>
+                                    </div>
+                                  </TooltipTrigger>
+                                  <TooltipContent>Stock: {stock ?? "N/D"}</TooltipContent>
+                                </Tooltip>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </TableCell>
+
+                      {/* Monto */}
                       <TableCell>
                         {order.totalAmount != null ? (
-                          <span className="font-medium">
-                            ${Number(order.totalAmount).toLocaleString()}
-                          </span>
+                          <span className="font-medium">${Number(order.totalAmount).toLocaleString()}</span>
                         ) : (
                           <span className="text-gray-400">--</span>
                         )}
                       </TableCell>
-                      <TableCell>
-                        <Badge
-                          variant={
-                            order.uiStatus === "GESTIONADA"
-                              ? "default"
-                              : order.uiStatus === "SIN_GESTIONAR"
-                                ? "secondary"
-                                : "destructive"
-                          }
-                        >
-                          {order.uiStatus === "GESTIONADA"
-                            ? "Gestionada"
-                            : order.uiStatus === "SIN_GESTIONAR"
-                              ? "Sin gestionar"
-                              : "Error"}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="text-sm text-gray-600">
-                        {new Date(order.createdAt).toLocaleDateString()}
-                      </TableCell>
+
+                      {/* Estado (restaurado + cancelada) */}
+                      <TableCell>{renderStatusBadge(fulfillment)}</TableCell>
+
+                      {/* Fecha */}
+                      <TableCell className="text-sm">{new Date(order.createdAt).toLocaleDateString()}</TableCell>
+
+                      {/* Acciones */}
                       <TableCell>
                         <div className="flex items-center space-x-1.5">
-                          {/* Ver (ojo) */}
+                          {/* Ver */}
                           <Tooltip>
                             <TooltipTrigger asChild>
                               <Button
@@ -824,20 +924,18 @@ export default function Pedidos() {
                               <Button
                                 variant="outline"
                                 size="icon"
-                                onClick={() =>
-                                  createTicketMutation.mutate({ orderId: Number(order.id) })}
-                                disabled={createTicketMutation.isPending || order.isManaged || order.hasTicket}
+                                onClick={() => createTicketMutation.mutate({ orderId: Number(order.id) })}
+                                disabled={(createTicketMutation as any).isPending || (order as any).isManaged || (order as any).hasTicket}
                                 aria-label="Crear ticket"
                               >
                                 <Ticket className="h-4 w-4" />
                                 <span className="sr-only">Crear ticket</span>
                               </Button>
-
                             </TooltipTrigger>
                             <TooltipContent>Crear ticket</TooltipContent>
                           </Tooltip>
 
-                          {/* Cancelar (basura) */}
+                          {/* Cancelar */}
                           <Tooltip>
                             <TooltipTrigger asChild>
                               <Button
@@ -856,7 +954,6 @@ export default function Pedidos() {
                           </Tooltip>
                         </div>
                       </TableCell>
-
                     </TableRow>
                   );
                 })}
@@ -886,15 +983,16 @@ export default function Pedidos() {
           </CardContent>
         </Card>
 
-
+        {/* Modales */}
         {selectedOrderId != null && (
           <OrderDetailsModalNew
-            orderId={selectedOrderId}      // ✅ ahora es number
+            orderId={selectedOrderId}
             isOpen={selectedOrderId != null}
             onClose={() => setSelectedOrderId(null)}
           />
         )}
       </div>
+
       {cancelOrderId && (
         <CancelOrderModal
           orderId={cancelOrderId}
@@ -905,12 +1003,8 @@ export default function Pedidos() {
           }}
         />
       )}
-      {showImportModal && (
-        <ImportOrdersModal
-          open={showImportModal}
-          onClose={() => setShowImportModal(false)}
-        />
-      )}
+
+      {showImportModal && <ImportOrdersModal open={showImportModal} onClose={() => setShowImportModal(false)} />}
     </>
   );
 }

@@ -30,12 +30,15 @@ export class ProductStorage {
     categoria?: string;
     condicion?: string;
     marca_producto?: string;
+    stockEq0?: boolean;
+    stockGte?: number;
     orderBy?: string;
     orderDir?: 'asc' | 'desc';
   }) {
     const {
       page, pageSize, search, searchField,
       marca, categoria, condicion, marca_producto,
+      stockEq0, stockGte,
       orderBy = 'nombre_producto', orderDir = 'asc'
     } = params;
 
@@ -72,6 +75,8 @@ export class ProductStorage {
     if (categoria) whereParts.push(sql`categoria = ${categoria}`);
     if (condicion) whereParts.push(sql`condicion = ${condicion}`);
     if (marca_producto) whereParts.push(sql`marca_producto = ${marca_producto}`);
+    if (stockEq0) whereParts.push(sql`COALESCE(stock, 0) = 0`);
+    if (typeof stockGte === 'number' && !Number.isNaN(stockGte)) whereParts.push(sql`COALESCE(stock, 0) >= ${stockGte}`);
 
     const whereSQL = sql.join(whereParts, sql` AND `);
 

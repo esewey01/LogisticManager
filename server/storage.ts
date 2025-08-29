@@ -1804,6 +1804,8 @@ async getOrderDetails(idParam: unknown) {
     searchType?: "all" | "sku" | "customer" | "product";
     sortField?: string;
     sortOrder?: "asc" | "desc";
+    brand?: string;
+    stockState?: "out" | "apartar" | "ok";
   }): Promise<{ rows: any[]; total: number; page: number; pageSize: number }> {
     const {
       statusFilter,
@@ -1814,6 +1816,8 @@ async getOrderDetails(idParam: unknown) {
       searchType = "all",
       sortField,
       sortOrder = "desc",
+      brand,
+      stockState,
     } = params;
 
     const conds: any[] = [];
@@ -1823,12 +1827,34 @@ async getOrderDetails(idParam: unknown) {
       conds.push(sql`LOWER(COALESCE(o.fulfillment_status, '')) IN ('', 'unfulfilled')`);
     } else if (statusFilter === "managed") {
       conds.push(sql`LOWER(COALESCE(o.fulfillment_status, '')) = 'fulfilled'`);
+    } else if (statusFilter === ("cancelled" as any) || statusFilter === ("canceladas" as any)) {
+      conds.push(sql`LOWER(COALESCE(o.fulfillment_status, '')) = 'restocked'`);
     }
 
     // Canal
     if (channelId !== undefined && channelId !== null) {
       // usa shop_id como ya lo hacías
       conds.push(sql`o.shop_id = ${channelId}`);
+    }
+
+    // Filtro por marca (union de vendor y marca catálogo)
+    if (brand && brand.trim() !== "") {
+      const b = brand.toLowerCase();
+      conds.push(sql`(
+        LOWER(COALESCE(p.vendor, '')) = ${b} OR
+        LOWER(COALESCE(cp.marca, '')) = ${b}
+      )`);
+    }
+
+    // Filtro por estado de stock
+    if (stockState) {
+      if (stockState === "out") {
+        conds.push(sql`COALESCE(cp.stock, -1) = 0`);
+      } else if (stockState === "apartar") {
+        conds.push(sql`COALESCE(cp.stock, 0) BETWEEN 1 AND 15`);
+      } else if (stockState === "ok") {
+        conds.push(sql`COALESCE(cp.stock, 0) > 15`);
+      }
     }
 
     // Búsqueda
@@ -1905,6 +1931,25 @@ async getOrderDetails(idParam: unknown) {
       COALESCE(o.shopify_created_at, o.created_at, NOW()) as "createdAt",
       COALESCE(COUNT(oi.id), 0) as "itemsCount",
       COALESCE(ARRAY_AGG(oi.sku) FILTER (WHERE oi.sku IS NOT NULL), ARRAY[]::text[]) as skus,
+      COALESCE(
+        JSON_AGG(
+          JSON_BUILD_OBJECT(
+            'sku', oi.sku,
+            'quantity', oi.quantity,
+            'price', oi.price,
+            'vendorFromShop', p.vendor,
+            'catalogBrand', cp.marca,
+            'stockFromCatalog', cp.stock,
+            'stockState', CASE 
+              WHEN cp.stock IS NULL THEN 'Desconocido'
+              WHEN cp.stock = 0 THEN 'Stock Out'
+              WHEN cp.stock <= 15 THEN 'Apartar'
+              ELSE 'OK'
+            END
+          )
+        ) FILTER (WHERE oi.id IS NOT NULL),
+        '[]'::json
+      ) as items,
       CASE
         WHEN LOWER(COALESCE(o.fulfillment_status, '')) IN ('', 'unfulfilled') THEN 'SIN_GESTIONAR'
         WHEN LOWER(COALESCE(o.fulfillment_status, '')) = 'fulfilled' THEN 'GESTIONADA'
@@ -1918,6 +1963,8 @@ async getOrderDetails(idParam: unknown) {
       END as "isManaged"
     FROM orders o
     LEFT JOIN order_items oi ON oi.order_id = o.id
+    LEFT JOIN products p ON p.id_shopify = oi.shopify_product_id AND p.shop_id = o.shop_id
+    LEFT JOIN catalogo_productos cp ON cp.sku_interno = oi.sku
     ${whereClause ? sql`WHERE ${whereClause}` : sql``}
     GROUP BY o.id, o.order_id, o.name, o.customer_name, o.total_amount, 
              o.fulfillment_status, o.shopify_created_at, o.created_at, o.shop_id
@@ -2352,7 +2399,7 @@ export const almacenamiento = storage;
 
 // Actualización segura de campos de cancelación (opcional según columnas existentes)
 export async function markOrderCancelledSafe(idNum: number, payload: {
-  cancelledAt?: string | null; // Shopify order.cancelledAt
+  cancelledAt?: string | Date | null; // Shopify order.cancelledAt (ISO) -> Date
   cancelReason?: string | null;
   staffNote?: string | null;   // map to orderNote if exists
   displayFinancialStatus?: string | null;
@@ -2360,14 +2407,30 @@ export async function markOrderCancelledSafe(idNum: number, payload: {
 }) {
   try {
     const updateData: Record<string, any> = {};
-    // Schema-aligned fields (see shared/schema.ts)
-    if (typeof payload.cancelledAt !== "undefined") updateData["shopifyCancelledAt"] = payload.cancelledAt;
-    if (typeof payload.cancelReason !== "undefined") updateData["cancelReason"] = payload.cancelReason;
-    if (typeof payload.staffNote !== "undefined") updateData["orderNote"] = payload.staffNote;
-    if (typeof payload.displayFinancialStatus !== "undefined") updateData["financialStatus"] = payload.displayFinancialStatus;
-    if (typeof payload.displayFulfillmentStatus !== "undefined") updateData["fulfillmentStatus"] = payload.displayFulfillmentStatus;
 
-    if (Object.keys(updateData).length === 0) return { ok: true, skipped: true } as const;
+    // Normaliza cancelledAt -> Date | null
+    let cancelledAtDate: Date | null | undefined = undefined;
+    if (typeof payload.cancelledAt === "string") {
+      const d = new Date(payload.cancelledAt);
+      cancelledAtDate = isNaN(d.getTime()) ? null : d;
+    } else if (payload.cancelledAt instanceof Date) {
+      cancelledAtDate = isNaN(payload.cancelledAt.getTime()) ? null : payload.cancelledAt;
+    } else if (payload.cancelledAt === null) {
+      cancelledAtDate = null;
+    }
+
+    // Ajusta los nombres de columnas a tu esquema real:
+    // Si tu columna se llama "shopifyCancelledAt" (timestamp), guarda el Date.
+    if (typeof payload.cancelledAt !== "undefined") updateData["shopifyCancelledAt"] = cancelledAtDate;
+
+    if (typeof payload.cancelReason !== "undefined") updateData["cancelReason"] = payload.cancelReason ?? null;
+    if (typeof payload.staffNote !== "undefined") updateData["orderNote"] = payload.staffNote ?? null;
+    if (typeof payload.displayFinancialStatus !== "undefined") updateData["financialStatus"] = payload.displayFinancialStatus ?? null;
+    if (typeof payload.displayFulfillmentStatus !== "undefined") updateData["fulfillmentStatus"] = payload.displayFulfillmentStatus ?? null;
+
+    if (Object.keys(updateData).length === 0) {
+      return { ok: true, skipped: true } as const;
+    }
 
     await baseDatos
       .update(tablaOrdenes)

@@ -885,6 +885,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const pageSize = req.query.pageSize ? Number(req.query.pageSize) : 50; // opcional: alinea con el FE
       const search = req.query.search as string | undefined;
       const searchType = req.query.searchType as "all" | "sku" | "customer" | "product" | undefined;
+      const brand = (req.query.brand as string | undefined) || undefined;
+      const stockState = (req.query.stock_state as string | undefined) as any;
 
       // ✅ ordenamiento opcional (whitelist)
       const sortField = (req.query.sortField as string | undefined) || undefined;
@@ -899,6 +901,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         searchType,
         sortField,
         sortOrder,
+        brand,
+        stockState,
       });
       res.json(data);
     } catch (e) {
@@ -930,6 +934,345 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error(`[GET /api/orders/:id/details] Error:`, error);
       res.status(500).json({ message: "No se pudo obtener la orden (detalles)" });
+    }
+  });
+
+  // ---------- Catálogo (catalogo_productos) ----------
+  // GET /api/catalogo
+  // Mapea columnas visibles a BD: sku->sku, sku_interno->sku_interno, nombre_producto->nombre_producto,
+  // costo->costo (decimal), stock->stock (int). Campo opcional estado: si no existe en BD se deriva de stock.
+  app.get("/api/catalogo", requiereAutenticacion, async (req, res) => {
+    try {
+      const { productStorage } = await import("./productStorage");
+      const page = req.query.page ? Number(req.query.page) : 1;
+      const pageSize = req.query.pageSize ? Number(req.query.pageSize) : 50;
+      const q = (req.query.q as string) || "";
+      const campo = (req.query.campo as string) as 'sku_interno' | 'sku' | 'nombre' | undefined;
+      const marca = (req.query.marca as string) || undefined;
+      const categoria = (req.query.categoria as string) || undefined;
+      const stockEq0 = (req.query.stock_eq0 as string) === 'true';
+      const stockGteRaw = req.query.stock_gte as string | undefined;
+      const stockGte = stockGteRaw != null && stockGteRaw !== '' ? Number(stockGteRaw) : undefined;
+      const sort = (req.query.sort as string) || '';
+
+      let orderBy: string | undefined;
+      let orderDir: 'asc' | 'desc' = 'asc';
+      if (sort) {
+        const [f, d] = sort.split(":");
+        orderBy = f;
+        orderDir = (d === 'desc' ? 'desc' : 'asc');
+      }
+
+      // Map UI campo -> storage searchField
+      let searchField: 'sku' | 'sku_interno' | 'codigo_barras' | 'nombre_producto' | undefined;
+      if (campo === 'sku') searchField = 'sku';
+      else if (campo === 'sku_interno') searchField = 'sku_interno';
+      else if (campo === 'nombre') searchField = 'nombre_producto';
+
+      const result = await productStorage.getCatalogProducts({
+        page,
+        pageSize,
+        search: q || undefined,
+        searchField,
+        marca,
+        categoria,
+        stockEq0,
+        stockGte,
+        orderBy,
+        orderDir,
+      });
+
+      const totalPages = Math.max(1, Math.ceil((result.total || 0) / pageSize));
+      res.json({
+        data: result.rows.map((p: any) => ({
+          sku: p.sku,
+          sku_interno: p.sku_interno,
+          nombre_producto: p.nombre_producto,
+          costo: p.costo != null ? Number(p.costo) : null,
+          stock: p.stock != null ? Number(p.stock) : 0,
+          estado: (p as any).estado ?? ((Number(p.stock ?? 0) > 0) ? 'ACTIVO' : 'INACTIVO'),
+          marca: p.marca ?? p.marca_producto ?? null,
+          categoria: p.categoria ?? null,
+        })),
+        page,
+        pageSize,
+        total: result.total || 0,
+        totalPages,
+      });
+    } catch (error) {
+      console.error("Error en GET /api/catalogo:", error);
+      res.status(500).json({ message: "Error al obtener el catálogo" });
+    }
+  });
+
+  // GET /api/catalogo/export
+  // Exporta CSV/XLSX con columnas en orden: Sku Externo, Sku Interno, Producto, Costo, Inventario, Estado, Marca, Categoria
+  // Respeta mismos filtros de /api/catalogo. Usa paginado interno para no cargar todo en memoria de un golpe.
+  app.get("/api/catalogo/export", requiereAutenticacion, async (req, res) => {
+    try {
+      const { productStorage } = await import("./productStorage");
+      const q = (req.query.q as string) || "";
+      const campo = (req.query.campo as string) as 'sku_interno' | 'sku' | 'nombre' | undefined;
+      const marca = (req.query.marca as string) || undefined;
+      const categoria = (req.query.categoria as string) || undefined;
+      const stockEq0 = (req.query.stock_eq0 as string) === 'true';
+      const stockGteRaw = req.query.stock_gte as string | undefined;
+      const stockGte = stockGteRaw != null && stockGteRaw !== '' ? Number(stockGteRaw) : undefined;
+      const sort = (req.query.sort as string) || '';
+      const format = ((req.query.format as string) || 'csv').toLowerCase();
+
+      let orderBy: string | undefined;
+      let orderDir: 'asc' | 'desc' = 'asc';
+      if (sort) {
+        const [f, d] = sort.split(":");
+        orderBy = f;
+        orderDir = (d === 'desc' ? 'desc' : 'asc');
+      }
+
+      let searchField: 'sku' | 'sku_interno' | 'codigo_barras' | 'nombre_producto' | undefined;
+      if (campo === 'sku') searchField = 'sku';
+      else if (campo === 'sku_interno') searchField = 'sku_interno';
+      else if (campo === 'nombre') searchField = 'nombre_producto';
+
+      // First fetch to know total
+      const first = await productStorage.getCatalogProducts({
+        page: 1,
+        pageSize: 5000,
+        search: q || undefined,
+        searchField,
+        marca,
+        categoria,
+        stockEq0,
+        stockGte,
+        orderBy,
+        orderDir,
+      });
+
+      const rows: any[] = [...first.rows];
+      const total = first.total || 0;
+      let loaded = first.rows.length;
+      let page = 2;
+      const pageSize = 5000;
+      while (loaded < total) {
+        const r = await productStorage.getCatalogProducts({
+          page,
+          pageSize,
+          search: q || undefined,
+          searchField,
+          marca,
+          categoria,
+          stockEq0,
+          stockGte,
+          orderBy,
+          orderDir,
+        });
+        rows.push(...r.rows);
+        loaded += r.rows.length;
+        page++;
+        if (r.rows.length === 0) break;
+      }
+
+      const mapped = rows.map((p: any) => ({
+        'Sku Externo': p.sku ?? '',
+        'Sku Interno': p.sku_interno ?? '',
+        'Producto': p.nombre_producto ?? '',
+        'Costo': p.costo != null ? Number(p.costo) : '',
+        'Inventario': p.stock != null ? Number(p.stock) : 0,
+        'Estado': (p as any).estado ?? ((Number(p.stock ?? 0) > 0) ? 'ACTIVO' : 'INACTIVO'),
+        'Marca': p.marca ?? p.marca_producto ?? '',
+        'Categoria': p.categoria ?? '',
+      }));
+
+      if (format === 'xlsx') {
+        const wb = xlsx.utils.book_new();
+        const ws = xlsx.utils.json_to_sheet(mapped, { cellDates: false });
+        xlsx.utils.book_append_sheet(wb, ws, 'catalogo');
+        const buf = xlsx.write(wb, { bookType: 'xlsx', type: 'buffer' });
+        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        res.setHeader('Content-Disposition', `attachment; filename="catalogo_${new Date().toISOString().slice(0,10)}.xlsx"`);
+        return res.send(buf);
+      }
+
+      // CSV
+      const headers = ['Sku Externo','Sku Interno','Producto','Costo','Inventario','Estado','Marca','Categoria'];
+      const lines = [headers.join(',')];
+      for (const r of mapped) {
+        const row = headers.map((h) => {
+          const v = (r as any)[h];
+          if (v == null) return '';
+          const s = String(v);
+          return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+        }).join(',');
+        lines.push(row);
+      }
+      const csv = lines.join('\n');
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename="catalogo_${new Date().toISOString().slice(0,10)}.csv"`);
+      return res.send(csv);
+    } catch (error) {
+      console.error('Error en GET /api/catalogo/export:', error);
+      res.status(500).json({ message: 'Error al exportar catálogo' });
+    }
+  });
+
+  // POST /api/catalogo/import
+  // Reglas de upsert: si sku_interno existe => UPDATE; si no, intenta por sku => UPDATE; de lo contrario INSERT.
+  // Valida encabezados, normaliza costo/stock, procesa en lotes de 500 con transacción por lote (si falla el lote, rollback y continúa).
+  const uploadCatalog = multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: 20 * 1024 * 1024 },
+    fileFilter: (_req: Request, file: Express.Multer.File, cb: FileFilterCallback) => {
+      const allowed = new Set([
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'application/vnd.ms-excel',
+        'text/csv',
+        'application/csv',
+      ]);
+      if (!allowed.has(file.mimetype)) return cb(new Error('415: Tipo de archivo no soportado. Sube CSV/XLSX.'));
+      cb(null, true);
+    },
+  });
+
+  app.post('/api/catalogo/import', requiereAutenticacion, uploadCatalog.single('file'), async (req: Request & { file?: Express.Multer.File }, res: Response) => {
+    try {
+      if (!req.file?.buffer) return res.status(400).json({ message: 'No se recibió archivo' });
+
+      const wb = xlsx.read(req.file.buffer, { type: 'buffer' });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      if (!ws) return res.status(400).json({ message: 'El archivo no tiene hojas' });
+
+      const rows = xlsx.utils.sheet_to_json<Record<string, any>>(ws, { defval: null, raw: true });
+      if (!rows.length) return res.status(400).json({ message: 'El archivo está vacío' });
+
+      const required = ['sku','sku_interno','nombre_producto','costo','stock','estado','marca','categoria'];
+      const first = rows[0] || {};
+      const missing = required.filter((h) => !(h in first));
+      if (missing.length) {
+        return res.status(400).json({ message: 'Faltan columnas obligatorias', missing, required });
+      }
+
+      // Procesar en lotes de 500 con transacción por lote
+      const batchSize = 500;
+      let inserted = 0;
+      let updated = 0;
+      const errors: Array<{ rowIndex: number; message: string }> = [];
+
+      const { db: baseDatos } = await import('./db');
+
+      for (let i = 0; i < rows.length; i += batchSize) {
+        const slice = rows.slice(i, i + batchSize);
+        try {
+          await baseDatos.transaction(async (tx) => {
+            for (let j = 0; j < slice.length; j++) {
+              const rowIndex = i + j + 2; // +2 por header + base 1
+              const r = slice[j];
+              try {
+                // Normalizaciones
+                const sku = (r.sku ?? '').toString().trim();
+                const sku_interno = (r.sku_interno ?? '').toString().trim();
+                const nombre = (r.nombre_producto ?? '').toString().trim();
+                let costo = r.costo;
+                if (typeof costo === 'string') costo = costo.replace(',', '.');
+                const costoNum = costo == null || costo === '' ? null : Number(costo);
+                let stock = r.stock;
+                const stockNum = stock == null || stock === '' ? 0 : Number(stock);
+                const estado = (r.estado ?? '').toString().trim().toUpperCase();
+                const marca = r.marca != null ? String(r.marca) : null;
+                const categoria = r.categoria != null ? String(r.categoria) : null;
+
+                if (!sku_interno && !sku) throw new Error('Fila sin sku_interno ni sku');
+                if (!nombre) throw new Error('nombre_producto requerido');
+                if (costoNum != null && (Number.isNaN(costoNum) || Number(costoNum) < 0)) throw new Error('costo inválido');
+                if (Number.isNaN(stockNum) || stockNum < 0) throw new Error('stock inválido');
+                if (estado && !['ACTIVO','INACTIVO'].includes(estado)) throw new Error('estado inválido');
+
+                // Upsert por sku_interno, fallback por sku
+                const existsByInternal = await tx.execute(sql`SELECT 1 FROM catalogo_productos WHERE sku_interno = ${sku_interno} LIMIT 1`);
+                if ((existsByInternal as any).rowCount > 0) {
+                  await tx.execute(sql`
+                    UPDATE catalogo_productos
+                    SET nombre_producto = ${nombre}, costo = ${costoNum}, stock = ${stockNum}, marca = ${marca}, categoria = ${categoria}
+                    WHERE sku_interno = ${sku_interno}
+                  `);
+                  updated++;
+                } else if (sku) {
+                  const existsBySku = await tx.execute(sql`SELECT 1 FROM catalogo_productos WHERE sku = ${sku} LIMIT 1`);
+                  if ((existsBySku as any).rowCount > 0) {
+                    await tx.execute(sql`
+                      UPDATE catalogo_productos
+                      SET nombre_producto = ${nombre}, costo = ${costoNum}, stock = ${stockNum}, sku_interno = ${sku_interno || null}, marca = ${marca}, categoria = ${categoria}
+                      WHERE sku = ${sku}
+                    `);
+                    updated++;
+                  } else {
+                    await tx.execute(sql`
+                      INSERT INTO catalogo_productos (sku, sku_interno, nombre_producto, costo, stock, marca, categoria)
+                      VALUES (${sku || null}, ${sku_interno || null}, ${nombre}, ${costoNum}, ${stockNum}, ${marca}, ${categoria})
+                    `);
+                    inserted++;
+                  }
+                } else {
+                  // No sku externo, insert con sku_interno al menos
+                  await tx.execute(sql`
+                    INSERT INTO catalogo_productos (sku, sku_interno, nombre_producto, costo, stock, marca, categoria)
+                    VALUES (${null}, ${sku_interno || null}, ${nombre}, ${costoNum}, ${stockNum}, ${marca}, ${categoria})
+                  `);
+                  inserted++;
+                }
+              } catch (e: any) {
+                // Provoca rollback del lote completo
+                errors.push({ rowIndex, message: e?.message || 'Error desconocido' });
+                throw e;
+              }
+            }
+          });
+        } catch (e) {
+          // Lote falló y se revirtió; continuar con el siguiente
+          continue;
+        }
+      }
+
+      // Generar CSV de errores si existen
+      let reportBase64: string | undefined;
+      if (errors.length) {
+        const h = 'rowIndex,message';
+        const lines = [h, ...errors.map((e) => `${e.rowIndex},"${String(e.message).replace(/"/g,'""')}"`)];
+        const csv = lines.join('\n');
+        reportBase64 = Buffer.from(csv, 'utf8').toString('base64');
+      }
+
+      res.json({ inserted, updated, errors: errors.length, errorRows: errors, reportBase64 });
+    } catch (error: any) {
+      console.error('Error en POST /api/catalogo/import:', error);
+      res.status(500).json({ message: error?.message || 'Error al importar catálogo' });
+    }
+  });
+
+  // Filtro de marcas unificado: union de products.vendor y catalogo_productos.marca
+  app.get("/api/orders/brands", requiereAutenticacion, async (req, res) => {
+    try {
+      const shopIdRaw = (req.query.shopId ?? req.query.channelId) as string | undefined;
+      const shopId = shopIdRaw && shopIdRaw !== 'all' ? Number(shopIdRaw) : undefined;
+      const result = await baseDatos.execute(sql`
+        (
+          SELECT DISTINCT TRIM(COALESCE(p.vendor, '')) AS marca
+          FROM products p
+          ${shopId !== undefined ? sql`WHERE p.vendor IS NOT NULL AND p.vendor <> '' AND p.shop_id = ${shopId}` : sql`WHERE p.vendor IS NOT NULL AND p.vendor <> ''`}
+        )
+        UNION
+        (
+          SELECT DISTINCT TRIM(COALESCE(cp.marca, '')) AS marca
+          FROM catalogo_productos cp
+          WHERE cp.marca IS NOT NULL AND cp.marca <> ''
+        )
+        ORDER BY marca ASC
+      `);
+      const brands = (result.rows || [])
+        .map((r: any) => r.marca)
+        .filter((s: any) => typeof s === 'string' && s.trim().length > 0);
+      res.json(brands);
+    } catch (e) {
+      res.status(500).json({ message: 'No se pudieron obtener marcas' });
     }
   });
 
@@ -1102,9 +1445,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
           orderGid: gid,
           reason: reasonEff,
           staffNote: staffNoteEff,
-          email: notifyCustomerEff,
+          notifyCustomer: notifyCustomerEff,
           restock: restockEff,
-          refund: refundEff,
+          refundToOriginal: refundEff,
         });
 
         if (!result.ok) {

@@ -5,14 +5,28 @@ type CancelArgs = {
   orderGid: string; // "gid://shopify/Order/1234567890"
   reason?: string;  // OrderCancelReason
   staffNote?: string;
-  email?: boolean;
-  restock?: boolean;
-  refund?: boolean;
+  notifyCustomer?: boolean;
+  restock?: boolean; // prefer true by default
+  refundToOriginal?: boolean;
 };
 
 const ORDER_CANCEL_MUTATION = `
-mutation orderCancel($id: ID!, $reason: OrderCancelReason, $staffNote: String, $email: Boolean, $restock: Boolean, $refund: Boolean){
-  orderCancel(id: $id, reason: $reason, staffNote: $staffNote, email: $email, restock: $restock, refund: $refund){
+mutation orderCancel(
+  $orderId: ID!,
+  $notifyCustomer: Boolean,
+  $refundMethod: OrderCancelRefundMethodInput,
+  $restock: Boolean!,
+  $reason: OrderCancelReason!,
+  $staffNote: String
+){
+  orderCancel(
+    orderId: $orderId,
+    notifyCustomer: $notifyCustomer,
+    refundMethod: $refundMethod,
+    restock: $restock,
+    reason: $reason,
+    staffNote: $staffNote
+  ){
     job { id }
     userErrors { field message }
   }
@@ -47,12 +61,12 @@ export async function cancelShopifyOrderAndWait(args: CancelArgs) {
     body: JSON.stringify({
       query: ORDER_CANCEL_MUTATION,
       variables: {
-        id: args.orderGid,
+        orderId: args.orderGid,
         reason: args.reason || "OTHER",
         staffNote: args.staffNote || null,
-        email: !!args.email,
-        restock: !!args.restock,
-        refund: !!args.refund,
+        notifyCustomer: (args.notifyCustomer === undefined ? true : !!args.notifyCustomer),
+        restock: (args.restock === undefined ? true : !!args.restock),
+        refundMethod: args.refundToOriginal ? { originalPaymentMethodsRefund: true } : null,
       }
     }),
   });
@@ -99,4 +113,3 @@ export async function cancelShopifyOrderAndWait(args: CancelArgs) {
 
   return { ok: true as const, order };
 }
-
