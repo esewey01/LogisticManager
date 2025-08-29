@@ -4,13 +4,13 @@ import { sql, SQL } from "drizzle-orm";
 import { eq, and, or, isNull, isNotNull, desc, asc, count } from "drizzle-orm";
 import {
   productLinks,
-  shopifyJobs,
+  // shopifyJobs, // tabla no disponible en el esquema actual
   variants,
   products,
   type ProductLink,
   type InsertProductLink,
-  type ShopifyJob,
-  type InsertShopifyJob
+  // type ShopifyJob,
+  // type InsertShopifyJob
 } from "@shared/schema";
 
 export class ProductStorage {
@@ -445,22 +445,9 @@ export class ProductStorage {
 
   // ================== JOBS DE SHOPIFY ==================
 
-  /** Encola job para Shopify */
-  async enqueueShopifyJob(job: Omit<InsertShopifyJob, 'id' | 'createdAt'>) {
-    try {
-      const [shopifyJob] = await baseDatos
-        .insert(shopifyJobs)
-        .values({
-          ...job,
-          createdAt: new Date()
-        })
-        .returning();
-
-      return shopifyJob;
-    } catch (error) {
-      console.error("Error enqueuing Shopify job:", error);
-      throw error;
-    }
+  /** Encola job para Shopify (deshabilitado: tabla no disponible) */
+  async enqueueShopifyJob(_job: any) {
+    return;
   }
 
   // ================== UTILIDADES ==================

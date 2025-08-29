@@ -25,7 +25,7 @@ export default function AdminUsuarios() {
     }
   }, [user, setLocation]);
 
-  const { data: users = [], isLoading } = useQuery({
+  const { data: users = [], isLoading } = useQuery<any[]>({
     queryKey: ["/api/admin/users"],
     enabled: user?.role === "admin",
   });

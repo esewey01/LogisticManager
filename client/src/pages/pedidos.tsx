@@ -9,15 +9,16 @@ import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
-import OrderDetailsModal from "@/components/modals/OrderDetailsModal";
+
 import OrderDetailsModalNew from "@/components/modals/OrderDetailsModalNew";
 import CancelOrderModal from "@/components/modals/CancelOrderModal";
+import ImportOrdersModal from "@/components/modals/ImportOrdersModal";
 import * as React from "react";
 import { Filter, Search, X } from "lucide-react";
 import { Eye, Ticket, Trash2 } from "lucide-react";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
-import { MlgPingBox } from "@/components/MlgPingBox"; // MLG-INTEGRATION
-import { MlgTestPanel } from "@/components/MlgTestPanel"; // MLG-INTEGRATION
+//import { MlgPingBox } from "@/components/MlgPingBox"; // MLG-INTEGRATION
+//import { MlgTestPanel } from "@/components/MlgTestPanel"; // MLG-INTEGRATION
 
 import {
   Popover,
@@ -184,6 +185,7 @@ export default function Pedidos() {
   const { toast } = useToast();
   const [sortField, setSortField] = useState<keyof OrderRow | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [showImportModal, setShowImportModal] = useState(false);
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
 
   // reset página y selección al cambiar filtros/busqueda
@@ -403,7 +405,7 @@ export default function Pedidos() {
   });
 
   const handleExportClick = () => exportMutation.mutate();
-  const handleImportClick = () => fileInputRef.current?.click();
+  const handleImportClick = () => setShowImportModal(true);
   const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (file) {
@@ -428,11 +430,11 @@ export default function Pedidos() {
           <h1 className="text-2xl font-semibold text-gray-900 mb-2">Gestión de Pedidos</h1>
           <p className="text-gray-600">Administra y procesa los pedidos del sistema</p>
           
-          {/* MLG-INTEGRATION: Testing components */}
+          {/* MLG-INTEGRATION: Testing components 
           <div className="mt-4 space-y-4">
             <MlgPingBox />
             <MlgTestPanel />
-          </div>
+          </div>*/}
         </div>
 
         {/* Filters and Actions */}
@@ -582,7 +584,7 @@ export default function Pedidos() {
                   type="file"
                   ref={fileInputRef}
                   style={{ display: 'none' }}
-                  accept=".xlsx,.xls"
+                  accept=".xlsx,.xls,.csv"
                   onChange={handleFileSelect}
                 />
               </div>
@@ -884,13 +886,6 @@ export default function Pedidos() {
           </CardContent>
         </Card>
 
-        {selectedOrder && (
-          <OrderDetailsModal
-            order={selectedOrder}
-            onClose={() => setSelectedOrder(null)}
-            channels={channels}
-          />
-        )}
 
         {selectedOrderId != null && (
           <OrderDetailsModalNew
@@ -908,6 +903,12 @@ export default function Pedidos() {
             setCancelOrderId(null);
             queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
           }}
+        />
+      )}
+      {showImportModal && (
+        <ImportOrdersModal
+          open={showImportModal}
+          onClose={() => setShowImportModal(false)}
         />
       )}
     </>

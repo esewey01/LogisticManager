@@ -11,13 +11,11 @@ import {
   carriers as tablaPaqueterias,
   orders as tablaOrdenes,
   tickets as tablaTickets,
-  shippingRules as tablaReglasEnvio,
   notes as tablaNotas,
   products as tablaProductos,
   variants as tablaVariantes,
   orderItems as tablaItemsOrden,
-  productComboItems as tablaItemsCombo,
-  externalProducts as tablaProductosExternos,
+  
   // Tipos (alias en español)
   type User as Usuario,
   type InsertUser as InsertarUsuario,
@@ -33,8 +31,6 @@ import {
   type InsertOrder as InsertarOrden,
   type Ticket as Ticket,
   type InsertTicket as InsertarTicket,
-  type ShippingRule as ReglaEnvio,
-  type InsertShippingRule as InsertarReglaEnvio,
   type Note as Nota,
   type InsertNote as InsertarNota,
   type DashboardMetrics,
@@ -44,10 +40,6 @@ import {
   type InsertVariant as InsertarVariante,
   type OrderItem as ItemOrden,
   type InsertOrderItem as InsertarItemOrden,
-  type ProductComboItem as ItemCombo,
-  type InsertProductComboItem as InsertarItemCombo,
-  type ExternalProduct as ProductoExterno,
-  type InsertExternalProduct as InsertarProductoExterno,
   orderItems,
 } from "@shared/schema";
 
@@ -67,6 +59,12 @@ import {
 } from "drizzle-orm";
 //Shopify fulfillment
 import { fulfillOrderInShopify } from "./shopifyFulfillment";
+
+// TODO: Legacy types/tables not present in current schema; declared only to satisfy interface typings.
+type ReglaEnvio = any;
+type InsertarReglaEnvio = any;
+const tablaReglasEnvio: any = undefined;
+const tablaProductosExternos: any = undefined;
 
 export type ExportFilters = {
   selectedIds?: (number | string)[];
@@ -510,95 +508,173 @@ export class DatabaseStorage implements IStorage {
   }
 
   //INFORMACION RELEVANTE DE LA ORDEN
-  async getOrderDetails(idParam: unknown) {
-    try {
-      const idNum = Number(idParam);
-      if (!Number.isInteger(idNum) || idNum <= 0) return undefined;
-      const idBig = BigInt(idNum);
+  // server/storage.ts
+async getOrderDetails(idParam: unknown) {
+  try {
+    const idNum = Number(idParam);
+    if (!Number.isInteger(idNum) || idNum <= 0) return undefined;
 
-      // NOTA: alias en camelCase para que coincidan con el FE
-      const { rows } = await baseDatos.execute(sql`
-        SELECT
-          -- Datos generales de la orden (camelCase)
-          o.id                               AS "id",
-          o.shop_id                          AS "shopId",
-          o.order_id                         AS "orderId",
-          o.name                             AS "name",
-          o.order_number                     AS "orderNumber",
-          o.customer_name                    AS "customerName",
-          o.customer_email                   AS "customerEmail",
-          o.subtotal_price                   AS "subtotalPrice",
-          o.total_amount                     AS "totalAmount",
-          o.currency                         AS "currency",
-          o.financial_status                 AS "financialStatus",
-          o.fulfillment_status               AS "fulfillmentStatus",
-          o.tags                             AS "tags",
-          o.order_note                       AS "orderNote",
-          o.created_at                       AS "createdAt",
-          o.shopify_created_at               AS "shopifyCreatedAt",
-          o.ship_name                        AS "shipName",
-          o.ship_phone                       AS "shipPhone",
-          o.ship_address1                    AS "shipAddress1",
-          o.ship_city                        AS "shipCity",
-          o.ship_province                    AS "shipProvince",
-          o.ship_country                     AS "shipCountry",
-          o.ship_zip                         AS "shipZip",
+    const { rows } = await baseDatos.execute(sql`
+      SELECT
+        -- Datos generales (alias camelCase)
+        o.id                              AS "id",
+        o.shop_id                         AS "shopId",
+        o.order_id                        AS "orderId",
+        o.name                            AS "name",
+        o.order_number                    AS "orderNumber",
+        o.customer_name                   AS "customerName",
+        o.customer_email                  AS "customerEmail",
+        o.subtotal_price                  AS "subtotalPrice",
+        o.total_amount                    AS "totalAmount",
+        o.currency                        AS "currency",
+        o.financial_status                AS "financialStatus",
+        o.fulfillment_status              AS "fulfillmentStatus",
+        o.tags                            AS "tags",
+        o.order_note                      AS "orderNote",
+        o.created_at                      AS "createdAt",
+        o.shopify_created_at              AS "shopifyCreatedAt",
+        o.ship_name                       AS "shipName",
+        o.ship_phone                      AS "shipPhone",
+        o.ship_address1                   AS "shipAddress1",
+        o.ship_city                       AS "shipCity",
+        o.ship_province                   AS "shipProvince",
+        o.ship_country                    AS "shipCountry",
+        o.ship_zip                        AS "shipZip",
 
-          -- Ítems enriquecidos como JSONB
-          COALESCE(
-            jsonb_agg(
-              jsonb_build_object(
-                'orderItemId',    oi.id,
-                'skuCanal',       oi.sku,
-                'skuMarca',       cp.sku,
-                'skuInterno',     cp.sku_interno,
-                'quantity',       oi.quantity,
-                'priceVenta',     oi.price,
+        -- Ítems enriquecidos: subconsulta por orden (garantiza 1-a-1 por order_item)
+        COALESCE((
+          SELECT COALESCE(jsonb_agg(jsonb_build_object(
+            'orderItemId',    x.order_item_id,
+            'skuCanal',       x.sku_canal,
+            'skuMarca',       x.sku_marca,
+            'skuInterno',     x.sku_interno,
+            'quantity',       x.quantity,
+            'priceVenta',     x.price_venta,
+            'unitPrice',      x.unit_price,
+            'mappingStatus',  x.mapping_status,
+            'matchSource',    x.match_source,
 
-                'title',          p.title,
-                'vendor',         p.vendor,
-                'productType',    p.product_type,
+            'title',          x.title,
+            'vendor',         x.vendor,
+            'productType',    x.product_type,
 
-                'barcode',        v.barcode,
-                'compareAtPrice', v.compare_at_price,
-                'stockShopify',   v.inventory_qty,
+            'barcode',        x.barcode,
+            'compareAtPrice', x.compare_at_price,
+            'stockShopify',   x.inventory_qty,
 
-                'nombreProducto', cp.nombre_producto,
-                'categoria',      cp.categoria,
-                'condicion',      cp.condicion,
-                'marca',          cp.marca,
-                'variante',       cp.variante,
-                'largo',          cp.largo,
-                'ancho',          cp.ancho,
-                'alto',           cp.alto,
-                'peso',           cp.peso,
-                'foto',           cp.foto,
-                'costo',          cp.costo,
-                'stockMarca',     cp.stock
-              )
-            ) FILTER (WHERE oi.id IS NOT NULL),
-            '[]'::jsonb
-          ) AS "items"
-        FROM orders o
-        LEFT JOIN order_items oi
-          ON oi.order_id = o.id
-        LEFT JOIN products p
-          ON p.id_shopify = oi.shopify_product_id
-        LEFT JOIN variants v
-          ON v.id_shopify = oi.shopify_variant_id
-        LEFT JOIN catalogo_productos cp
-          ON cp.sku_interno = oi.sku
-        WHERE o.id = ${idBig}
-        GROUP BY o.id
-      `);
+            'nombreProducto', x.nombre_producto,
+            'categoria',      x.categoria,
+            'condicion',      x.condicion,
+            'marca',          x.marca,
+            'variante',       x.variante,
+            'largo',          x.largo,
+            'ancho',          x.ancho,
+            'alto',           x.alto,
+            'peso',           x.peso,
+            'foto',           x.foto,
+            'costo',          x.costo,
+            'stockMarca',     x.stock_marca
+          )), '[]'::jsonb)
+          FROM (
+            SELECT
+              oi.id          AS order_item_id,
+              oi.sku         AS sku_canal,
+              oi.quantity    AS quantity,
+              oi.price       AS price_venta,
 
-      const row = (rows as any[])[0];
-      return row ?? undefined;
-    } catch (e) {
-      console.error("[Storage] Error getOrderDetails:", (e as any)?.message || e);
-      return undefined;
-    }
+              -- products (1 fila garantizada por id_shopify)
+              p.title        AS title,
+              p.vendor       AS vendor,
+              p.product_type AS product_type,
+
+              -- variants (1 fila garantizada por id_shopify)
+              v.barcode,
+              v.compare_at_price,
+              v.inventory_qty,
+
+              -- catalogo_productos (elegir UNA fila “mejor coincidencia”)
+              cp.sku         AS sku_marca,
+              cp.sku_interno AS sku_interno,
+              cp.nombre_producto,
+              cp.categoria,
+              cp.condicion,
+              cp.marca,
+              cp.variante,
+              cp.largo,
+              cp.ancho,
+              cp.alto,
+              cp.peso,
+              cp.foto,
+              cp.costo,
+              cp.stock       AS stock_marca,
+
+              -- Campos derivados de mapeo
+              CASE WHEN cp.sku IS NULL AND cp.sku_interno IS NULL THEN 'unmapped'
+                   ELSE 'matched'
+              END AS mapping_status,
+              CASE
+                WHEN cp.sku_interno IS NOT NULL AND oi.sku IS NOT NULL AND lower(cp.sku_interno) = lower(oi.sku) THEN 'interno'
+                WHEN cp.sku           IS NOT NULL AND oi.sku IS NOT NULL AND lower(cp.sku)           = lower(oi.sku) THEN 'externo'
+                ELSE NULL
+              END AS match_source,
+              cp.costo AS unit_price
+
+            FROM order_items oi
+
+            -- products por Shopify product id
+            LEFT JOIN LATERAL (
+              SELECT p.*
+              FROM products p
+              WHERE p.id_shopify = oi.shopify_product_id
+              LIMIT 1
+            ) p ON TRUE
+
+            -- variants por Shopify variant id
+            LEFT JOIN LATERAL (
+              SELECT v.*
+              FROM variants v
+              WHERE v.id_shopify = oi.shopify_variant_id
+              LIMIT 1
+            ) v ON TRUE
+
+            -- catalogo_productos: NO hay updated_at ni id; preferimos coincidencia exacta.
+            -- Regla: si oi.sku coincide con cp.sku_interno => prioriza; si no, prueba con cp.sku.
+            LEFT JOIN LATERAL (
+              SELECT cp.*
+              FROM catalogo_productos cp
+              WHERE
+                (cp.sku_interno IS NOT NULL OR cp.sku IS NOT NULL)
+                AND (
+                  (oi.sku IS NOT NULL AND lower(cp.sku_interno) = lower(oi.sku))
+                  OR
+                  (oi.sku IS NOT NULL AND lower(cp.sku) = lower(oi.sku))
+                )
+              ORDER BY
+                (lower(cp.sku_interno) = lower(oi.sku)) DESC,
+                (lower(cp.sku) = lower(oi.sku)) DESC,
+                cp.sku_interno NULLS LAST,
+                cp.sku        NULLS LAST
+              LIMIT 1
+            ) cp ON TRUE
+
+            WHERE oi.order_id = o.id
+          ) x
+        ), '[]'::jsonb) AS "items"
+
+      FROM orders o
+      WHERE o.id = ${idNum}
+      LIMIT 1
+    `);
+
+    const row = (rows as any[])[0];
+    return row ?? undefined;
+  } catch (e) {
+    console.error("[Storage] Error getOrderDetails:", (e as any)?.message || e);
+    return undefined;
   }
+}
+
+
 
   /** 
    * Obtiene una orden por ID con detalles completos 
@@ -609,7 +685,7 @@ export class DatabaseStorage implements IStorage {
       const idNum = Number(idParam);
       if (!Number.isInteger(idNum) || idNum <= 0) return undefined;
 
-      const idBig = BigInt(idNum); // ✅ nunca BigInt(NaN)
+      const idBig = Number(idNum); // ✅ nunca BigInt(NaN)
       const [orden] = await baseDatos
         .select()
         .from(tablaOrdenes)
@@ -642,7 +718,7 @@ export class DatabaseStorage implements IStorage {
     const [orden] = await baseDatos
       .update(tablaOrdenes)
       .set(updates)
-      .where(eq(tablaOrdenes.id, BigInt(id)))
+      .where(eq(tablaOrdenes.id, Number(id)))
       .returning();
     return orden;
   }
@@ -867,25 +943,28 @@ export class DatabaseStorage implements IStorage {
 
         // 2) Primero intentar fulfill en Shopify
         let fulfillResp: any;
-        try {
-          fulfillResp = await fulfillOrderInShopify({
-            storeNumber,
-            shopifyOrderId: String(shopifyOrderId),
-            notifyCustomer: false,
-          });
-        } catch (shopifyError: any) {
-          failed.push({
-            orderId: oid,
-            reason: `Shopify error: ${shopifyError?.message || shopifyError}`
-          });
-          continue; // Si Shopify falla, no continuar con esta orden
+        // No empujar a Shopify si es MLG (shopId=3)
+        if (storeNumber !== 3) {
+          try {
+            fulfillResp = await fulfillOrderInShopify({
+              storeNumber,
+              shopifyOrderId: String(shopifyOrderId),
+              notifyCustomer: false,
+            });
+          } catch (shopifyError: any) {
+            failed.push({
+              orderId: oid,
+              reason: `Shopify error: ${shopifyError?.message || shopifyError}`
+            });
+            continue; // Si Shopify falla, no continuar con esta orden
+          }
         }
 
         // 3) Si Shopify fue exitoso, crear ticket y actualizar BD local
         const ticketTx = await baseDatos.transaction(async (tx) => {
           const [ticketNuevo] = await tx.insert(tablaTickets).values({
             ticketNumber: sql`nextval('public.ticket_number_seq')::text`,
-            orderId: BigInt(orderIdNum),
+            orderId: Number(orderIdNum),
             status: "open",
             notes: notes || `Ticket creado masivamente para orden ${shopifyOrderId}`,
           }).returning();
@@ -896,7 +975,7 @@ export class DatabaseStorage implements IStorage {
               fulfillmentStatus: "fulfilled",
               shopifyUpdatedAt: new Date()
             })
-            .where(eq(tablaOrdenes.id, BigInt(orderIdNum)));
+            .where(eq(tablaOrdenes.id, Number(orderIdNum)));
 
           return ticketNuevo;
         });
@@ -932,7 +1011,7 @@ export class DatabaseStorage implements IStorage {
     const [orden] = await baseDatos
       .select()
       .from(tablaOrdenes)
-      .where(eq(tablaOrdenes.id, BigInt(orderId)));
+      .where(eq(tablaOrdenes.id, Number(orderId)));
 
     if (!orden) throw new Error(`Orden ${orderId} no encontrada`);
 
@@ -940,6 +1019,35 @@ export class DatabaseStorage implements IStorage {
     if (!shopifyOrderId) throw new Error(`La orden ${orderId} no tiene order_id de Shopify`);
 
     const storeNumber = orden.shopId ?? parseInt(process.env.DEFAULT_SHOPIFY_STORE || "1", 10);
+
+    // MLG: no empujar a Shopify, crear ticket y marcar fulfilled localmente
+    if (storeNumber === 3) {
+      const nuevoTicket = await baseDatos.transaction(async (tx) => {
+        const [ticketCreado] = await tx
+          .insert(tablaTickets)
+          .values({
+            ticketNumber: sql`nextval('public.ticket_number_seq')::text`,
+            orderId: Number(orderId),
+            status: "open",
+            notes,
+          })
+          .returning();
+
+        if (!ticketCreado) throw new Error("No se pudo crear el ticket");
+
+        await tx
+          .update(tablaOrdenes)
+          .set({
+            fulfillmentStatus: "fulfilled",
+            shopifyUpdatedAt: new Date(),
+          })
+          .where(eq(tablaOrdenes.id, Number(orderId)));
+
+        return ticketCreado;
+      });
+
+      return nuevoTicket;
+    }
 
     try {
       // 2) Primero fulfill en Shopify
@@ -957,7 +1065,7 @@ export class DatabaseStorage implements IStorage {
           .insert(tablaTickets)
           .values({
             ticketNumber: sql`nextval('public.ticket_number_seq')::text`,
-            orderId: BigInt(orderId),
+            orderId: Number(orderId),
             status: "open",
             notes,
           })
@@ -971,7 +1079,7 @@ export class DatabaseStorage implements IStorage {
             fulfillmentStatus: "fulfilled",
             shopifyUpdatedAt: new Date(),
           })
-          .where(eq(tablaOrdenes.id, BigInt(orderId)));
+          .where(eq(tablaOrdenes.id, Number(orderId)));
 
         return ticketCreado;
       });
@@ -1023,7 +1131,7 @@ export class DatabaseStorage implements IStorage {
       await tx.delete(tablaTickets).where(eq(tablaTickets.id, id));
       await tx.update(tablaOrdenes)
         .set({ fulfillmentStatus: '' as any, shopifyUpdatedAt: new Date() })
-        .where(eq(tablaOrdenes.id, typeof orderPk === 'bigint' ? orderPk : BigInt(orderPk)));
+        .where(eq(tablaOrdenes.id, Number(orderPk)));
     });
 
     return { ok: true, changedLocal: true, cancelledRemote };
@@ -1034,20 +1142,14 @@ export class DatabaseStorage implements IStorage {
   ///==== REGLAS DE ENVÍO ====
 
   /** Devuelve reglas de envío activas. */
+  // Removed: shipping rules are not part of current schema
   async getShippingRules(): Promise<ReglaEnvio[]> {
-    return await baseDatos
-      .select()
-      .from(tablaReglasEnvio)
-      .where(eq(tablaReglasEnvio.isActive, true));
+    return [] as any[];
   }
 
   /** Crea una regla de envío. */
-  async createShippingRule(regla: InsertarReglaEnvio): Promise<ReglaEnvio> {
-    const [nuevaRegla] = await baseDatos
-      .insert(tablaReglasEnvio)
-      .values(regla)
-      .returning();
-    return nuevaRegla;
+  async createShippingRule(_regla: InsertarReglaEnvio): Promise<ReglaEnvio> {
+    throw new Error('Shipping rules not supported');
   }
 
   // ==== NOTAS ====
@@ -1466,7 +1568,7 @@ export class DatabaseStorage implements IStorage {
       const [order] = await baseDatos
         .select()
         .from(tablaOrdenes)
-        .where(eq(tablaOrdenes.id, BigInt(orderId)))
+        .where(eq(tablaOrdenes.id, Number(orderId)))
         .limit(1);
       return order;
     } catch (error) {
@@ -1481,7 +1583,7 @@ export class DatabaseStorage implements IStorage {
       const items = await baseDatos
         .select()
         .from(tablaItemsOrden)
-        .where(eq(tablaItemsOrden.orderId, BigInt(orderId)));
+        .where(eq(tablaItemsOrden.orderId, Number(orderId)));
       return items;
     } catch (error) {
       console.error("Error getting order items for shipping:", error);
@@ -1621,8 +1723,7 @@ export class DatabaseStorage implements IStorage {
         // Crear ticket
         const numeroTicket = await this.getNextTicketNumber();
         const ticket = await this.createTicket({
-          orderId: BigInt(numericOrderId),
-          ticketNumber: numeroTicket,
+          orderId: Number(numericOrderId) as any,
           status: 'open',
           notes: notes || `Ticket creado automáticamente para orden ${numericOrderId}`
         });
@@ -1852,7 +1953,7 @@ export class DatabaseStorage implements IStorage {
       const idNum = Number(orderIdParam);
       if (!Number.isInteger(idNum) || idNum <= 0) return [];
 
-      const idBig = BigInt(idNum);
+      const idBig = Number(idNum);
       console.log(`[DEBUG] Buscando items para order ID: ${idNum}`);
 
       // Primero obtenemos los items básicos
@@ -1923,17 +2024,8 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getExternalProductsPaginated(page: number, pageSize: number) {
-    const offset = (page - 1) * pageSize;
-    const rows = await baseDatos
-      .select()
-      .from(tablaProductosExternos)
-      .orderBy(asc(tablaProductosExternos.prod))
-      .limit(pageSize)
-      .offset(offset);
-    const totalRes = await baseDatos
-      .select({ count: count() })
-      .from(tablaProductosExternos);
-    return { rows, total: Number(totalRes[0]?.count ?? 0), page, pageSize };
+    // Removed: external_products table is not part of current schema
+    return { rows: [], total: 0, page, pageSize };
   }
 
   async getOrdersForExport(filters: ExportFilters): Promise<any[]> {
@@ -2068,6 +2160,26 @@ export class DatabaseStorage implements IStorage {
   }
 
   async importOrdersFromRows(rows: Array<Record<string, unknown>>) {
+    // Normalizadores reutilizables
+    const toDecimal = (v: unknown) =>
+      v == null || v === "" ? null : (typeof v === "number" ? v : Number(String(v).replace(/,/g, "")));
+    const toDate = (v: unknown) => (v ? new Date(String(v)) : null);
+    const toArray = (v: unknown) =>
+      Array.isArray(v) ? v : (typeof v === "string" ? v.split(",").map(s => s.trim()).filter(Boolean) : null);
+
+    type Group = {
+      shopId: number;
+      orderId: string;
+      rows: number[]; // índices de filas que pertenecen al grupo
+      payload: Partial<InsertarOrden>;
+      items: Array<{
+        sku: string;
+        quantity: number;
+        price?: number | null;
+        title?: string | null;
+      }>;
+    };
+
     const results: Array<{
       rowIndex: number;
       status: "ok" | "skipped" | "error";
@@ -2077,84 +2189,150 @@ export class DatabaseStorage implements IStorage {
       orderId?: number | string;
     }> = [];
 
-    let ok = 0, skipped = 0, errors = 0;
+    const groups = new Map<string, Group>();
+    const mark = (rowIndex: number, status: "ok" | "skipped" | "error", extra: Partial<typeof results[number]> = {}) => {
+      results.push({ rowIndex, status, ...extra } as any);
+    };
 
+    // 1) Agrupar por (shopId, orderId)
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i];
+      const shopIdRaw = row["shopId"];
+      const orderIdRaw = row["orderId"];
 
-      try {
-        const shopIdRaw = row["shopId"];
-        const orderIdRaw = row["orderId"];
+      if (shopIdRaw == null || orderIdRaw == null) {
+        mark(i, "skipped", { message: "Faltan columnas obligatorias: shopId y/o orderId" });
+        continue;
+      }
 
-        if (shopIdRaw == null || orderIdRaw == null) {
-          skipped++;
-          results.push({
-            rowIndex: i,
-            status: "skipped",
-            message: "Faltan columnas obligatorias: shopId y/o orderId",
-          });
-          continue;
-        }
+      const shopId = Number(shopIdRaw);
+      const orderId = String(orderIdRaw).trim();
+      if (!Number.isInteger(shopId) || !orderId) {
+        mark(i, "skipped", {
+          message: "Valores inválidos en shopId/orderId",
+          field: !Number.isInteger(shopId) ? "shopId" : "orderId",
+          value: !Number.isInteger(shopId) ? shopIdRaw : orderIdRaw,
+        });
+        continue;
+      }
 
-        const shopId = Number(shopIdRaw);
-        const orderId = String(orderIdRaw).trim();
-        if (!Number.isInteger(shopId) || !orderId) {
-          skipped++;
-          results.push({
-            rowIndex: i,
-            status: "skipped",
-            message: "Valores inválidos en shopId/orderId",
-            field: !Number.isInteger(shopId) ? "shopId" : "orderId",
-            value: !Number.isInteger(shopId) ? shopIdRaw : orderIdRaw,
-          });
-          continue;
-        }
-
-        // Buscar si existe
-        const existente = await this.getOrderByShopifyId(orderId, shopId);
-
-        // Normalizaciones opcionales
-        const toDecimal = (v: unknown) =>
-          v == null || v === "" ? null : (typeof v === "number" ? v : Number(String(v).replace(/,/g, "")));
-        const toDate = (v: unknown) => (v ? new Date(String(v)) : null);
-        const toArray = (v: unknown) =>
-          Array.isArray(v) ? v : (typeof v === "string" ? v.split(",").map(s => s.trim()).filter(Boolean) : null);
-
-        const payload: Partial<InsertarOrden> = {
+      const key = `${shopId}::${orderId}`;
+      if (!groups.has(key)) {
+        groups.set(key, {
           shopId,
           orderId,
-          name: (row["name"] as string) ?? null,
-          orderNumber: (row["orderNumber"] as string) ?? null,
-          customerName: (row["customerName"] as string) ?? null,
-          customerEmail: (row["customerEmail"] as string) ?? null,
-          subtotalPrice: toDecimal(row["subtotalPrice"]) as any,
-          totalAmount: toDecimal(row["totalAmount"]) as any,
-          currency: (row["currency"] as string) ?? null,
-          financialStatus: (row["financialStatus"] as string) ?? null,
-          fulfillmentStatus: (row["fulfillmentStatus"] as string) ?? null,
-          tags: toArray(row["tags"]) as any,
-          createdAt: toDate(row["createdAt"]) ?? undefined,
-          shopifyCreatedAt: toDate(row["shopifyCreatedAt"]) ?? undefined,
-        };
+          rows: [],
+          payload: {
+            shopId,
+            orderId,
+          },
+          items: [],
+        });
+      }
+      const g = groups.get(key)!;
+      g.rows.push(i);
 
+      // Merge payload (primer valor no nulo gana)
+      const mergeField = (k: keyof InsertarOrden, v: unknown) => {
+        if (v === undefined) return;
+        const cur = (g.payload as any)[k];
+        if (cur === undefined || cur === null) (g.payload as any)[k] = v as any;
+      };
+
+      mergeField("name", (row["name"] as string) ?? null);
+      mergeField("orderNumber", (row["orderNumber"] as string) ?? null);
+      mergeField("customerName", (row["customerName"] as string) ?? null);
+      mergeField("customerEmail", (row["customerEmail"] as string) ?? null);
+      mergeField("subtotalPrice", toDecimal(row["subtotalPrice"]) as any);
+      mergeField("totalAmount", toDecimal(row["totalAmount"]) as any);
+      mergeField("currency", (row["currency"] as string) ?? null);
+      mergeField("financialStatus", (row["financialStatus"] as string) ?? null);
+      mergeField("fulfillmentStatus", (row["fulfillmentStatus"] as string) ?? null);
+      mergeField("tags", toArray(row["tags"]) as any);
+      mergeField("createdAt", toDate(row["createdAt"]) ?? undefined);
+      mergeField("shopifyCreatedAt", toDate(row["shopifyCreatedAt"]) ?? undefined);
+
+      // Items: Modo A (JSON en 'items')
+      if (row.hasOwnProperty("items") && row["items"] != null && String(row["items"]).trim() !== "") {
+        try {
+          const arr = Array.isArray(row["items"]) ? (row["items"] as any[]) : JSON.parse(String(row["items"])) as any[];
+          if (Array.isArray(arr)) {
+            for (const it of arr) {
+              const sku = String(it?.sku ?? "").trim();
+              const qty = Number(it?.quantity ?? it?.qty ?? 0);
+              if (!sku || !Number.isFinite(qty) || qty <= 0) continue; // valida mínimos
+              const price = toDecimal(it?.price) as number | null;
+              const title = (it?.title != null ? String(it.title) : null) as string | null;
+              g.items.push({ sku, quantity: qty, price: price as any, title });
+            }
+          }
+        } catch (e) {
+          mark(i, "error", { message: "items JSON inválido" });
+        }
+      }
+
+      // Items: Modo B (columnas sku, quantity, price, title)
+      if (row.hasOwnProperty("sku") || row.hasOwnProperty("quantity")) {
+        const sku = (row["sku"] != null ? String(row["sku"]) : "").trim();
+        const qty = Number(row["quantity"] ?? 0);
+        if (sku && Number.isFinite(qty) && qty > 0) {
+          const price = toDecimal(row["price"]) as number | null;
+          const title = (row["title"] != null ? String(row["title"]) : null) as string | null;
+          g.items.push({ sku, quantity: qty, price: price as any, title });
+        }
+      }
+    }
+
+    let ok = 0, skipped = results.filter(r => r.status === "skipped").length, errors = results.filter(r => r.status === "error").length;
+
+    // 2) Procesar cada grupo (transacción por orden: upsert y sincronizar ítems)
+    for (const [, g] of groups) {
+      try {
+        const existente = await this.getOrderByShopifyId(g.orderId, g.shopId);
+        let orderPk: number;
         if (existente) {
-          // update
-          await this.updateOrder(Number(existente.id), payload as any);
+          await this.updateOrder(Number(existente.id), g.payload as any);
+          orderPk = Number(existente.id);
         } else {
-          // create
-          await this.createOrder(payload as InsertarOrden);
+          const created = await this.createOrder(g.payload as InsertarOrden);
+          orderPk = Number(created.id);
         }
 
-        ok++;
-        results.push({ rowIndex: i, status: "ok", orderId });
+        // Sincronizar ítems: borrar e insertar (idempotente a nivel de import)
+        const run = async () => {
+          await baseDatos.delete(tablaItemsOrden).where(eq(tablaItemsOrden.orderId as any, orderPk as any));
+          if (g.items.length > 0) {
+            const values = g.items.map((it) => ({
+              orderId: orderPk,
+              sku: it.sku,
+              quantity: it.quantity,
+              price: it.price as any,
+              title: it.title ?? null,
+            })) as any[];
+            await baseDatos.insert(tablaItemsOrden).values(values);
+          }
+        };
 
+        // Usa transacción si está disponible
+        const txAny = (baseDatos as any);
+        if (typeof txAny.transaction === 'function') {
+          await txAny.transaction(async () => { await run(); });
+        } else {
+          await run();
+        }
+
+        ok += g.rows.length;
+        for (const idx of g.rows) {
+          // Si ya se marcó error por items JSON inválido no sobreescribir
+          if (!results.find(r => r.rowIndex === idx)) {
+            mark(idx, "ok", { orderId: g.orderId });
+          }
+        }
       } catch (e: any) {
-        errors++;
-        results.push({
-          rowIndex: i,
-          status: "error",
-          message: e?.message || "Error no identificado",
-        });
+        errors += g.rows.length;
+        for (const idx of g.rows) {
+          mark(idx, "error", { message: e?.message || "Error al guardar orden/ítems", orderId: g.orderId });
+        }
       }
     }
 
@@ -2171,3 +2349,34 @@ export class DatabaseStorage implements IStorage {
 // Instancia lista para usar (compatibilidad y alias en español)
 export const storage = new DatabaseStorage();
 export const almacenamiento = storage;
+
+// Actualización segura de campos de cancelación (opcional según columnas existentes)
+export async function markOrderCancelledSafe(idNum: number, payload: {
+  cancelledAt?: string | null; // Shopify order.cancelledAt
+  cancelReason?: string | null;
+  staffNote?: string | null;   // map to orderNote if exists
+  displayFinancialStatus?: string | null;
+  displayFulfillmentStatus?: string | null;
+}) {
+  try {
+    const updateData: Record<string, any> = {};
+    // Schema-aligned fields (see shared/schema.ts)
+    if (typeof payload.cancelledAt !== "undefined") updateData["shopifyCancelledAt"] = payload.cancelledAt;
+    if (typeof payload.cancelReason !== "undefined") updateData["cancelReason"] = payload.cancelReason;
+    if (typeof payload.staffNote !== "undefined") updateData["orderNote"] = payload.staffNote;
+    if (typeof payload.displayFinancialStatus !== "undefined") updateData["financialStatus"] = payload.displayFinancialStatus;
+    if (typeof payload.displayFulfillmentStatus !== "undefined") updateData["fulfillmentStatus"] = payload.displayFulfillmentStatus;
+
+    if (Object.keys(updateData).length === 0) return { ok: true, skipped: true } as const;
+
+    await baseDatos
+      .update(tablaOrdenes)
+      .set(updateData as any)
+      .where(eq(tablaOrdenes.id, idNum as any));
+
+    return { ok: true } as const;
+  } catch (e) {
+    console.warn("[cancel-order] markOrderCancelledSafe skipped or failed:", (e as any)?.message);
+    return { ok: true, warning: "update skipped" } as const;
+  }
+}

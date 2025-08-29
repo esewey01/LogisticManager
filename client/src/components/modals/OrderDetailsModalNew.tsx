@@ -1,6 +1,6 @@
 // src/components/modals/OrderDetailsModalNew.tsx
-import React from "react";
-import { useQuery } from "@tanstack/react-query";
+import React, { useMemo, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
@@ -8,12 +8,15 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import {
   Loader2, Package, User, Calendar, DollarSign, MapPin, Phone, Mail,
-  Store, Ticket, CheckCircle2, AlertTriangle, Barcode,
+  Store, Ticket, CheckCircle2, AlertTriangle, Barcode, Search,
 } from "lucide-react";
 
 /* ===================== Tipos ===================== */
@@ -30,6 +33,9 @@ type OrderItemEnriched = {
   skuInterno: string | null;   // catalogo_productos.sku_interno (match clave)
   quantity: number;
   priceVenta: string | null;   // order_items.price
+  unitPrice?: string | number | null; // costo del catálogo (backend)
+  mappingStatus?: "matched" | "unmapped";
+  matchSource?: "interno" | "externo" | null;
 
   title: string | null;        // products.title (Shopify)
   vendor: string | null;       // products.vendor
@@ -140,6 +146,150 @@ const calculateItemTotal = (price: string | null, quantity: number, currency?: s
   return formatCurrency(String(total), currency ?? "MXN");
 };
 
+// Mini componente para seleccionar y asignar SKU a un item
+type CatalogItem = {
+  sku: string;
+  sku_interno: string | null;
+  nombre_producto: string | null;
+  costo: number | string | null;
+  stock: number | null;
+};
+
+function SkuSelector({
+  orderId,
+  itemId,
+  onAssigned,
+  compact,
+}: {
+  orderId: number;
+  itemId: number;
+  onAssigned: () => void;
+  compact?: boolean;
+}) {
+  const qc = useQueryClient();
+  const [q, setQ] = useState("");
+  const [results, setResults] = useState<CatalogItem[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [selected, setSelected] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const searchCatalog = async (query: string) => {
+    const url = `/api/catalogo/search?q=${encodeURIComponent(query)}`;
+    const res = await fetch(url, { credentials: "include" });
+    if (!res.ok) throw new Error(await res.text());
+    return (await res.json()) as CatalogItem[];
+  };
+
+  const handleSearch = async () => {
+    setError(null);
+    const term = q.trim();
+    if (!term) {
+      setResults([]);
+      return;
+    }
+    try {
+      setLoading(true);
+      const rows = await searchCatalog(term);
+      setResults(rows);
+    } catch (e: any) {
+      setError(e?.message || "Error en búsqueda");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const assignMutation = useMutation({
+    mutationFn: async (sku: string) => {
+      const res = await apiRequest(
+        "PUT",
+        `/api/orders/${orderId}/items/${itemId}/sku`,
+        { sku }
+      );
+      return res.json().catch(() => ({}));
+    },
+    onSuccess: async () => {
+      // Invalida y refetch de detalles
+      await qc.invalidateQueries({ queryKey: ["/api/orders", orderId, "details"] });
+      onAssigned();
+    },
+    onError: (e: any) => {
+      setError(e?.message || "No se pudo asignar SKU");
+    },
+  });
+
+  return (
+    <div className={compact ? "space-y-2" : "space-y-3 p-3 border rounded-md bg-white"}>
+      <div className="flex items-center gap-2">
+        <Input
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          placeholder="Buscar por SKU, interno o nombre"
+          onKeyDown={(e) => {
+            if (e.key === "Enter") handleSearch();
+          }}
+        />
+        <Button type="button" variant="secondary" onClick={handleSearch} disabled={loading}>
+          <Search className="w-4 h-4 mr-1" /> Buscar
+        </Button>
+      </div>
+      {error && (
+        <p className="text-sm text-red-600">{error}</p>
+      )}
+      <div className="max-h-48 overflow-auto border rounded">
+        {loading ? (
+          <div className="p-3 text-sm text-gray-500">Buscando...</div>
+        ) : results.length === 0 ? (
+          <div className="p-3 text-sm text-gray-500">Sin resultados</div>
+        ) : (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>SKU</TableHead>
+                <TableHead>Interno</TableHead>
+                <TableHead>Nombre</TableHead>
+                <TableHead className="text-right">Costo</TableHead>
+                <TableHead className="text-center">Stock</TableHead>
+                <TableHead className="text-right">Acción</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {results.map((r) => (
+                <TableRow key={`${r.sku}-${r.sku_interno}`} className={selected === (r.sku || r.sku_interno || "") ? "bg-amber-50" : ""}>
+                  <TableCell className="font-mono text-xs">{r.sku || "-"}</TableCell>
+                  <TableCell className="font-mono text-xs">{r.sku_interno || "-"}</TableCell>
+                  <TableCell className="text-sm">{r.nombre_producto || "-"}</TableCell>
+                  <TableCell className="text-right font-mono text-xs">{formatCurrency(String(r.costo ?? 0))}</TableCell>
+                  <TableCell className="text-center">
+                    {r.stock === 0 ? (
+                      <Badge variant="destructive">Sin stock</Badge>
+                    ) : (
+                      <Badge variant="secondary">{r.stock ?? "-"}</Badge>
+                    )}
+                  </TableCell>
+                  <TableCell className="text-right">
+                    <Button
+                      size="sm"
+                      onClick={() => {
+                        const sku = r.sku_interno || r.sku; // prefer interno si está
+                        if (!sku) return;
+                        setSelected(sku);
+                        assignMutation.mutate(sku);
+                      }}
+                      disabled={assignMutation.isPending}
+                    >
+                      Asignar
+                    </Button>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}
+      </div>
+    </div>
+  );
+}
+
 /* ===================== Componente ===================== */
 export default function OrderDetailsModalNew({ orderId, isOpen, onClose }: OrderDetailsModalProps) {
   const {
@@ -164,6 +314,8 @@ export default function OrderDetailsModalNew({ orderId, isOpen, onClose }: Order
 
   const items = order?.items ?? [];
   const skuChips = items.slice(0, 6);
+  const hasUnmapped = useMemo(() => items.some((it) => it.mappingStatus === "unmapped"), [items]);
+  const qc = useQueryClient();
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
@@ -234,6 +386,13 @@ export default function OrderDetailsModalNew({ orderId, isOpen, onClose }: Order
                 </CardTitle>
               </CardHeader>
               <CardContent>
+                {hasUnmapped && (
+                  <Alert className="mb-4 border-amber-300 bg-amber-50">
+                    <AlertDescription>
+                      Ítems sin mapeo detectados. Asigna un SKU para continuar.
+                    </AlertDescription>
+                  </Alert>
+                )}
                 {items.length > 0 ? (
                   <Table>
                     <TableHeader>
@@ -249,9 +408,14 @@ export default function OrderDetailsModalNew({ orderId, isOpen, onClose }: Order
                       {items.map((it) => (
                         <TableRow key={String(it.orderItemId)}>
                           <TableCell className="font-mono text-sm">
-                            {(it.skuInterno || "—")}
+                            {(it.skuInterno || "-")}
                             {it.skuMarca ? <span className="text-gray-500"> / {it.skuMarca}</span> : null}
                             {it.skuCanal ? <span className="text-gray-500"> / {it.skuCanal}</span> : null}
+                            {it.mappingStatus === "unmapped" && (
+                              <span className="ml-2">
+                                <Badge variant="destructive">Sin mapeo</Badge>
+                              </span>
+                            )}
                           </TableCell>
                           <TableCell className="max-w-[420px]">
                             <div className="flex items-start gap-3">
@@ -277,9 +441,30 @@ export default function OrderDetailsModalNew({ orderId, isOpen, onClose }: Order
                                   )}
                                   {(it.stockShopify != null || it.stockMarca != null) && (
                                     <span className="inline-flex items-center gap-2">
-                                      <Badge variant="secondary">Stock SF: {it.stockShopify ?? "—"}</Badge>
-                                      <Badge variant="secondary">Stock Marca: {it.stockMarca ?? "—"}</Badge>
+                                      <Badge variant="secondary">Stock SF: {it.stockShopify ?? "-"}</Badge>
+                                      {it.stockMarca === 0 ? (
+                                        <Badge variant="destructive">Sin stock</Badge>
+                                      ) : (
+                                        <Badge variant="secondary">Stock Marca: {it.stockMarca ?? "-"}</Badge>
+                                      )}
                                     </span>
+                                  )}
+                                  {/* Reasignar SKU para ítems mapeados */}
+                                  {it.mappingStatus !== "unmapped" && (
+                                    <details className="ml-2">
+                                      <summary className="cursor-pointer text-blue-600 hover:underline">Reasignar SKU</summary>
+                                      <div className="mt-2">
+                                        <SkuSelector
+                                          orderId={order.id}
+                                          itemId={it.orderItemId}
+                                          compact
+                                          onAssigned={() => {
+                                            // refrescar detalles
+                                            qc.invalidateQueries({ queryKey: ["/api/orders", order.id, "details"] });
+                                          }}
+                                        />
+                                      </div>
+                                    </details>
                                   )}
                                 </div>
                               </div>
@@ -289,12 +474,39 @@ export default function OrderDetailsModalNew({ orderId, isOpen, onClose }: Order
                             <Badge variant="secondary">{it.quantity}</Badge>
                           </TableCell>
                           <TableCell className="text-right font-mono">
-                            {formatCurrency(it.priceVenta, order.currency ?? "MXN")}
+                            {formatCurrency(
+                              it.unitPrice != null ? String(it.unitPrice) : null,
+                              order.currency ?? "MXN"
+                            )}
                           </TableCell>
                           <TableCell className="text-right font-mono font-semibold">
-                            {calculateItemTotal(it.priceVenta, it.quantity, order.currency)}
+                            {calculateItemTotal(
+                              it.unitPrice != null ? String(it.unitPrice) : null,
+                              it.quantity,
+                              order.currency
+                            )}
                           </TableCell>
                         </TableRow>
+                        ))}
+                        {/* Bloque de asignación para ítems sin mapeo */}
+                        {items.filter((it) => it.mappingStatus === "unmapped").map((it) => (
+                          <TableRow key={`assign-${it.orderItemId}`}>
+                            <TableCell colSpan={5}>
+                              <div className="p-3 bg-amber-50 border border-amber-200 rounded-md">
+                                <div className="flex items-center justify-between mb-2">
+                                  <span className="font-medium">Item sin mapeo (ID {it.orderItemId})</span>
+                                  <Badge variant="destructive">Asignación requerida</Badge>
+                                </div>
+                                <SkuSelector
+                                  orderId={order.id}
+                                  itemId={it.orderItemId}
+                                  onAssigned={() => {
+                                    qc.invalidateQueries({ queryKey: ["/api/orders", order.id, "details"] });
+                                  }}
+                                />
+                              </div>
+                            </TableCell>
+                          </TableRow>
                       ))}
                     </TableBody>
                   </Table>

@@ -1,28 +1,39 @@
-// REFACTOR: Real-time health status indicators for navbar
+// client/src/components/HealthStatusIndicator.tsx
+// Health indicators independientes por servicio/tienda
 import React from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { Badge } from "@/components/ui/badge";
-import { AlertCircle, CheckCircle, Clock, Wifi, WifiOff } from "lucide-react";
+import { CheckCircle, Clock, WifiOff } from "lucide-react";
 
 interface HealthStatus {
   ok: boolean;
   status?: number;
   error?: string;
   timestamp: string;
+  details?: Record<string, any>;
 }
 
+type ServiceKey =
+  | "ww"   // Shopify WW
+  | "ct"   // Shopify CT
+  | "mlg"
+  | "expresspl";
+
 interface HealthIndicatorProps {
-  service: "shopify" | "mlg" | "expresspl";
+  service: ServiceKey;
   label: string;
 }
 
 function HealthIndicator({ service, label }: HealthIndicatorProps) {
   const { data, isLoading, error } = useQuery<HealthStatus>({
     queryKey: [`/api/health/${service}`],
-    refetchInterval: 60000, // Refresh every minute
-    staleTime: 30000, // Consider stale after 30s
-    retry: 2
+    queryFn: async () => {
+      const res = await fetch(`/api/health/${service}`, { credentials: "include" });
+      return res.json();
+    },
+    refetchInterval: 60_000,
+    staleTime: 30_000,
+    retry: 2,
   });
 
   const getStatusColor = () => {
@@ -39,22 +50,28 @@ function HealthIndicator({ service, label }: HealthIndicatorProps) {
 
   const getTooltipContent = () => {
     if (isLoading) return `Verificando ${label}...`;
-    if (error) return `Error al verificar ${label}: ${error}`;
-    if (!data?.ok) return `${label} desconectado: ${data?.error || 'Sin conexión'}`;
-    
-    const lastCheck = data?.timestamp ? new Date(data.timestamp).toLocaleString('es-ES') : 'Desconocido';
-    return `${label} conectado - Última verificación: ${lastCheck}`;
+    if (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      return `Error al verificar ${label}: ${msg}`;
+    }
+    if (!data?.ok) return `${label} desconectado: ${data?.error || "Sin conexión"}`;
+
+    const lastCheck = data.timestamp
+      ? new Date(data.timestamp).toLocaleString("es-MX")
+      : "Desconocido";
+    const shop = data.details?.shop ?? "";
+    return `${label} conectado — ${shop ? `Tienda: ${shop} — ` : ""}Última verificación: ${lastCheck}`;
   };
 
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <div 
-          className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-muted hover:bg-muted/80 transition-colors cursor-help"
+        <div
+          className="flex items-center gap-1.5 px-2 py-1 rounded-md hover:bg-muted/80 transition-colors cursor-help"
           data-testid={`status-${service}`}
         >
           <div className={`w-2 h-2 rounded-full ${getStatusColor()}`} />
-          <span className="text-xs font-medium text-muted-foreground">{label}</span>
+          <span className="text-xs font-medium">{label}</span>
           {getStatusIcon()}
         </div>
       </TooltipTrigger>
@@ -68,7 +85,10 @@ function HealthIndicator({ service, label }: HealthIndicatorProps) {
 export function HealthStatusIndicators() {
   return (
     <div className="flex items-center gap-2" data-testid="health-indicators">
-      <HealthIndicator service="shopify" label="Shopify" />
+      {/* Tiendas Shopify por separado */}
+      <HealthIndicator service="ww" label="WordWide" />
+      <HealthIndicator service="ct" label="CrediTienda" />
+      {/* Otros servicios */}
       <HealthIndicator service="mlg" label="MLG" />
       <HealthIndicator service="expresspl" label="Express-PL" />
     </div>

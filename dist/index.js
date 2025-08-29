@@ -17,12 +17,9 @@ __export(schema_exports, {
   catalogoProductos: () => catalogoProductos,
   channels: () => channels,
   createBulkTicketsSchema: () => createBulkTicketsSchema,
-  externalProducts: () => externalProducts,
   insertNoteSchema: () => insertNoteSchema,
   insertOrderSchema: () => insertOrderSchema,
-  insertProductSchema: () => insertProductSchema,
   insertTicketSchema: () => insertTicketSchema,
-  insertVariantSchema: () => insertVariantSchema,
   marcas: () => brands,
   notas: () => notes,
   notes: () => notes,
@@ -30,12 +27,8 @@ __export(schema_exports, {
   orderItems: () => orderItems,
   orders: () => orders,
   paqueterias: () => carriers,
-  productComboItems: () => productComboItems,
   productLinks: () => productLinks,
   products: () => products,
-  reglasEnvio: () => shippingRules,
-  shippingRules: () => shippingRules,
-  shopifyJobs: () => shopifyJobs,
   tickets: () => tickets,
   ticketsTabla: () => tickets,
   users: () => users,
@@ -51,310 +44,207 @@ import {
   integer,
   decimal,
   bigint,
-  json,
   varchar,
   jsonb
 } from "drizzle-orm/pg-core";
-import { sql } from "drizzle-orm";
+import { index, uniqueIndex } from "drizzle-orm/pg-core";
 import { z } from "zod";
-var users, brands, catalogoProductos, channels, carriers, orders, orderItems, tickets, shippingRules, notes, products, externalProducts, variants, productComboItems, insertOrderSchema, insertProductSchema, insertVariantSchema, insertTicketSchema, createBulkTicketsSchema, insertNoteSchema, productLinks, shopifyJobs;
+var users, brands, carriers, catalogoProductos, channels, notes, orders, orderItems, products, variants, productLinks, tickets, insertOrderSchema, insertTicketSchema, createBulkTicketsSchema, insertNoteSchema;
 var init_schema = __esm({
   "shared/schema.ts"() {
     "use strict";
     users = pgTable("users", {
       id: serial("id").primaryKey(),
-      // ID autoincremental (PK)
       email: text("email").notNull().unique(),
-      // correo único (login)
       password: text("password").notNull(),
-      // hash de contraseña
       firstName: text("first_name"),
-      // nombre (opcional)
       lastName: text("last_name"),
-      // apellido (opcional)
       role: text("role").notNull().default("user"),
-      // rol: user | admin
       lastLogin: timestamp("last_login"),
-      // último acceso
       createdAt: timestamp("created_at").defaultNow(),
       updatedAt: timestamp("updated_at")
     });
-    brands = pgTable("brands", {
-      id: serial("id").primaryKey(),
-      name: text("name").notNull(),
-      // nombre visible
-      code: text("code").notNull().unique(),
-      // código corto único
-      isActive: boolean("is_active").notNull().default(true),
-      createdAt: timestamp("created_at").defaultNow(),
-      updatedAt: timestamp("updated_at")
-    });
+    brands = pgTable(
+      "brands",
+      {
+        id: serial("id").primaryKey(),
+        name: text("name").notNull(),
+        code: text("code").notNull(),
+        isActive: boolean("is_active").notNull().default(true),
+        createdAt: timestamp("created_at").defaultNow(),
+        updatedAt: timestamp("updated_at")
+      },
+      (t) => ({
+        uxCode: uniqueIndex("brands_code_unique").on(t.code)
+      })
+    );
+    carriers = pgTable(
+      "carriers",
+      {
+        id: serial("id").primaryKey(),
+        name: text("name").notNull(),
+        code: text("code").notNull(),
+        apiEndpoint: text("api_endpoint"),
+        isActive: boolean("is_active").notNull().default(true),
+        createdAt: timestamp("created_at").defaultNow(),
+        updatedAt: timestamp("updated_at")
+      },
+      (t) => ({
+        uxCode: uniqueIndex("carriers_code_unique").on(t.code)
+      })
+    );
     catalogoProductos = pgTable("catalogo_productos", {
-      sku_interno: text("sku_interno").primaryKey().unique(),
-      // SKU interno único
       sku: text("sku"),
-      nombre_producto: text("nombre_producto"),
       marca: text("marca"),
+      sku_interno: text("sku_interno"),
+      codigo_barras: text("codigo_barras"),
+      nombre_producto: text("nombre_producto"),
       modelo: text("modelo"),
       categoria: text("categoria"),
+      condicion: text("condicion"),
       marca_producto: text("marca_producto"),
       variante: text("variante"),
-      codigo_barras: text("codigo_barras"),
-      foto: text("foto"),
-      peso: decimal("peso"),
-      alto: decimal("alto"),
-      ancho: decimal("ancho"),
       largo: decimal("largo"),
-      condicion: text("condicion"),
-      stock: integer("stock"),
+      ancho: decimal("ancho"),
+      alto: decimal("alto"),
+      peso: decimal("peso"),
+      foto: text("foto"),
       costo: decimal("costo"),
-      situacion: text("situacion")
+      stock: integer("stock")
     });
-    channels = pgTable("channels", {
-      id: serial("id").primaryKey(),
-      code: text("code").notNull().unique(),
-      // código corto único del canal
-      name: text("name").notNull(),
-      // nombre del canal
-      color: text("color"),
-      // color para UI (hex)
-      icon: text("icon"),
-      // icono para UI (clase o nombre)
-      isActive: boolean("is_active").notNull().default(true),
-      createdAt: timestamp("created_at").defaultNow(),
-      updatedAt: timestamp("updated_at")
-    });
-    carriers = pgTable("carriers", {
-      id: serial("id").primaryKey(),
-      name: text("name").notNull(),
-      // nombre visible
-      code: text("code").notNull().unique(),
-      // código único (ej. DHL)
-      apiEndpoint: text("api_endpoint"),
-      // endpoint API (si aplica)
-      isActive: boolean("is_active").notNull().default(true),
-      createdAt: timestamp("created_at").defaultNow(),
-      updatedAt: timestamp("updated_at")
-    });
-    orders = pgTable("orders", {
-      id: bigint("id", { mode: "bigint" }).generatedAlwaysAsIdentity().primaryKey(),
-      // << AUTOGENERATED // BIGSERIAL PRIMARY KEY
-      shopId: integer("shop_id").notNull(),
-      // INT NOT NULL ← importante
-      orderId: text("order_id").notNull(),
-      // TEXT NOT NULL (ID externo de la plataforma)
-      name: text("name"),
-      orderNumber: text("order_number"),
-      customerName: text("customer_name"),
-      // TEXT
-      customerEmail: text("customer_email"),
-      // TEXT
-      subtotalPrice: decimal("subtotal_price"),
-      // NUMERIC
-      totalAmount: decimal("total_amount"),
-      // NUMERIC
-      currency: text("currency"),
-      // TEXT
-      financialStatus: text("financial_status"),
-      // TEXT
-      fulfillmentStatus: text("fulfillment_status"),
-      // TEXT
-      tags: text("tags").array(),
-      // TEXT[]
-      noteAttributes: json("note_attributes"),
-      // JSONB
-      createdAt: timestamp("created_at"),
-      // TIMESTAMP
-      shopifyCreatedAt: timestamp("shopify_created_at", { withTimezone: true }),
-      // TIMESTAMPTZ
-      shopifyUpdatedAt: timestamp("shopify_updated_at", { withTimezone: true }),
-      // TIMESTAMPTZ
-      shopifyProcessedAt: timestamp("shopify_processed_at", { withTimezone: true }),
-      // TIMESTAMPTZ
-      shopifyClosedAt: timestamp("shopify_closed_at", { withTimezone: true }),
-      // TIMESTAMPTZ
-      shopifyCancelledAt: timestamp("shopify_cancelled_at", { withTimezone: true })
-      // TIMESTAMPTZ
-    });
-    orderItems = pgTable("order_items", {
-      id: serial("id").primaryKey(),
-      // SERIAL PRIMARY KEY
-      orderId: bigint("order_id", { mode: "bigint" }).notNull(),
-      // BIGINT NOT NULL (FK a orders.id con ON DELETE CASCADE)
-      sku: text("sku"),
-      // TEXT
-      quantity: integer("quantity").notNull(),
-      // INT NOT NULL
-      price: decimal("price"),
-      // NUMERIC
-      shopifyProductId: text("shopify_product_id"),
-      // TEXT
-      shopifyVariantId: text("shopify_variant_id"),
-      // TEXT
-      title: text("title")
-      // TEXT
-    });
-    tickets = pgTable("tickets", {
-      id: serial("id").primaryKey(),
-      // SERIAL PRIMARY KEY
-      ticketNumber: text("ticket_number").notNull().default(sql`nextval('ticket_number_seq')::text`),
-      // TEXT UNIQUE NOT NULL
-      orderId: bigint("order_id", { mode: "bigint" }).notNull(),
-      // INTEGER NOT NULL (FK a orders.id con ON DELETE CASCADE)
-      status: text("status").notNull().default("open"),
-      // TEXT NOT NULL DEFAULT 'open'
-      notes: text("notes"),
-      // TEXT
-      createdAt: timestamp("created_at").defaultNow(),
-      // TIMESTAMP DEFAULT now()
-      updatedAt: timestamp("updated_at")
-      // TIMESTAMP
-    });
-    shippingRules = pgTable("shipping_rules", {
-      id: serial("id").primaryKey(),
-      name: text("name").notNull(),
-      // nombre de la regla
-      condition: text("condition").notNull(),
-      // expresión/condición (definición libre)
-      carrierId: integer("carrier_id").notNull(),
-      // referencia a carriers.id
-      service: text("service"),
-      // nombre del servicio (si aplica)
-      cost: decimal("cost"),
-      // costo estimado
-      estimatedDays: integer("estimated_days"),
-      // días estimados de entrega
-      isActive: boolean("is_active").notNull().default(true),
-      createdAt: timestamp("created_at").defaultNow(),
-      updatedAt: timestamp("updated_at")
-    });
+    channels = pgTable(
+      "channels",
+      {
+        id: serial("id").primaryKey(),
+        code: text("code").notNull(),
+        name: text("name").notNull(),
+        color: text("color"),
+        icon: text("icon"),
+        isActive: boolean("is_active").notNull().default(true),
+        createdAt: timestamp("created_at").defaultNow(),
+        updatedAt: timestamp("updated_at")
+      },
+      (t) => ({
+        uxCode: uniqueIndex("channels_code_unique").on(t.code)
+      })
+    );
     notes = pgTable("notes", {
       id: serial("id").primaryKey(),
       userId: integer("user_id").notNull(),
-      // usuario propietario de la nota
       content: text("content").notNull(),
-      // contenido de la nota
-      createdAt: timestamp("created_at").defaultNow(),
-      updatedAt: timestamp("updated_at").defaultNow()
-    });
-    products = pgTable("products", {
-      id: serial("id").primaryKey(),
-      idShopify: text("id_shopify").notNull(),
-      // ID de Shopify
-      shopId: integer("shop_id").notNull(),
-      // 1 o 2 (tienda)
-      title: text("title").notNull(),
-      // título del producto
-      vendor: text("vendor"),
-      // proveedor/marca
-      productType: text("product_type"),
-      // tipo de producto
-      status: text("status").notNull().default("active"),
-      // active, draft
-      tags: text("tags").array(),
-      // etiquetas (array)
       createdAt: timestamp("created_at").defaultNow(),
       updatedAt: timestamp("updated_at")
+      // en la BD no hay default
     });
-    externalProducts = pgTable("external_products", {
-      id: serial("id").primaryKey(),
-      sku: text("sku").notNull().unique(),
-      prod: text("name").notNull(),
-      createdAt: timestamp("created_at").defaultNow()
-    });
-    variants = pgTable("variants", {
-      id: serial("id").primaryKey(),
-      productId: integer("product_id"),
-      // referencia a products.id
-      idShopify: text("id_shopify"),
-      // ID de variante en Shopify
-      sku: text("sku"),
-      // SKU de la variante
-      price: decimal("price"),
-      // precio de venta
-      compareAtPrice: decimal("compare_at_price"),
-      // precio de comparación
-      barcode: text("barcode"),
-      // código de barras
-      inventoryQty: integer("inventory_qty"),
-      // cantidad en inventario
-      createdAt: timestamp("created_at"),
-      updatedAt: timestamp("updated_at")
-    });
-    productComboItems = pgTable("product_combo_items", {
-      id: serial("id").primaryKey(),
-      productComboId: integer("product_combo_id").notNull(),
-      // producto que es combo
-      productSimpleId: integer("product_simple_id").notNull(),
-      // producto componente
-      qty: integer("qty").notNull().default(1),
-      // cantidad del componente
-      createdAt: timestamp("created_at").defaultNow()
-    });
-    insertOrderSchema = z.object({
-      // ID requerido (bigint)
-      id: z.union([z.bigint(), z.string(), z.number()]).optional(),
-      // Campos obligatorios según DB
-      shopId: z.number().int().min(1).max(2),
-      orderId: z.string().min(1, "Order ID es requerido"),
-      // Campos opcionales de cliente
-      customerName: z.string().optional(),
-      customerEmail: z.string().optional(),
-      // Campos de precio
-      subtotalPrice: z.string().optional(),
-      totalAmount: z.string().optional(),
-      currency: z.string().default("MXN"),
-      // Estados
-      financialStatus: z.string().optional(),
-      fulfillmentStatus: z.string().optional(),
-      // Metadatos
-      tags: z.array(z.string()).default([]),
-      noteAttributes: z.any().optional(),
-      // Timestamps Shopify
-      createdAt: z.date().optional(),
-      shopifyCreatedAt: z.date().optional(),
-      shopifyUpdatedAt: z.date().optional(),
-      shopifyProcessedAt: z.date().optional(),
-      shopifyClosedAt: z.date().optional(),
-      shopifyCancelledAt: z.date().optional()
-    }).transform((data) => {
-      if (data.id && typeof data.id !== "bigint") {
-        data.id = typeof data.id === "string" ? BigInt(data.id) : BigInt(data.id);
-      }
-      return data;
-    });
-    insertProductSchema = z.object({
-      idShopify: z.string().min(1, "ID de Shopify requerido"),
-      shopId: z.number().int().min(1).max(2, "Shop ID debe ser 1 o 2"),
-      title: z.string().min(1, "T\xEDtulo requerido"),
-      vendor: z.string().optional(),
-      productType: z.string().optional(),
-      status: z.enum(["active", "draft"]).default("active"),
-      tags: z.array(z.string()).optional().default([])
-    });
-    insertVariantSchema = z.object({
-      idShopify: z.string().min(1, "ID de Shopify requerido"),
-      productId: z.number().int().positive("Product ID requerido"),
-      sku: z.string().optional(),
-      price: z.string().optional(),
-      compareAtPrice: z.string().optional(),
-      barcode: z.string().optional(),
-      inventoryQty: z.number().int().optional()
-    });
-    insertTicketSchema = z.object({
-      ticketNumber: z.string().optional(),
-      orderId: z.coerce.number().int().positive("El ID de la orden debe ser un n\xFAmero positivo"),
-      status: z.string().default("open"),
-      notes: z.string().optional()
-    });
-    createBulkTicketsSchema = z.object({
-      orderIds: z.array(z.union([z.number().int().positive(), z.string().min(1)])).min(1, "Debe seleccionar al menos una orden"),
-      notes: z.string().optional()
-    });
-    insertNoteSchema = z.object({
-      text: z.string().min(1, "El contenido es obligatorio"),
-      date: z.string().optional()
-    });
+    orders = pgTable(
+      "orders",
+      {
+        id: serial("id").primaryKey(),
+        // SERIAL (int4) en la BD real
+        orderId: text("order_id").notNull(),
+        customerName: text("customer_name"),
+        totalAmount: decimal("total_amount"),
+        status: text("status").notNull().default("pending"),
+        createdAt: timestamp("created_at").defaultNow(),
+        name: text("name"),
+        orderNumber: text("order_number"),
+        financialStatus: text("financial_status"),
+        fulfillmentStatus: text("fulfillment_status"),
+        currency: text("currency").default("MXN"),
+        subtotalPrice: decimal("subtotal_price"),
+        customerEmail: text("customer_email"),
+        tags: text("tags").array(),
+        shipName: text("ship_name"),
+        shipPhone: text("ship_phone"),
+        shipAddress1: text("ship_address1"),
+        shipCity: text("ship_city"),
+        shipProvince: text("ship_province"),
+        shipCountry: text("ship_country"),
+        shipZip: text("ship_zip"),
+        shopifyCreatedAt: timestamp("shopify_created_at", { withTimezone: true }),
+        shopifyUpdatedAt: timestamp("shopify_updated_at", { withTimezone: true }),
+        shopifyProcessedAt: timestamp("shopify_processed_at", { withTimezone: true }),
+        shopifyClosedAt: timestamp("shopify_closed_at", { withTimezone: true }),
+        shopifyCancelledAt: timestamp("shopify_cancelled_at", { withTimezone: true }),
+        cancelReason: text("cancel_reason"),
+        orderNote: text("order_note"),
+        noteAttributes: jsonb("note_attributes"),
+        shopId: integer("shop_id").references(() => channels.id),
+        updatedAt: timestamp("updated_at").defaultNow()
+      },
+      (t) => ({
+        // La BD tiene ambos: uniq_shop_order y ux_orders_shop_order (duplicados). Mantener uno
+        uxShopOrder: uniqueIndex("ux_orders_shop_order").on(t.shopId, t.orderId),
+        idxByShopCreated: index("ix_orders_shop_created").on(t.shopId, t.createdAt),
+        idxFulfillment: index("orders_fulfillment_status_idx").on(t.fulfillmentStatus),
+        idxShopifyCreated: index("orders_shopify_created_idx").on(t.shopifyCreatedAt),
+        idxShop: index("ix_orders_shop").on(t.shopId),
+        idxChannel: index("ix_orders_channel").on(t.shopId)
+      })
+    );
+    orderItems = pgTable(
+      "order_items",
+      {
+        id: serial("id").primaryKey(),
+        orderId: bigint("order_id", { mode: "number" }).notNull().references(() => orders.id),
+        sku: text("sku"),
+        quantity: integer("quantity").notNull(),
+        price: decimal("price"),
+        createdAt: timestamp("created_at").defaultNow(),
+        shopifyProductId: text("shopify_product_id"),
+        shopifyVariantId: text("shopify_variant_id"),
+        title: text("title"),
+        variantTitle: text("variant_title")
+      },
+      (t) => ({
+        idxOrder: index("idx_order_items_order_id").on(t.orderId),
+        idxSku: index("ix_order_items_sku").on(t.sku),
+        idxShopProd: index("ix_order_items_shopify_product").on(t.shopifyProductId),
+        idxShopVar: index("ix_order_items_shopify_variant").on(t.shopifyVariantId)
+      })
+    );
+    products = pgTable(
+      "products",
+      {
+        id: serial("id").primaryKey(),
+        idShopify: text("id_shopify").notNull(),
+        shopId: integer("shop_id").notNull(),
+        title: text("title").notNull(),
+        vendor: text("vendor"),
+        productType: text("product_type"),
+        status: text("status").notNull().default("active"),
+        tags: text("tags").array(),
+        createdAt: timestamp("created_at").defaultNow(),
+        updatedAt: timestamp("updated_at"),
+        sku: text("sku")
+      },
+      (t) => ({
+        idxShop: index("ix_products_shop").on(t.shopId),
+        idxShop2: index("products_shop_id_idx").on(t.shopId),
+        uxShopShopify: uniqueIndex("ux_products_shop_shopify").on(t.shopId, t.idShopify)
+      })
+    );
+    variants = pgTable(
+      "variants",
+      {
+        id: serial("id").primaryKey(),
+        idShopify: text("id_shopify").notNull(),
+        productId: integer("product_id").notNull().references(() => products.id),
+        sku: text("sku"),
+        price: decimal("price"),
+        compareAtPrice: decimal("compare_at_price"),
+        barcode: text("barcode"),
+        inventoryQty: integer("inventory_qty"),
+        createdAt: timestamp("created_at").defaultNow(),
+        updatedAt: timestamp("updated_at"),
+        externalVariantId: text("external_variant_id")
+      },
+      (t) => ({
+        idxProd: index("ix_variants_product").on(t.productId),
+        idxShopify: index("ix_variants_shopify").on(t.idShopify),
+        idxSku: index("ix_variants_sku").on(t.sku)
+      })
+    );
     productLinks = pgTable("product_links", {
       id: serial("id").primaryKey(),
       catalogoSku: varchar("catalogo_sku", { length: 100 }).notNull(),
@@ -363,9 +253,7 @@ var init_schema = __esm({
       variantId: integer("variant_id").references(() => variants.id),
       productId: integer("product_id").references(() => products.id),
       matchStatus: varchar("match_status", { length: 20 }).default("pending"),
-      // 'matched', 'conflict', 'missing'
       syncStatus: varchar("sync_status", { length: 20 }).default("pending"),
-      // 'synced', 'error', 'pending'
       errorMessage: text("error_message"),
       lastSyncAt: timestamp("last_sync_at"),
       createdAt: timestamp("created_at").defaultNow(),
@@ -373,22 +261,66 @@ var init_schema = __esm({
       createdBy: integer("created_by").references(() => users.id),
       updatedBy: integer("updated_by").references(() => users.id)
     });
-    shopifyJobs = pgTable("shopify_jobs", {
-      id: serial("id").primaryKey(),
-      shopId: integer("shop_id").notNull(),
-      jobType: varchar("job_type", { length: 50 }).notNull(),
-      // 'update_product', 'update_variant', 'create_product'
-      shopifyProductId: varchar("shopify_product_id", { length: 100 }),
-      shopifyVariantId: varchar("shopify_variant_id", { length: 100 }),
-      payload: jsonb("payload").notNull(),
-      status: varchar("status", { length: 20 }).default("pending"),
-      // 'pending', 'processing', 'completed', 'failed'
-      attempts: integer("attempts").default(0),
-      maxAttempts: integer("max_attempts").default(3),
-      errorMessage: text("error_message"),
-      processedAt: timestamp("processed_at"),
-      scheduledFor: timestamp("scheduled_for").defaultNow(),
-      createdAt: timestamp("created_at").defaultNow()
+    tickets = pgTable(
+      "tickets",
+      {
+        id: serial("id").primaryKey(),
+        ticketNumber: serial("ticket_number").notNull(),
+        // SERIAL en la BD
+        orderId: bigint("order_id", { mode: "number" }).notNull().references(() => orders.id),
+        status: text("status").notNull().default("open"),
+        notes: text("notes"),
+        createdAt: timestamp("created_at").defaultNow(),
+        updatedAt: timestamp("updated_at")
+      },
+      (t) => ({
+        uxTicketNumber: uniqueIndex("tickets_ticket_number_unique").on(t.ticketNumber),
+        idxOrder: index("ix_tickets_order").on(t.orderId),
+        idxStatus: index("ix_tickets_status").on(t.status)
+      })
+    );
+    insertOrderSchema = z.object({
+      // La PK es SERIAL, no se envía
+      shopId: z.number().int().optional(),
+      // nullable en BD; se recomienda enviarlo
+      orderId: z.string().min(1),
+      customerName: z.string().optional(),
+      customerEmail: z.string().optional(),
+      subtotalPrice: z.string().optional(),
+      totalAmount: z.string().optional(),
+      currency: z.string().optional(),
+      financialStatus: z.string().optional(),
+      fulfillmentStatus: z.string().optional(),
+      tags: z.array(z.string()).optional(),
+      shipName: z.string().optional(),
+      shipPhone: z.string().optional(),
+      shipAddress1: z.string().optional(),
+      shipCity: z.string().optional(),
+      shipProvince: z.string().optional(),
+      shipCountry: z.string().optional(),
+      shipZip: z.string().optional(),
+      shopifyCreatedAt: z.date().optional(),
+      shopifyUpdatedAt: z.date().optional(),
+      shopifyProcessedAt: z.date().optional(),
+      shopifyClosedAt: z.date().optional(),
+      shopifyCancelledAt: z.date().optional(),
+      cancelReason: z.string().optional(),
+      orderNote: z.string().optional(),
+      noteAttributes: z.any().optional()
+      // jsonb
+    });
+    insertTicketSchema = z.object({
+      orderId: z.coerce.number().int().positive(),
+      // en BD es BIGINT; aquí lo traemos como number
+      status: z.string().default("open"),
+      notes: z.string().optional()
+    });
+    createBulkTicketsSchema = z.object({
+      orderIds: z.array(z.union([z.number().int().positive(), z.string().min(1)])).min(1),
+      notes: z.string().optional()
+    });
+    insertNoteSchema = z.object({
+      content: z.string().min(1)
     });
   }
 });
@@ -406,8 +338,8 @@ var init_db = __esm({
       throw new Error("DATABASE_URL no definida/encontrada");
     }
     pool = new Pool({
-      connectionString: process.env.DATABASE_URL,
-      ssl: { rejectUnauthorized: false }
+      connectionString: process.env.DATABASE_URL
+      //  ssl: { rejectUnauthorized: true },
     });
     u = new URL(process.env.DATABASE_URL);
     console.log("[DB] Conectando a:", u.hostname);
@@ -528,6 +460,13 @@ var init_shopifyFulfillment = __esm({
 });
 
 // server/storage.ts
+var storage_exports = {};
+__export(storage_exports, {
+  DatabaseStorage: () => DatabaseStorage,
+  almacenamiento: () => almacenamiento,
+  markOrderCancelledSafe: () => markOrderCancelledSafe,
+  storage: () => storage
+});
 import {
   eq as eq2,
   and,
@@ -535,19 +474,35 @@ import {
   isNotNull,
   desc,
   asc,
-  sql as sql2,
+  sql,
   count,
   gte,
   lte
 } from "drizzle-orm";
-var createdAtEff, DatabaseStorage, storage;
+async function markOrderCancelledSafe(idNum, payload) {
+  try {
+    const updateData = {};
+    if (typeof payload.cancelledAt !== "undefined") updateData["shopifyCancelledAt"] = payload.cancelledAt;
+    if (typeof payload.cancelReason !== "undefined") updateData["cancelReason"] = payload.cancelReason;
+    if (typeof payload.staffNote !== "undefined") updateData["orderNote"] = payload.staffNote;
+    if (typeof payload.displayFinancialStatus !== "undefined") updateData["financialStatus"] = payload.displayFinancialStatus;
+    if (typeof payload.displayFulfillmentStatus !== "undefined") updateData["fulfillmentStatus"] = payload.displayFulfillmentStatus;
+    if (Object.keys(updateData).length === 0) return { ok: true, skipped: true };
+    await db.update(orders).set(updateData).where(eq2(orders.id, idNum));
+    return { ok: true };
+  } catch (e) {
+    console.warn("[cancel-order] markOrderCancelledSafe skipped or failed:", e?.message);
+    return { ok: true, warning: "update skipped" };
+  }
+}
+var createdAtEff, DatabaseStorage, storage, almacenamiento;
 var init_storage = __esm({
   "server/storage.ts"() {
     "use strict";
     init_schema();
     init_db();
     init_shopifyFulfillment();
-    createdAtEff = (tabla) => sql2`COALESCE(${tabla.shopifyCreatedAt}, ${tabla.createdAt})`;
+    createdAtEff = (tabla) => sql`COALESCE(${tabla.shopifyCreatedAt}, ${tabla.createdAt})`;
     DatabaseStorage = class {
       // ==== USUARIOS ====
       /** Obtiene un usuario por su ID. */
@@ -648,16 +603,16 @@ var init_storage = __esm({
           condiciones.push(eq2(orders.shopId, filtros.channelId));
         if (filtros?.managed !== void 0) {
           if (filtros.managed) {
-            condiciones.push(sql2`LOWER(COALESCE(${orders.fulfillmentStatus}, '')) = 'fulfilled'`);
+            condiciones.push(sql`LOWER(COALESCE(${orders.fulfillmentStatus}, '')) = 'fulfilled'`);
           } else {
-            condiciones.push(sql2`LOWER(COALESCE(${orders.fulfillmentStatus}, '')) IN ('', 'unfulfilled')`);
+            condiciones.push(sql`LOWER(COALESCE(${orders.fulfillmentStatus}, '')) IN ('', 'unfulfilled')`);
           }
         }
         if (filtros?.hasTicket !== void 0) {
           if (filtros.hasTicket) {
-            condiciones.push(sql2`EXISTS(SELECT 1 FROM tickets t WHERE t.order_id = ${orders.id})`);
+            condiciones.push(sql`EXISTS(SELECT 1 FROM tickets t WHERE t.order_id = ${orders.id})`);
           } else {
-            condiciones.push(sql2`NOT EXISTS(SELECT 1 FROM tickets t WHERE t.order_id = ${orders.id})`);
+            condiciones.push(sql`NOT EXISTS(SELECT 1 FROM tickets t WHERE t.order_id = ${orders.id})`);
           }
         }
         if (condiciones.length > 0) {
@@ -666,85 +621,162 @@ var init_storage = __esm({
         return await db.select().from(orders).orderBy(desc(createdAtEff(orders)));
       }
       //INFORMACION RELEVANTE DE LA ORDEN
+      // server/storage.ts
       async getOrderDetails(idParam) {
         try {
           const idNum = Number(idParam);
           if (!Number.isInteger(idNum) || idNum <= 0) return void 0;
-          const idBig = BigInt(idNum);
-          const { rows } = await db.execute(sql2`
-        SELECT
-          -- Datos generales de la orden (camelCase)
-          o.id                               AS "id",
-          o.shop_id                          AS "shopId",
-          o.order_id                         AS "orderId",
-          o.name                             AS "name",
-          o.order_number                     AS "orderNumber",
-          o.customer_name                    AS "customerName",
-          o.customer_email                   AS "customerEmail",
-          o.subtotal_price                   AS "subtotalPrice",
-          o.total_amount                     AS "totalAmount",
-          o.currency                         AS "currency",
-          o.financial_status                 AS "financialStatus",
-          o.fulfillment_status               AS "fulfillmentStatus",
-          o.tags                             AS "tags",
-          o.order_note                       AS "orderNote",
-          o.created_at                       AS "createdAt",
-          o.shopify_created_at               AS "shopifyCreatedAt",
-          o.ship_name                        AS "shipName",
-          o.ship_phone                       AS "shipPhone",
-          o.ship_address1                    AS "shipAddress1",
-          o.ship_city                        AS "shipCity",
-          o.ship_province                    AS "shipProvince",
-          o.ship_country                     AS "shipCountry",
-          o.ship_zip                         AS "shipZip",
+          const { rows } = await db.execute(sql`
+      SELECT
+        -- Datos generales (alias camelCase)
+        o.id                              AS "id",
+        o.shop_id                         AS "shopId",
+        o.order_id                        AS "orderId",
+        o.name                            AS "name",
+        o.order_number                    AS "orderNumber",
+        o.customer_name                   AS "customerName",
+        o.customer_email                  AS "customerEmail",
+        o.subtotal_price                  AS "subtotalPrice",
+        o.total_amount                    AS "totalAmount",
+        o.currency                        AS "currency",
+        o.financial_status                AS "financialStatus",
+        o.fulfillment_status              AS "fulfillmentStatus",
+        o.tags                            AS "tags",
+        o.order_note                      AS "orderNote",
+        o.created_at                      AS "createdAt",
+        o.shopify_created_at              AS "shopifyCreatedAt",
+        o.ship_name                       AS "shipName",
+        o.ship_phone                      AS "shipPhone",
+        o.ship_address1                   AS "shipAddress1",
+        o.ship_city                       AS "shipCity",
+        o.ship_province                   AS "shipProvince",
+        o.ship_country                    AS "shipCountry",
+        o.ship_zip                        AS "shipZip",
 
-          -- Ítems enriquecidos como JSONB
-          COALESCE(
-            jsonb_agg(
-              jsonb_build_object(
-                'orderItemId',    oi.id,
-                'skuCanal',       oi.sku,
-                'skuMarca',       cp.sku,
-                'skuInterno',     cp.sku_interno,
-                'quantity',       oi.quantity,
-                'priceVenta',     oi.price,
+        -- Ítems enriquecidos: subconsulta por orden (garantiza 1-a-1 por order_item)
+        COALESCE((
+          SELECT COALESCE(jsonb_agg(jsonb_build_object(
+            'orderItemId',    x.order_item_id,
+            'skuCanal',       x.sku_canal,
+            'skuMarca',       x.sku_marca,
+            'skuInterno',     x.sku_interno,
+            'quantity',       x.quantity,
+            'priceVenta',     x.price_venta,
+            'unitPrice',      x.unit_price,
+            'mappingStatus',  x.mapping_status,
+            'matchSource',    x.match_source,
 
-                'title',          p.title,
-                'vendor',         p.vendor,
-                'productType',    p.product_type,
+            'title',          x.title,
+            'vendor',         x.vendor,
+            'productType',    x.product_type,
 
-                'barcode',        v.barcode,
-                'compareAtPrice', v.compare_at_price,
-                'stockShopify',   v.inventory_qty,
+            'barcode',        x.barcode,
+            'compareAtPrice', x.compare_at_price,
+            'stockShopify',   x.inventory_qty,
 
-                'nombreProducto', cp.nombre_producto,
-                'categoria',      cp.categoria,
-                'condicion',      cp.condicion,
-                'marca',          cp.marca,
-                'variante',       cp.variante,
-                'largo',          cp.largo,
-                'ancho',          cp.ancho,
-                'alto',           cp.alto,
-                'peso',           cp.peso,
-                'foto',           cp.foto,
-                'costo',          cp.costo,
-                'stockMarca',     cp.stock
-              )
-            ) FILTER (WHERE oi.id IS NOT NULL),
-            '[]'::jsonb
-          ) AS "items"
-        FROM orders o
-        LEFT JOIN order_items oi
-          ON oi.order_id = o.id
-        LEFT JOIN products p
-          ON p.id_shopify = oi.shopify_product_id
-        LEFT JOIN variants v
-          ON v.id_shopify = oi.shopify_variant_id
-        LEFT JOIN catalogo_productos cp
-          ON cp.sku_interno = oi.sku
-        WHERE o.id = ${idBig}
-        GROUP BY o.id
-      `);
+            'nombreProducto', x.nombre_producto,
+            'categoria',      x.categoria,
+            'condicion',      x.condicion,
+            'marca',          x.marca,
+            'variante',       x.variante,
+            'largo',          x.largo,
+            'ancho',          x.ancho,
+            'alto',           x.alto,
+            'peso',           x.peso,
+            'foto',           x.foto,
+            'costo',          x.costo,
+            'stockMarca',     x.stock_marca
+          )), '[]'::jsonb)
+          FROM (
+            SELECT
+              oi.id          AS order_item_id,
+              oi.sku         AS sku_canal,
+              oi.quantity    AS quantity,
+              oi.price       AS price_venta,
+
+              -- products (1 fila garantizada por id_shopify)
+              p.title        AS title,
+              p.vendor       AS vendor,
+              p.product_type AS product_type,
+
+              -- variants (1 fila garantizada por id_shopify)
+              v.barcode,
+              v.compare_at_price,
+              v.inventory_qty,
+
+              -- catalogo_productos (elegir UNA fila “mejor coincidencia”)
+              cp.sku         AS sku_marca,
+              cp.sku_interno AS sku_interno,
+              cp.nombre_producto,
+              cp.categoria,
+              cp.condicion,
+              cp.marca,
+              cp.variante,
+              cp.largo,
+              cp.ancho,
+              cp.alto,
+              cp.peso,
+              cp.foto,
+              cp.costo,
+              cp.stock       AS stock_marca,
+
+              -- Campos derivados de mapeo
+              CASE WHEN cp.sku IS NULL AND cp.sku_interno IS NULL THEN 'unmapped'
+                   ELSE 'matched'
+              END AS mapping_status,
+              CASE
+                WHEN cp.sku_interno IS NOT NULL AND oi.sku IS NOT NULL AND lower(cp.sku_interno) = lower(oi.sku) THEN 'interno'
+                WHEN cp.sku           IS NOT NULL AND oi.sku IS NOT NULL AND lower(cp.sku)           = lower(oi.sku) THEN 'externo'
+                ELSE NULL
+              END AS match_source,
+              cp.costo AS unit_price
+
+            FROM order_items oi
+
+            -- products por Shopify product id
+            LEFT JOIN LATERAL (
+              SELECT p.*
+              FROM products p
+              WHERE p.id_shopify = oi.shopify_product_id
+              LIMIT 1
+            ) p ON TRUE
+
+            -- variants por Shopify variant id
+            LEFT JOIN LATERAL (
+              SELECT v.*
+              FROM variants v
+              WHERE v.id_shopify = oi.shopify_variant_id
+              LIMIT 1
+            ) v ON TRUE
+
+            -- catalogo_productos: NO hay updated_at ni id; preferimos coincidencia exacta.
+            -- Regla: si oi.sku coincide con cp.sku_interno => prioriza; si no, prueba con cp.sku.
+            LEFT JOIN LATERAL (
+              SELECT cp.*
+              FROM catalogo_productos cp
+              WHERE
+                (cp.sku_interno IS NOT NULL OR cp.sku IS NOT NULL)
+                AND (
+                  (oi.sku IS NOT NULL AND lower(cp.sku_interno) = lower(oi.sku))
+                  OR
+                  (oi.sku IS NOT NULL AND lower(cp.sku) = lower(oi.sku))
+                )
+              ORDER BY
+                (lower(cp.sku_interno) = lower(oi.sku)) DESC,
+                (lower(cp.sku) = lower(oi.sku)) DESC,
+                cp.sku_interno NULLS LAST,
+                cp.sku        NULLS LAST
+              LIMIT 1
+            ) cp ON TRUE
+
+            WHERE oi.order_id = o.id
+          ) x
+        ), '[]'::jsonb) AS "items"
+
+      FROM orders o
+      WHERE o.id = ${idNum}
+      LIMIT 1
+    `);
           const row = rows[0];
           return row ?? void 0;
         } catch (e) {
@@ -760,7 +792,7 @@ var init_storage = __esm({
         try {
           const idNum = Number(idParam);
           if (!Number.isInteger(idNum) || idNum <= 0) return void 0;
-          const idBig = BigInt(idNum);
+          const idBig = Number(idNum);
           const [orden] = await db.select().from(orders).where(eq2(orders.id, idBig));
           return orden ?? void 0;
         } catch (e) {
@@ -775,7 +807,7 @@ var init_storage = __esm({
       }
       /** Actualiza una orden. */
       async updateOrder(id, updates) {
-        const [orden] = await db.update(orders).set(updates).where(eq2(orders.id, BigInt(id))).returning();
+        const [orden] = await db.update(orders).set(updates).where(eq2(orders.id, Number(id))).returning();
         return orden;
       }
       /** Lista órdenes por nombre de cliente. */
@@ -783,9 +815,9 @@ var init_storage = __esm({
         return await db.select().from(orders).where(eq2(orders.customerName, nombreCliente)).orderBy(desc(orders.createdAt));
       }
       async getOrdersByChannel(from, to) {
-        const fromCond = from ? sql2`o.created_at >= ${from}` : sql2`o.created_at >= NOW() - INTERVAL '30 days'`;
-        const toCond = to ? sql2`o.created_at < ${to}` : sql2`TRUE`;
-        const result = await db.execute(sql2`
+        const fromCond = from ? sql`o.created_at >= ${from}` : sql`o.created_at >= NOW() - INTERVAL '30 days'`;
+        const toCond = to ? sql`o.created_at < ${to}` : sql`TRUE`;
+        const result = await db.execute(sql`
       SELECT 
         CASE 
           WHEN o.shop_id = 1 THEN 'WW'
@@ -812,7 +844,7 @@ var init_storage = __esm({
       /** Obtiene estadísticas de órdenes canceladas/reabastecidas */
       async getCancelledOrdersStats() {
         try {
-          const result = await db.execute(sql2`
+          const result = await db.execute(sql`
         SELECT 
           COUNT(CASE WHEN LOWER(COALESCE(fulfillment_status, '')) = 'restocked' THEN 1 END)::int as cancelled_count,
           COUNT(*)::int as total_count
@@ -843,7 +875,7 @@ var init_storage = __esm({
       //Vista para obtener tickets en la tabla de tickets
       // storage.ts
       async getTicketsView() {
-        const result = await db.execute(sql2`
+        const result = await db.execute(sql`
     SELECT 
       t.id,
       t.ticket_number                                                         AS "ticketNumber",
@@ -895,7 +927,7 @@ var init_storage = __esm({
       }
       /** Obtiene el siguiente número de ticket secuencial empezando en 30000. */
       async getNextTicketNumber() {
-        const resultado = await db.select({ maxTicket: sql2`MAX(${tickets.ticketNumber})` }).from(tickets).where(sql2`${tickets.ticketNumber} ~ '^[0-9]+$'`);
+        const resultado = await db.select({ maxTicket: sql`MAX(${tickets.ticketNumber})` }).from(tickets).where(sql`${tickets.ticketNumber} ~ '^[0-9]+$'`);
         const maxTicket = resultado[0]?.maxTicket;
         let nextNumber = 3e4;
         if (maxTicket && !isNaN(Number(maxTicket))) {
@@ -924,30 +956,32 @@ var init_storage = __esm({
               continue;
             }
             let fulfillResp;
-            try {
-              fulfillResp = await fulfillOrderInShopify({
-                storeNumber,
-                shopifyOrderId: String(shopifyOrderId),
-                notifyCustomer: false
-              });
-            } catch (shopifyError) {
-              failed.push({
-                orderId: oid,
-                reason: `Shopify error: ${shopifyError?.message || shopifyError}`
-              });
-              continue;
+            if (storeNumber !== 3) {
+              try {
+                fulfillResp = await fulfillOrderInShopify({
+                  storeNumber,
+                  shopifyOrderId: String(shopifyOrderId),
+                  notifyCustomer: false
+                });
+              } catch (shopifyError) {
+                failed.push({
+                  orderId: oid,
+                  reason: `Shopify error: ${shopifyError?.message || shopifyError}`
+                });
+                continue;
+              }
             }
             const ticketTx = await db.transaction(async (tx) => {
               const [ticketNuevo] = await tx.insert(tickets).values({
-                ticketNumber: sql2`nextval('public.ticket_number_seq')::text`,
-                orderId: BigInt(orderIdNum),
+                ticketNumber: sql`nextval('public.ticket_number_seq')::text`,
+                orderId: Number(orderIdNum),
                 status: "open",
                 notes: notes2 || `Ticket creado masivamente para orden ${shopifyOrderId}`
               }).returning();
               await tx.update(orders).set({
                 fulfillmentStatus: "fulfilled",
                 shopifyUpdatedAt: /* @__PURE__ */ new Date()
-              }).where(eq2(orders.id, BigInt(orderIdNum)));
+              }).where(eq2(orders.id, Number(orderIdNum)));
               return ticketNuevo;
             });
             tickets2.push(ticketTx);
@@ -964,11 +998,28 @@ var init_storage = __esm({
       // ==== STATUS FULLFILMENT 
       async createTicketAndFulfill(params) {
         const { orderId, notes: notes2, notifyCustomer = false } = params;
-        const [orden] = await db.select().from(orders).where(eq2(orders.id, BigInt(orderId)));
+        const [orden] = await db.select().from(orders).where(eq2(orders.id, Number(orderId)));
         if (!orden) throw new Error(`Orden ${orderId} no encontrada`);
         const shopifyOrderId = orden.orderId;
         if (!shopifyOrderId) throw new Error(`La orden ${orderId} no tiene order_id de Shopify`);
         const storeNumber = orden.shopId ?? parseInt(process.env.DEFAULT_SHOPIFY_STORE || "1", 10);
+        if (storeNumber === 3) {
+          const nuevoTicket = await db.transaction(async (tx) => {
+            const [ticketCreado] = await tx.insert(tickets).values({
+              ticketNumber: sql`nextval('public.ticket_number_seq')::text`,
+              orderId: Number(orderId),
+              status: "open",
+              notes: notes2
+            }).returning();
+            if (!ticketCreado) throw new Error("No se pudo crear el ticket");
+            await tx.update(orders).set({
+              fulfillmentStatus: "fulfilled",
+              shopifyUpdatedAt: /* @__PURE__ */ new Date()
+            }).where(eq2(orders.id, Number(orderId)));
+            return ticketCreado;
+          });
+          return nuevoTicket;
+        }
         try {
           const fulfillResp = await fulfillOrderInShopify({
             storeNumber,
@@ -978,8 +1029,8 @@ var init_storage = __esm({
           console.log("\u{1F6D2} Shopify fulfill response:", fulfillResp);
           const nuevoTicket = await db.transaction(async (tx) => {
             const [ticketCreado] = await tx.insert(tickets).values({
-              ticketNumber: sql2`nextval('public.ticket_number_seq')::text`,
-              orderId: BigInt(orderId),
+              ticketNumber: sql`nextval('public.ticket_number_seq')::text`,
+              orderId: Number(orderId),
               status: "open",
               notes: notes2
             }).returning();
@@ -987,7 +1038,7 @@ var init_storage = __esm({
             await tx.update(orders).set({
               fulfillmentStatus: "fulfilled",
               shopifyUpdatedAt: /* @__PURE__ */ new Date()
-            }).where(eq2(orders.id, BigInt(orderId)));
+            }).where(eq2(orders.id, Number(orderId)));
             return ticketCreado;
           });
           return nuevoTicket;
@@ -1022,19 +1073,19 @@ var init_storage = __esm({
         }
         await db.transaction(async (tx) => {
           await tx.delete(tickets).where(eq2(tickets.id, id));
-          await tx.update(orders).set({ fulfillmentStatus: "", shopifyUpdatedAt: /* @__PURE__ */ new Date() }).where(eq2(orders.id, typeof orderPk === "bigint" ? orderPk : BigInt(orderPk)));
+          await tx.update(orders).set({ fulfillmentStatus: "", shopifyUpdatedAt: /* @__PURE__ */ new Date() }).where(eq2(orders.id, Number(orderPk)));
         });
         return { ok: true, changedLocal: true, cancelledRemote };
       }
       ///==== REGLAS DE ENVÍO ====
       /** Devuelve reglas de envío activas. */
+      // Removed: shipping rules are not part of current schema
       async getShippingRules() {
-        return await db.select().from(shippingRules).where(eq2(shippingRules.isActive, true));
+        return [];
       }
       /** Crea una regla de envío. */
-      async createShippingRule(regla) {
-        const [nuevaRegla] = await db.insert(shippingRules).values(regla).returning();
-        return nuevaRegla;
+      async createShippingRule(_regla) {
+        throw new Error("Shipping rules not supported");
       }
       // ==== NOTAS ====
       /** Lista notas por usuario. */
@@ -1134,28 +1185,28 @@ var init_storage = __esm({
         );
         const totalOrdersRes = await db.select({ count: count() }).from(orders).where(range);
         const totalSalesRes = await db.select({
-          sum: sql2`COALESCE(SUM(${orders.totalAmount}),0)`
+          sum: sql`COALESCE(SUM(${orders.totalAmount}),0)`
         }).from(orders).where(range);
         const unmanagedRes = await db.select({ count: count() }).from(orders).where(and(
-          sql2`LOWER(COALESCE(${orders.fulfillmentStatus}, '')) IN ('', 'unfulfilled')`,
+          sql`LOWER(COALESCE(${orders.fulfillmentStatus}, '')) IN ('', 'unfulfilled')`,
           range
         ));
         const managedRes = await db.select({ count: count() }).from(orders).where(and(
-          sql2`LOWER(COALESCE(${orders.fulfillmentStatus}, '')) = 'fulfilled'`,
+          sql`LOWER(COALESCE(${orders.fulfillmentStatus}, '')) = 'fulfilled'`,
           range
         ));
         const byChannelRes = await db.select({
           channelId: orders.shopId,
-          channelName: sql2`CASE 
+          channelName: sql`CASE 
           WHEN ${orders.shopId} = 1 THEN 'WordWide'
           WHEN ${orders.shopId} = 2 THEN 'CrediTienda'
           ELSE 'Tienda ' || ${orders.shopId}::text
         END`,
-          count: sql2`COUNT(*)`
+          count: sql`COUNT(*)`
         }).from(orders).where(range).groupBy(orders.shopId);
         const byShopRes = await db.select({
           shopId: orders.shopId,
-          count: sql2`COUNT(*)`
+          count: sql`COUNT(*)`
         }).from(orders).where(range).groupBy(orders.shopId);
         return {
           totalOrders: Number(totalOrdersRes[0]?.count ?? 0),
@@ -1186,9 +1237,9 @@ var init_storage = __esm({
         const rows = await db.select({
           sku: orderItems.sku,
           // tu "SKU interno"
-          totalQty: sql2`COALESCE(SUM(${orderItems.quantity}), 0)`,
-          revenue: sql2`COALESCE(SUM(${orderItems.quantity} * COALESCE(${orderItems.price}, 0)), 0)`
-        }).from(orderItems).innerJoin(orders, eq2(orders.id, orderItems.orderId)).where(range).groupBy(orderItems.sku).orderBy(sql2`COALESCE(SUM(${orderItems.quantity}), 0) DESC`).limit(limit);
+          totalQty: sql`COALESCE(SUM(${orderItems.quantity}), 0)`,
+          revenue: sql`COALESCE(SUM(${orderItems.quantity} * COALESCE(${orderItems.price}, 0)), 0)`
+        }).from(orderItems).innerJoin(orders, eq2(orders.id, orderItems.orderId)).where(range).groupBy(orderItems.sku).orderBy(sql`COALESCE(SUM(${orderItems.quantity}), 0) DESC`).limit(limit);
         return rows.map((r) => ({
           sku: r.sku ?? null,
           totalQty: Number(r.totalQty ?? 0),
@@ -1202,7 +1253,7 @@ var init_storage = __esm({
           today.setHours(0, 0, 0, 0);
           const tomorrow = new Date(today);
           tomorrow.setDate(tomorrow.getDate() + 1);
-          const result = await db.execute(sql2`
+          const result = await db.execute(sql`
         SELECT 
           COUNT(*) as count,
           COALESCE(SUM(CAST(total_amount AS NUMERIC)), 0) as total_amount
@@ -1224,7 +1275,7 @@ var init_storage = __esm({
       // storage.ts
       async getOrdersByWeekday(weekOffset = 0) {
         try {
-          const result = await db.execute(sql2`
+          const result = await db.execute(sql`
       WITH base AS (
         SELECT (now() AT TIME ZONE 'America/Mexico_City') AS now_cdmx
       ),
@@ -1261,8 +1312,8 @@ var init_storage = __esm({
       ORDER BY 1;
     `);
           const dayNames = ["Dom", "Lun", "Mar", "Mi\xE9", "Jue", "Vie", "S\xE1b"];
-          const data = dayNames.map((day, index) => {
-            const found = result.rows.find((row) => Number(row.dow) === index);
+          const data = dayNames.map((day, index2) => {
+            const found = result.rows.find((row) => Number(row.dow) === index2);
             return { day, count: found ? Number(found.count) : 0 };
           });
           return data;
@@ -1274,7 +1325,7 @@ var init_storage = __esm({
       /** Obtiene ventas por mes para gráfico. */
       async getSalesByMonth() {
         try {
-          const result = await db.execute(sql2`
+          const result = await db.execute(sql`
         SELECT 
           TO_CHAR(shopify_created_at, 'YYYY-MM') as month,
           COALESCE(SUM(CAST(total_amount AS NUMERIC)), 0) as sales
@@ -1296,7 +1347,7 @@ var init_storage = __esm({
       /** Obtiene una orden por ID para generación de guías. */
       async getOrderById(orderId) {
         try {
-          const [order] = await db.select().from(orders).where(eq2(orders.id, BigInt(orderId))).limit(1);
+          const [order] = await db.select().from(orders).where(eq2(orders.id, Number(orderId))).limit(1);
           return order;
         } catch (error) {
           console.error("Error getting order by ID:", error);
@@ -1306,7 +1357,7 @@ var init_storage = __esm({
       /** Obtiene los items de una orden para calcular dimensiones y cantidad (EXPRESSPL). */
       async getOrderItemsForShipping(orderId) {
         try {
-          const items = await db.select().from(orderItems).where(eq2(orderItems.orderId, BigInt(orderId)));
+          const items = await db.select().from(orderItems).where(eq2(orderItems.orderId, Number(orderId)));
           return items;
         } catch (error) {
           console.error("Error getting order items for shipping:", error);
@@ -1332,7 +1383,7 @@ var init_storage = __esm({
           if (search) {
             const searchPattern = `%${search.toLowerCase()}%`;
             conds.push(
-              sql2`(
+              sql`(
             LOWER(COALESCE(title, '')) LIKE ${searchPattern} OR
             LOWER(COALESCE(vendor, '')) LIKE ${searchPattern} OR
             LOWER(COALESCE(product_type, '')) LIKE ${searchPattern}
@@ -1385,8 +1436,7 @@ var init_storage = __esm({
             const numericOrderId = typeof orderId === "string" ? parseInt(orderId) : orderId;
             const numeroTicket = await this.getNextTicketNumber();
             const ticket = await this.createTicket({
-              orderId: BigInt(numericOrderId),
-              ticketNumber: numeroTicket,
+              orderId: Number(numericOrderId),
               status: "open",
               notes: notes2 || `Ticket creado autom\xE1ticamente para orden ${numericOrderId}`
             });
@@ -1405,7 +1455,7 @@ var init_storage = __esm({
       /** Obtiene órdenes con items para exportación */
       async getOrdersWithItemsForExport(filters) {
         try {
-          const result = await db.execute(sql2`
+          const result = await db.execute(sql`
         SELECT 
           o.id,
           o.order_id as "orderId",
@@ -1432,9 +1482,9 @@ var init_storage = __esm({
         FROM orders o
         LEFT JOIN order_items oi ON o.id = oi.order_id
         WHERE 1=1
-        ${filters?.statusFilter === "managed" ? sql2`AND LOWER(COALESCE(o.fulfillment_status, '')) = 'fulfilled'` : sql2``}
-        ${filters?.statusFilter === "unmanaged" ? sql2`AND LOWER(COALESCE(o.fulfillment_status, '')) IN ('', 'unfulfilled')` : sql2``}
-        ${filters?.channelId ? sql2`AND o.shop_id = ${filters.channelId}` : sql2``}
+        ${filters?.statusFilter === "managed" ? sql`AND LOWER(COALESCE(o.fulfillment_status, '')) = 'fulfilled'` : sql``}
+        ${filters?.statusFilter === "unmanaged" ? sql`AND LOWER(COALESCE(o.fulfillment_status, '')) IN ('', 'unfulfilled')` : sql``}
+        ${filters?.channelId ? sql`AND o.shop_id = ${filters.channelId}` : sql``}
         GROUP BY o.id, o.order_id, o.customer_name, o.customer_email, o.total_amount, 
                  o.financial_status, o.fulfillment_status, o.shopify_created_at, o.shop_id
         ORDER BY o.shopify_created_at DESC
@@ -1463,28 +1513,28 @@ var init_storage = __esm({
         } = params;
         const conds = [];
         if (statusFilter === "unmanaged") {
-          conds.push(sql2`LOWER(COALESCE(o.fulfillment_status, '')) IN ('', 'unfulfilled')`);
+          conds.push(sql`LOWER(COALESCE(o.fulfillment_status, '')) IN ('', 'unfulfilled')`);
         } else if (statusFilter === "managed") {
-          conds.push(sql2`LOWER(COALESCE(o.fulfillment_status, '')) = 'fulfilled'`);
+          conds.push(sql`LOWER(COALESCE(o.fulfillment_status, '')) = 'fulfilled'`);
         }
         if (channelId !== void 0 && channelId !== null) {
-          conds.push(sql2`o.shop_id = ${channelId}`);
+          conds.push(sql`o.shop_id = ${channelId}`);
         }
         if (search) {
           const searchPattern = `%${search.toLowerCase()}%`;
           if (searchType === "sku") {
-            conds.push(sql2`EXISTS (
+            conds.push(sql`EXISTS (
         SELECT 1 FROM order_items oi2 
         WHERE oi2.order_id = o.id 
         AND LOWER(COALESCE(oi2.sku, '')) LIKE ${searchPattern}
       )`);
           } else if (searchType === "customer") {
-            conds.push(sql2`(
+            conds.push(sql`(
         LOWER(COALESCE(o.customer_name, '')) LIKE ${searchPattern} OR 
         LOWER(COALESCE(o.customer_email, '')) LIKE ${searchPattern}
       )`);
           } else if (searchType === "product") {
-            conds.push(sql2`EXISTS (
+            conds.push(sql`EXISTS (
         SELECT 1 FROM order_items oi2 
         WHERE oi2.order_id = o.id 
         AND (
@@ -1493,7 +1543,7 @@ var init_storage = __esm({
         )
       )`);
           } else {
-            conds.push(sql2`(
+            conds.push(sql`(
         LOWER(COALESCE(o.order_id, '')) LIKE ${searchPattern} OR 
         LOWER(COALESCE(o.customer_name, '')) LIKE ${searchPattern} OR 
         LOWER(COALESCE(o.customer_email, '')) LIKE ${searchPattern} OR
@@ -1509,7 +1559,7 @@ var init_storage = __esm({
       )`);
           }
         }
-        const whereClause = conds.length ? sql2`${conds.reduce((acc, cond, i) => i === 0 ? cond : sql2`${acc} AND ${cond}`)}` : void 0;
+        const whereClause = conds.length ? sql`${conds.reduce((acc, cond, i) => i === 0 ? cond : sql`${acc} AND ${cond}`)}` : void 0;
         const offset = Math.max(0, (page - 1) * pageSize);
         const sortMap = {
           name: `COALESCE(o.name, o.order_id, '')`,
@@ -1517,9 +1567,9 @@ var init_storage = __esm({
           totalAmount: `COALESCE(o.total_amount, 0)`
         };
         const sortCol = sortField && sortMap[sortField] ? sortMap[sortField] : `COALESCE(o.shopify_created_at, o.created_at)`;
-        const sortDir = sortOrder === "asc" ? sql2`ASC` : sql2`DESC`;
-        const orderDir = sortOrder?.toLowerCase() === "asc" ? sql2`ASC` : sql2`DESC`;
-        const baseQuery = sql2`
+        const sortDir = sortOrder === "asc" ? sql`ASC` : sql`DESC`;
+        const orderDir = sortOrder?.toLowerCase() === "asc" ? sql`ASC` : sql`DESC`;
+        const baseQuery = sql`
     SELECT 
       o.id::text as id,
       COALESCE(o.name, o.order_id, '') as name,
@@ -1548,16 +1598,16 @@ var init_storage = __esm({
       END as "isManaged"
     FROM orders o
     LEFT JOIN order_items oi ON oi.order_id = o.id
-    ${whereClause ? sql2`WHERE ${whereClause}` : sql2``}
+    ${whereClause ? sql`WHERE ${whereClause}` : sql``}
     GROUP BY o.id, o.order_id, o.name, o.customer_name, o.total_amount, 
              o.fulfillment_status, o.shopify_created_at, o.created_at, o.shop_id
-    ORDER BY ${sql2.raw(sortCol)} ${sortDir}   -- ✅ orden dinámico seguro
+    ORDER BY ${sql.raw(sortCol)} ${sortDir}   -- ✅ orden dinámico seguro
     LIMIT ${pageSize} OFFSET ${offset}
   `;
-        const countQuery = sql2`
+        const countQuery = sql`
     SELECT COUNT(DISTINCT o.id) as count
     FROM orders o
-    ${whereClause ? sql2`WHERE ${whereClause}` : sql2``}
+    ${whereClause ? sql`WHERE ${whereClause}` : sql``}
   `;
         const [rows, totalRes] = await Promise.all([
           db.execute(baseQuery),
@@ -1576,7 +1626,7 @@ var init_storage = __esm({
         try {
           const idNum = Number(orderIdParam);
           if (!Number.isInteger(idNum) || idNum <= 0) return [];
-          const idBig = BigInt(idNum);
+          const idBig = Number(idNum);
           console.log(`[DEBUG] Buscando items para order ID: ${idNum}`);
           const rawItems = await db.select().from(orderItems).where(eq2(orderItems.orderId, idBig));
           console.log(`[DEBUG] Items encontrados:`, rawItems);
@@ -1619,10 +1669,7 @@ var init_storage = __esm({
         return { rows, total: Number(totalRes[0]?.count ?? 0), page, pageSize };
       }
       async getExternalProductsPaginated(page, pageSize) {
-        const offset = (page - 1) * pageSize;
-        const rows = await db.select().from(externalProducts).orderBy(asc(externalProducts.prod)).limit(pageSize).offset(offset);
-        const totalRes = await db.select({ count: count() }).from(externalProducts);
-        return { rows, total: Number(totalRes[0]?.count ?? 0), page, pageSize };
+        return { rows: [], total: 0, page, pageSize };
       }
       async getOrdersForExport(filters) {
         const {
@@ -1638,7 +1685,7 @@ var init_storage = __esm({
         } = filters;
         if (selectedIds?.length) {
           const ids = selectedIds.map((id) => BigInt(id));
-          const q = sql2`
+          const q = sql`
       SELECT 
         o.id, o.shop_id as "shopId", o.order_id as "orderId",
         o.name, o.order_number as "orderNumber",
@@ -1813,6 +1860,7 @@ var init_storage = __esm({
       }
     };
     storage = new DatabaseStorage();
+    almacenamiento = storage;
   }
 });
 
@@ -1822,7 +1870,7 @@ __export(catalogStorage_exports, {
   CatalogStorage: () => CatalogStorage,
   catalogStorage: () => catalogStorage
 });
-import { sql as sql3 } from "drizzle-orm";
+import { sql as sql2 } from "drizzle-orm";
 var CatalogStorage, catalogStorage;
 var init_catalogStorage = __esm({
   "server/catalogStorage.ts"() {
@@ -1853,7 +1901,7 @@ var init_catalogStorage = __esm({
             paramIndex++;
           }
           const whereClause = whereConditions.join(" AND ");
-          const productos = await db.execute(sql3`
+          const productos = await db.execute(sql2`
         SELECT sku, marca, nombre_producto, categoria, marca_producto, 
                stock, costo, sku_interno, codigo_barras
         FROM catalogo_productos 
@@ -1861,7 +1909,7 @@ var init_catalogStorage = __esm({
         ORDER BY nombre_producto
         LIMIT ${pageSize} OFFSET ${offset}
       `);
-          const totalResult = await db.execute(sql3`
+          const totalResult = await db.execute(sql2`
         SELECT COUNT(*) as total 
         FROM catalogo_productos 
         WHERE nombre_producto IS NOT NULL
@@ -1894,7 +1942,7 @@ var init_catalogStorage = __esm({
       /** Obtiene las categorías únicas de productos del catálogo. */
       async getProductCategories() {
         try {
-          const result = await db.execute(sql3`
+          const result = await db.execute(sql2`
         SELECT DISTINCT categoria 
         FROM catalogo_productos 
         WHERE categoria IS NOT NULL 
@@ -1909,7 +1957,7 @@ var init_catalogStorage = __esm({
       /** Crea un nuevo producto en el catálogo. */
       async createProduct(datos) {
         try {
-          await db.execute(sql3`
+          await db.execute(sql2`
         INSERT INTO catalogo_productos (
           sku, nombre_producto, categoria, marca_producto, stock, costo
         ) VALUES (
@@ -1939,7 +1987,7 @@ var init_catalogStorage = __esm({
       /** Actualiza un producto del catálogo. */
       async updateProduct(id, datos) {
         try {
-          await db.execute(sql3`
+          await db.execute(sql2`
         UPDATE catalogo_productos 
         SET 
           nombre_producto = ${datos.nombre || null},
@@ -1967,7 +2015,7 @@ var init_catalogStorage = __esm({
       /** Elimina un producto del catálogo. */
       async deleteProduct(id) {
         try {
-          await db.execute(sql3`
+          await db.execute(sql2`
         DELETE FROM catalogo_productos WHERE sku = ${id}
       `);
         } catch (error) {
@@ -1986,7 +2034,7 @@ __export(productStorage_exports, {
   ProductStorage: () => ProductStorage,
   productStorage: () => productStorage
 });
-import { sql as sql4 } from "drizzle-orm";
+import { sql as sql3 } from "drizzle-orm";
 import { eq as eq4 } from "drizzle-orm";
 var ProductStorage, productStorage;
 var init_productStorage = __esm({
@@ -2019,16 +2067,16 @@ var init_productStorage = __esm({
         const offset = (page - 1) * pageSize;
         const validCols = ["sku", "sku_interno", "codigo_barras", "nombre_producto", "categoria", "marca", "marca_producto"];
         const orderCol = validCols.includes(orderBy) ? orderBy : "nombre_producto";
-        const orderDirection = orderDir === "desc" ? sql4.raw("DESC") : sql4.raw("ASC");
-        const whereParts = [sql4`1=1`];
+        const orderDirection = orderDir === "desc" ? sql3.raw("DESC") : sql3.raw("ASC");
+        const whereParts = [sql3`1=1`];
         if (search) {
           if (searchField && validCols.includes(searchField)) {
             whereParts.push(
-              sql4`LOWER(COALESCE(${sql4.raw(searchField)}, '')) LIKE LOWER(${`%${search.toLowerCase()}%`})`
+              sql3`LOWER(COALESCE(${sql3.raw(searchField)}, '')) LIKE LOWER(${`%${search.toLowerCase()}%`})`
             );
           } else {
             const s = `%${search.toLowerCase()}%`;
-            whereParts.push(sql4`(
+            whereParts.push(sql3`(
         LOWER(COALESCE(sku,'')) LIKE LOWER(${s})
         OR LOWER(COALESCE(sku_interno,'')) LIKE LOWER(${s})
         OR LOWER(COALESCE(codigo_barras,'')) LIKE LOWER(${s})
@@ -2036,23 +2084,23 @@ var init_productStorage = __esm({
       )`);
           }
         }
-        if (marca) whereParts.push(sql4`marca = ${marca}`);
-        if (categoria) whereParts.push(sql4`categoria = ${categoria}`);
-        if (condicion) whereParts.push(sql4`condicion = ${condicion}`);
-        if (marca_producto) whereParts.push(sql4`marca_producto = ${marca_producto}`);
-        const whereSQL = sql4.join(whereParts, sql4` AND `);
-        const productos = await db.execute(sql4`
+        if (marca) whereParts.push(sql3`marca = ${marca}`);
+        if (categoria) whereParts.push(sql3`categoria = ${categoria}`);
+        if (condicion) whereParts.push(sql3`condicion = ${condicion}`);
+        if (marca_producto) whereParts.push(sql3`marca_producto = ${marca_producto}`);
+        const whereSQL = sql3.join(whereParts, sql3` AND `);
+        const productos = await db.execute(sql3`
     SELECT
       sku, marca, sku_interno, codigo_barras, nombre_producto, modelo, categoria,
       condicion, marca_producto, variante, largo, ancho, alto, peso, foto, costo, stock
-    FROM ${sql4.raw("catalogo_productos")}
+    FROM ${sql3.raw("catalogo_productos")}
     WHERE ${whereSQL}
-    ORDER BY ${sql4.raw(orderCol)} ${orderDirection}
+    ORDER BY ${sql3.raw(orderCol)} ${orderDirection}
     LIMIT ${pageSize} OFFSET ${offset}
   `);
-        const totalRes = await db.execute(sql4`
+        const totalRes = await db.execute(sql3`
     SELECT COUNT(*)::int AS total
-    FROM ${sql4.raw("catalogo_productos")}
+    FROM ${sql3.raw("catalogo_productos")}
     WHERE ${whereSQL}
   `);
         const total = Number(totalRes.rows[0]?.total ?? 0);
@@ -2084,19 +2132,19 @@ var init_productStorage = __esm({
       async createCatalogProduct(product) {
         const cols = Object.keys(product);
         if (cols.length === 0) throw new Error("Datos insuficientes");
-        const colNodes = cols.map((c) => sql4.raw(c));
-        const valNodes = cols.map((c) => sql4`${product[c]}`);
-        const result = await db.execute(sql4`
-    INSERT INTO ${sql4.raw("catalogo_productos")}
-      (${sql4.join(colNodes, sql4`, `)})
+        const colNodes = cols.map((c) => sql3.raw(c));
+        const valNodes = cols.map((c) => sql3`${product[c]}`);
+        const result = await db.execute(sql3`
+    INSERT INTO ${sql3.raw("catalogo_productos")}
+      (${sql3.join(colNodes, sql3`, `)})
     VALUES
-      (${sql4.join(valNodes, sql4`, `)})
+      (${sql3.join(valNodes, sql3`, `)})
     RETURNING *
   `);
         return result.rows[0];
       }
       async deleteCatalogProduct(sku) {
-        await db.execute(sql4`DELETE FROM catalogo_productos WHERE sku = ${sku}`);
+        await db.execute(sql3`DELETE FROM catalogo_productos WHERE sku = ${sku}`);
         return { success: true };
       }
       /** Actualiza un producto del catálogo */
@@ -2104,10 +2152,10 @@ var init_productStorage = __esm({
         try {
           const fields = Object.keys(updates);
           if (fields.length === 0) return { success: true };
-          const setNodes = fields.map((f) => sql4`${sql4.raw(f)} = ${updates[f]}`);
-          await db.execute(sql4`
-      UPDATE ${sql4.raw("catalogo_productos")}
-      SET ${sql4.join(setNodes, sql4`, `)}
+          const setNodes = fields.map((f) => sql3`${sql3.raw(f)} = ${updates[f]}`);
+          await db.execute(sql3`
+      UPDATE ${sql3.raw("catalogo_productos")}
+      SET ${sql3.join(setNodes, sql3`, `)}
       WHERE sku = ${sku}
     `);
           return { success: true };
@@ -2120,10 +2168,10 @@ var init_productStorage = __esm({
       async getCatalogFacets() {
         try {
           const [marcas, categorias, condiciones, marcasProducto] = await Promise.all([
-            db.execute(sql4`SELECT DISTINCT marca FROM catalogo_productos WHERE marca IS NOT NULL ORDER BY marca`),
-            db.execute(sql4`SELECT DISTINCT categoria FROM catalogo_productos WHERE categoria IS NOT NULL ORDER BY categoria`),
-            db.execute(sql4`SELECT DISTINCT condicion FROM catalogo_productos WHERE condicion IS NOT NULL ORDER BY condicion`),
-            db.execute(sql4`SELECT DISTINCT marca_producto FROM catalogo_productos WHERE marca_producto IS NOT NULL ORDER BY marca_producto`)
+            db.execute(sql3`SELECT DISTINCT marca FROM catalogo_productos WHERE marca IS NOT NULL ORDER BY marca`),
+            db.execute(sql3`SELECT DISTINCT categoria FROM catalogo_productos WHERE categoria IS NOT NULL ORDER BY categoria`),
+            db.execute(sql3`SELECT DISTINCT condicion FROM catalogo_productos WHERE condicion IS NOT NULL ORDER BY condicion`),
+            db.execute(sql3`SELECT DISTINCT marca_producto FROM catalogo_productos WHERE marca_producto IS NOT NULL ORDER BY marca_producto`)
           ]);
           return {
             marcas: marcas.rows.map((r) => r.marca),
@@ -2141,21 +2189,21 @@ var init_productStorage = __esm({
       async getShopifyProducts(params) {
         const { page, pageSize, search, shopId, status, vendor, productType } = params;
         const offset = (page - 1) * pageSize;
-        const whereParts = [sql4`1=1`];
+        const whereParts = [sql3`1=1`];
         if (search) {
           const s = `%${search}%`;
-          whereParts.push(sql4`(
+          whereParts.push(sql3`(
       LOWER(COALESCE(p.title,'')) LIKE LOWER(${s})
       OR LOWER(COALESCE(v.sku,'')) LIKE LOWER(${s})
       OR LOWER(COALESCE(v.barcode,'')) LIKE LOWER(${s})
     )`);
         }
-        if (shopId) whereParts.push(sql4`p.shop_id = ${shopId}`);
-        if (status) whereParts.push(sql4`p.status = ${status}`);
-        if (vendor) whereParts.push(sql4`p.vendor = ${vendor}`);
-        if (productType) whereParts.push(sql4`p.product_type = ${productType}`);
-        const whereSQL = sql4.join(whereParts, sql4` AND `);
-        const productos = await db.execute(sql4`
+        if (shopId) whereParts.push(sql3`p.shop_id = ${shopId}`);
+        if (status) whereParts.push(sql3`p.status = ${status}`);
+        if (vendor) whereParts.push(sql3`p.vendor = ${vendor}`);
+        if (productType) whereParts.push(sql3`p.product_type = ${productType}`);
+        const whereSQL = sql3.join(whereParts, sql3` AND `);
+        const productos = await db.execute(sql3`
     SELECT 
       p.id as product_id,
       p.id_shopify as shopify_product_id,
@@ -2182,7 +2230,7 @@ var init_productStorage = __esm({
     ORDER BY p.title, v.sku
     LIMIT ${pageSize} OFFSET ${offset}
   `);
-        const totalRes = await db.execute(sql4`
+        const totalRes = await db.execute(sql3`
     SELECT COUNT(DISTINCT p.id) as total
     FROM products p
     LEFT JOIN variants v ON v.product_id = p.id
@@ -2238,18 +2286,18 @@ var init_productStorage = __esm({
       async getReconciliationStats() {
         try {
           const [emparejados, faltantes, conflictos] = await Promise.all([
-            db.execute(sql4`
+            db.execute(sql3`
           SELECT COUNT(*) as count 
           FROM product_links 
           WHERE match_status = 'matched'
         `),
-            db.execute(sql4`
+            db.execute(sql3`
           SELECT COUNT(*) as count 
           FROM catalogo_productos cp
           LEFT JOIN product_links pl ON cp.sku = pl.catalogo_sku
           WHERE pl.id IS NULL
         `),
-            db.execute(sql4`
+            db.execute(sql3`
           SELECT COUNT(*) as count 
           FROM product_links 
           WHERE match_status = 'conflict'
@@ -2271,7 +2319,7 @@ var init_productStorage = __esm({
         const offset = Math.max(0, (page - 1) * pageSize);
         try {
           if (type === "catalog") {
-            const result = await db.execute(sql4`
+            const result = await db.execute(sql3`
           SELECT cp.sku, cp.nombre_producto, cp.marca_producto, cp.categoria
           FROM catalogo_productos cp
           LEFT JOIN product_links pl ON cp.sku = pl.catalogo_sku
@@ -2279,7 +2327,7 @@ var init_productStorage = __esm({
           ORDER BY cp.nombre_producto
           LIMIT ${pageSize} OFFSET ${offset}
         `);
-            const totalResult = await db.execute(sql4`
+            const totalResult = await db.execute(sql3`
           SELECT COUNT(*) as total
           FROM catalogo_productos cp
           LEFT JOIN product_links pl ON cp.sku = pl.catalogo_sku
@@ -2292,7 +2340,7 @@ var init_productStorage = __esm({
               pageSize
             };
           } else {
-            const result = await db.execute(sql4`
+            const result = await db.execute(sql3`
           SELECT 
             v.id as variant_id,
             v.sku,
@@ -2311,7 +2359,7 @@ var init_productStorage = __esm({
           ORDER BY p.title, v.sku
           LIMIT ${pageSize} OFFSET ${offset}
         `);
-            const totalResult = await db.execute(sql4`
+            const totalResult = await db.execute(sql3`
           SELECT COUNT(*) as total
           FROM variants v
           JOIN products p ON v.product_id = p.id
@@ -2355,24 +2403,15 @@ var init_productStorage = __esm({
         }
       }
       // ================== JOBS DE SHOPIFY ==================
-      /** Encola job para Shopify */
-      async enqueueShopifyJob(job) {
-        try {
-          const [shopifyJob] = await db.insert(shopifyJobs).values({
-            ...job,
-            createdAt: /* @__PURE__ */ new Date()
-          }).returning();
-          return shopifyJob;
-        } catch (error) {
-          console.error("Error enqueuing Shopify job:", error);
-          throw error;
-        }
+      /** Encola job para Shopify (deshabilitado: tabla no disponible) */
+      async enqueueShopifyJob(_job) {
+        return;
       }
       // ================== UTILIDADES ==================
       /** Obtiene shop_id por variant_id */
       async getShopIdByVariant(variantId) {
         try {
-          const result = await db.execute(sql4`
+          const result = await db.execute(sql3`
         SELECT p.shop_id 
         FROM variants v 
         JOIN products p ON v.product_id = p.id 
@@ -2389,34 +2428,170 @@ var init_productStorage = __esm({
   }
 });
 
+// server/integrations/shopify/cancelOrder.ts
+var cancelOrder_exports = {};
+__export(cancelOrder_exports, {
+  cancelShopifyOrderAndWait: () => cancelShopifyOrderAndWait
+});
+import fetch2 from "node-fetch";
+async function cancelShopifyOrderAndWait(args) {
+  const { shop, token, apiVersion } = getShopifyCredentials(String(args.shopId));
+  const reasonEff = args.reason && String(args.reason).trim() ? args.reason : "OTHER";
+  const restockEff = typeof args.restock === "boolean" ? args.restock : true;
+  const notifyEff = !!args.email;
+  const refundMethod = args.refund ? { originalPaymentMethodsRefund: true } : void 0;
+  const staffNote = args.staffNote ? String(args.staffNote).slice(0, 255) : null;
+  const r = await fetch2(`https://${shop}/admin/api/${apiVersion}/graphql.json`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Shopify-Access-Token": token },
+    body: JSON.stringify({
+      query: ORDER_CANCEL_MUTATION,
+      variables: {
+        orderId: args.orderGid,
+        notifyCustomer: notifyEff,
+        refundMethod,
+        // opcional
+        restock: restockEff,
+        // Boolean!
+        reason: reasonEff,
+        // OrderCancelReason!
+        staffNote
+        // opcional
+      }
+    })
+  });
+  const data = await r.json();
+  const gqlErrors = data?.data?.orderCancel?.orderCancelUserErrors?.length ? data.data.orderCancel.orderCancelUserErrors : data?.data?.orderCancel?.userErrors?.length ? data.data.orderCancel.userErrors : data?.errors;
+  if (!r.ok || gqlErrors && gqlErrors.length) {
+    return { ok: false, stage: "request", errors: gqlErrors || [{ message: "Shopify cancel failed" }] };
+  }
+  const jobId = data?.data?.orderCancel?.job?.id;
+  if (!jobId) {
+    return { ok: false, stage: "no-job", errors: [{ message: "Shopify did not return a job id" }] };
+  }
+  const started = Date.now();
+  const deadlineMs = 2e4;
+  let delay = 500;
+  while (Date.now() - started < deadlineMs) {
+    const jr = await fetch2(`https://${shop}/admin/api/${apiVersion}/graphql.json`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Shopify-Access-Token": token },
+      body: JSON.stringify({ query: JOB_QUERY, variables: { id: jobId } })
+    });
+    const jdata = await jr.json();
+    const done = !!jdata?.data?.job?.done;
+    if (done) break;
+    await new Promise((res) => setTimeout(res, delay));
+    delay = Math.min(delay + 250, 1500);
+  }
+  const or3 = await fetch2(`https://${shop}/admin/api/${apiVersion}/graphql.json`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Shopify-Access-Token": token },
+    body: JSON.stringify({ query: ORDER_QUERY, variables: { id: args.orderGid } })
+  });
+  const odata = await or3.json();
+  const order = odata?.data?.node;
+  if (!order?.cancelledAt) {
+    return { ok: false, stage: "verify", errors: [{ message: "Cancellation not reflected yet (cancelledAt null)" }], order };
+  }
+  return { ok: true, order };
+}
+var ORDER_CANCEL_MUTATION, JOB_QUERY, ORDER_QUERY;
+var init_cancelOrder = __esm({
+  "server/integrations/shopify/cancelOrder.ts"() {
+    "use strict";
+    init_shopifyEnv();
+    ORDER_CANCEL_MUTATION = `
+mutation OrderCancel(
+  $orderId: ID!,
+  $notifyCustomer: Boolean,
+  $refundMethod: OrderCancelRefundMethodInput,
+  $restock: Boolean!,
+  $reason: OrderCancelReason!,
+  $staffNote: String
+){
+  orderCancel(
+    orderId: $orderId,
+    notifyCustomer: $notifyCustomer,
+    refundMethod: $refundMethod,
+    restock: $restock,
+    reason: $reason,
+    staffNote: $staffNote
+  ) {
+    job { id done }
+    orderCancelUserErrors { field message code }
+    userErrors { field message }
+  }
+}`;
+    JOB_QUERY = `
+query job($id: ID!){
+  job(id: $id) { id done }
+}`;
+    ORDER_QUERY = `
+query order($id: ID!){
+  node(id: $id) {
+    ... on Order {
+      id
+      name
+      cancelledAt
+      cancelReason
+      displayFinancialStatus
+      displayFulfillmentStatus
+    }
+  }
+}`;
+  }
+});
+
 // server/services/MlgClient.ts
 var MlgClient_exports = {};
 __export(MlgClient_exports, {
   mlgRequest: () => mlgRequest
 });
 import { z as z2 } from "zod";
-async function login() {
-  console.log("MLG login starting...");
-  const res = await fetch(`${MLG_BASE_URL}/api/account/login`, {
+async function doLoginAt(path3) {
+  const url = `${MLG_BASE_URL}${path3}`;
+  const payload = { email: MLG_EMAIL, password: MLG_PASSWORD };
+  const res = await fetch(url, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email: MLG_EMAIL, password: MLG_PASSWORD })
+    headers: {
+      "Content-Type": "application/json",
+      "Accept": "application/json"
+    },
+    body: JSON.stringify(payload)
   });
   if (!res.ok) {
+    const text2 = await res.text().catch(() => "<no-body>");
+    console.error("[MLG] login failed:", res.status, res.statusText, "URL:", url, "BODY:", text2?.slice(0, 500));
     throw new Error(`MLG login HTTP ${res.status}`);
   }
-  const data = await res.json();
+  const data = await res.json().catch(() => ({}));
   const parsed = LoginRespSchema.safeParse(data);
   if (!parsed.success) {
+    console.error("[MLG] login schema mismatch:", data);
     throw new Error(`MLG login invalid schema`);
   }
-  if (parsed.data.statusCode !== 200 || !parsed.data.token) {
+  const token = parsed.data.token ?? null;
+  if (!token) {
+    console.error("[MLG] login no token. Response:", parsed.data);
     throw new Error(`MLG login failed: ${parsed.data.description ?? "no token"}`);
   }
-  cachedToken = parsed.data.token;
+  cachedToken = token;
   tokenExpiresAt = Date.now() + MLG_TOKEN_TTL_MIN * 60 * 1e3;
-  console.log("MLG login ok");
+  console.log("[MLG] login ok at", path3);
   return cachedToken;
+}
+async function login() {
+  console.log("MLG login starting...");
+  try {
+    return await doLoginAt("/api/Account/login");
+  } catch (e) {
+    if (String(e?.message).includes("HTTP 404")) {
+      console.warn("[MLG] /api/Account/login \u2192 404, intentando /Account/login");
+      return await doLoginAt("/Account/login");
+    }
+    throw e;
+  }
 }
 async function getToken() {
   if (cachedToken && Date.now() < tokenExpiresAt) return cachedToken;
@@ -2426,7 +2601,10 @@ async function mlgRequest(path3, init = {}, retry = true) {
   const token = await getToken();
   const res = await fetch(`${MLG_BASE_URL}${path3}`, {
     ...init,
+    method: init.method ?? "POST",
     headers: {
+      "Accept": "application/json",
+      "Content-Type": "application/json",
       ...init.headers ?? {},
       Authorization: `Bearer ${token}`
     }
@@ -2436,20 +2614,36 @@ async function mlgRequest(path3, init = {}, retry = true) {
     await login();
     return mlgRequest(path3, init, false);
   }
+  if (res.status === 404) {
+    const text2 = await res.text().catch(() => "<no-body>");
+    console.error("[MLG] 404 at", `${MLG_BASE_URL}${path3}`, "BODY:", text2?.slice(0, 500));
+  }
   return res;
 }
-var MLG_BASE_URL, MLG_EMAIL, MLG_PASSWORD, MLG_TOKEN_TTL_MIN, LoginRespSchema, cachedToken, tokenExpiresAt;
+var rawBase, rawEmail, rawPassword, MLG_TOKEN_TTL_MIN, MLG_BASE_URL, MLG_EMAIL, MLG_PASSWORD, LoginRespSchema, cachedToken, tokenExpiresAt;
 var init_MlgClient = __esm({
   "server/services/MlgClient.ts"() {
     "use strict";
-    MLG_BASE_URL = process.env.MLG_BASE_URL ?? "https://www.mlgdev.mx/marketplaceapi";
-    MLG_EMAIL = process.env.MLG_EMAIL;
-    MLG_PASSWORD = process.env.MLG_PASSWORD;
+    rawBase = process.env.MLG_BASE_URL ?? "https://www.mlgdev.mx/marketplaceapi";
+    rawEmail = process.env.MLG_EMAIL ?? "";
+    rawPassword = process.env.MLG_PASSWORD ?? "";
     MLG_TOKEN_TTL_MIN = Number(process.env.MLG_TOKEN_TTL_MIN ?? 50);
+    MLG_BASE_URL = rawBase.trim().replace(/\/+$/, "");
+    MLG_EMAIL = rawEmail.trim();
+    MLG_PASSWORD = rawPassword.trim();
+    if (!MLG_BASE_URL || !MLG_EMAIL || !MLG_PASSWORD) {
+      console.error("[MLG] Faltan variables de entorno:");
+      console.error("  MLG_BASE_URL:", JSON.stringify(MLG_BASE_URL));
+      console.error("  MLG_EMAIL:", JSON.stringify(MLG_EMAIL));
+      console.error("  MLG_PASSWORD is set?:", Boolean(MLG_PASSWORD));
+      throw new Error("MLG env vars missing. Revisa tu .env y proceso del server.");
+    }
+    console.log("[MLG] BASE_URL:", MLG_BASE_URL);
+    console.log("[MLG] EMAIL:", MLG_EMAIL);
     LoginRespSchema = z2.object({
       token: z2.string().nullable(),
-      statusCode: z2.number(),
-      description: z2.string().nullable()
+      statusCode: z2.number().optional(),
+      description: z2.string().nullable().optional()
     });
     cachedToken = null;
     tokenExpiresAt = 0;
@@ -2772,16 +2966,16 @@ async function generateLabelExpressPL(payload) {
     const text2 = await res.text().catch(() => "");
     throw new Error(`ExpressPL HTTP ${res.status}: ${text2}`);
   }
-  const json2 = await res.json().catch(() => null);
-  if (!json2 || json2.codigo !== "200" || !json2.pdf) {
-    const msg = json2?.mensaje || "Respuesta inv\xE1lida de Express-PL";
+  const json = await res.json().catch(() => null);
+  if (!json || json.codigo !== "200" || !json.pdf) {
+    const msg = json?.mensaje || "Respuesta inv\xE1lida de Express-PL";
     throw new Error(`ExpressPL error: ${msg}`);
   }
   return {
-    pdfBase64: json2.pdf,
+    pdfBase64: json.pdf,
     meta: {
-      guia: json2.numeroGuia,
-      paqueteria: json2.paqueteria
+      guia: json.numeroGuia,
+      paqueteria: json.paqueteria
     }
   };
 }
@@ -2841,9 +3035,9 @@ function registerShippingRoutes(app) {
         try {
           const row = await storage.getCatalogoBySkuInterno(sku);
           dimsBySku[sku] = {
-            alto: Number(row?.alto_cm ?? 10) || 10,
-            ancho: Number(row?.ancho_cm ?? 10) || 10,
-            largo: Number(row?.largo_cm ?? 10) || 10
+            alto: Number(row?.alto ?? 10) || 10,
+            ancho: Number(row?.ancho ?? 10) || 10,
+            largo: Number(row?.largo ?? 10) || 10
           };
         } catch (error) {
           dimsBySku[sku] = { alto: 10, ancho: 10, largo: 10 };
@@ -2857,19 +3051,19 @@ function registerShippingRoutes(app) {
         rfc: "XAXX010101000",
         razonsocial: order.customerName || "Cliente",
         contacto: order.customerName || "Cliente",
-        telefono: order.phone || "",
-        celular: order.phone || "",
-        calle: order.shippingAddress || "",
+        telefono: order.shipPhone || "",
+        celular: order.shipPhone || "",
+        calle: order.shipAddress1 || "",
         numinterior: "",
         numexterior: "",
-        codigoPostal: order.postalCode || "",
+        codigoPostal: order.shipZip || "",
         colonia: "",
-        ciudad: order.city || "",
-        estado: order.province || "",
+        ciudad: order.shipCity || "",
+        estado: order.shipProvince || "",
         email: order.customerEmail || "contacto@ulum.mx",
-        pais: order.country || "MEX",
+        pais: order.shipCountry || "MEX",
         entreCalles: "no",
-        referencia: order.notes || "no"
+        referencia: order.orderNote || "no"
       };
       const payload = {
         referencia: String(orderId),
@@ -2920,6 +3114,193 @@ var init_shippingRoutes = __esm({
     });
   }
 });
+
+// server/integrations/mlg/mlgClient.ts
+async function obtenerVentas(params) {
+  const res = await mlgRequest("/api/Ventas/ObtenerVentasProveedor", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    body: JSON.stringify(params)
+  });
+  const json = await res.json();
+  return json;
+}
+var init_mlgClient = __esm({
+  "server/integrations/mlg/mlgClient.ts"() {
+    "use strict";
+    init_MlgClient();
+  }
+});
+
+// server/integrations/mlg/mapAndUpsert.ts
+import { and as and3, eq as eq5 } from "drizzle-orm";
+function toStr(n) {
+  return n == null ? null : String(n);
+}
+function mapEstatusToStatus(e) {
+  if (!e) return "pending";
+  const m = e.toLowerCase();
+  if (m.includes("entregado")) return "delivered";
+  if (m.includes("camino") || m.includes("transito")) return "shipped";
+  if (m.includes("preparaci\xF3n") || m.includes("preparacion")) return "processing";
+  return "pending";
+}
+async function upsertMlgOrder(v) {
+  const orderIdStr = toStr(v.idCanje);
+  const name = v.idOrder || null;
+  const customerName = v.nombreCliente ?? null;
+  const totalAmount = toStr(v.totalCompra) ?? null;
+  const subtotalPrice = toStr(v.precioArticulo) ?? null;
+  const fulfillmentStatus = v.estatusEnvio ?? null;
+  const financialStatus = "PAID";
+  const createdAt = v.fechaSolicitud ? new Date(v.fechaSolicitud) : /* @__PURE__ */ new Date();
+  const shopifyCreatedAt = createdAt;
+  const currency = "MXN";
+  const tags = ["MLG"];
+  const inserted = await db.insert(orders).values({
+    shopId: MLG_SHOP_ID,
+    orderId: orderIdStr,
+    name,
+    customerName,
+    totalAmount,
+    subtotalPrice,
+    financialStatus,
+    fulfillmentStatus,
+    createdAt,
+    shopifyCreatedAt,
+    currency,
+    tags,
+    status: mapEstatusToStatus(fulfillmentStatus),
+    updatedAt: /* @__PURE__ */ new Date()
+  }).onConflictDoUpdate({
+    target: [orders.shopId, orders.orderId],
+    set: {
+      name,
+      customerName,
+      totalAmount,
+      subtotalPrice,
+      financialStatus,
+      fulfillmentStatus,
+      currency,
+      tags,
+      status: mapEstatusToStatus(fulfillmentStatus),
+      shopifyCreatedAt,
+      updatedAt: /* @__PURE__ */ new Date()
+    }
+  }).returning({ id: orders.id });
+  const orderRowId = inserted[0]?.id;
+  if (orderRowId) {
+    const title = v.titulo || v.producto || "Art\xEDculo MLG";
+    const sku = v.modelo ? String(v.modelo) : toStr(v.idProductoProveedor) ?? null;
+    const quantity = Number(v.cantidad || 1);
+    const price = toStr(v.precioArticulo) ?? null;
+    const existing = await db.select({ id: orderItems.id }).from(orderItems).where(and3(eq5(orderItems.orderId, orderRowId), eq5(orderItems.title, title))).limit(1);
+    if (existing.length === 0) {
+      await db.insert(orderItems).values({
+        orderId: orderRowId,
+        title,
+        sku,
+        quantity,
+        price,
+        variantTitle: v.modelo ?? null
+      });
+    }
+  }
+}
+var MLG_SHOP_ID;
+var init_mapAndUpsert = __esm({
+  "server/integrations/mlg/mapAndUpsert.ts"() {
+    "use strict";
+    init_db();
+    init_schema();
+    MLG_SHOP_ID = 3;
+  }
+});
+
+// server/integrations/mlg/syncMlgSales.ts
+var syncMlgSales_exports = {};
+__export(syncMlgSales_exports, {
+  startMlgSyncScheduler: () => startMlgSyncScheduler,
+  syncMlgOnce: () => syncMlgOnce
+});
+import fs2 from "node:fs";
+function todayPlus(days = 1) {
+  const d = /* @__PURE__ */ new Date();
+  d.setDate(d.getDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+function readCursor() {
+  try {
+    const raw = fs2.readFileSync(CURSOR_FILE, "utf-8");
+    const j = JSON.parse(raw);
+    return j?.lastFechaSolicitud ?? null;
+  } catch {
+    return null;
+  }
+}
+function writeCursor(fecha) {
+  try {
+    fs2.writeFileSync(CURSOR_FILE, JSON.stringify({ lastFechaSolicitud: fecha }, null, 2));
+  } catch {
+  }
+}
+async function syncMlgOnce() {
+  if (process.env.MLG_ENABLED !== "true") return { imported: 0 };
+  const providerId = process.env.MLG_PROVIDER_ID || process.env.MLG_IDPROVEEDOR;
+  if (!providerId) return { imported: 0 };
+  const dateMin = readCursor() || process.env.MLG_SYNC_SINCE || "2025-06-01";
+  const dateMax = todayPlus(1);
+  let page = 1;
+  let total = 0;
+  for (; ; ) {
+    const res = await obtenerVentas({
+      page,
+      totalRows: 100,
+      providerId,
+      orderBy: 1,
+      orderType: 1,
+      dateMin,
+      dateMax
+    });
+    const rows = res?.ventas?.results ?? [];
+    if (!rows.length) break;
+    for (const v of rows) {
+      await upsertMlgOrder(v);
+    }
+    const maxFecha = rows.map((r) => r.fechaSolicitud).filter(Boolean).sort().pop();
+    if (maxFecha) writeCursor(maxFecha);
+    total += rows.length;
+    page += 1;
+  }
+  return { imported: total };
+}
+function startMlgSyncScheduler() {
+  if (process.env.MLG_ENABLED !== "true") return;
+  const interval = Number(process.env.MLG_SYNC_INTERVAL_MS || 3e5);
+  const tick = async () => {
+    try {
+      const r = await syncMlgOnce();
+      if (r.imported) console.log(`[MLG] Imported ${r.imported} ventas`);
+    } catch (e) {
+      console.error("[MLG] sync error:", e?.message || e);
+    }
+  };
+  timer = setInterval(tick, interval);
+  tick();
+}
+var CURSOR_FILE, timer;
+var init_syncMlgSales = __esm({
+  "server/integrations/mlg/syncMlgSales.ts"() {
+    "use strict";
+    init_mlgClient();
+    init_mapAndUpsert();
+    CURSOR_FILE = ".mlg-cursor.json";
+    timer = null;
+  }
+});
+
+// server/index.ts
+import "dotenv/config";
 
 // server/syncShopifyOrders.ts
 init_db();
@@ -3624,12 +4005,14 @@ import fileUpload from "express-fileupload";
 
 // server/routes.ts
 init_storage();
+init_db();
 init_schema();
 import { createServer } from "http";
 import bcrypt from "bcrypt";
 import session from "express-session";
 import MemoryStore from "memorystore";
 import { z as z5 } from "zod";
+import { sql as sql4 } from "drizzle-orm";
 init_shopifyEnv();
 import multer from "multer";
 import xlsx from "xlsx";
@@ -3716,43 +4099,150 @@ async function registerRoutes(app) {
     console.log("Health check solicitado");
     res.json({
       ok: true,
-      ts: Date.now()
+      timestamp: (/* @__PURE__ */ new Date()).toISOString()
+      // ✅ normalizado (antes usabas ts)
     });
   });
   app.get("/api/health/shopify", async (req, res) => {
     try {
       const stores = [
-        { url: process.env.SHOPIFY_STORE_1_URL, token: process.env.SHOPIFY_STORE_1_TOKEN },
-        { url: process.env.SHOPIFY_STORE_2_URL, token: process.env.SHOPIFY_STORE_2_TOKEN }
-      ].filter((store) => store.url && store.token);
+        {
+          name: process.env.SHOPIFY_SHOP_NAME_1,
+          token: process.env.SHOPIFY_ACCESS_TOKEN_1,
+          apiVersion: process.env.SHOPIFY_API_VERSION_1
+        },
+        {
+          name: process.env.SHOPIFY_SHOP_NAME_2,
+          token: process.env.SHOPIFY_ACCESS_TOKEN_2,
+          apiVersion: process.env.SHOPIFY_API_VERSION_2
+        }
+      ].filter((s) => s.name && s.token).map((s) => ({
+        shop: s.name,
+        tokenMasked: s.token.slice(0, 6) + "\u2026",
+        // solo para debug seguro
+        apiVersion: s.apiVersion || "unset"
+      }));
       if (stores.length === 0) {
-        return res.json({ ok: false, error: "No Shopify stores configured", timestamp: (/* @__PURE__ */ new Date()).toISOString() });
+        return res.json({
+          ok: false,
+          error: "No hay tiendas Shopify configuradas (revisar SHOPIFY_SHOP_NAME_* y SHOPIFY_ACCESS_TOKEN_*)",
+          timestamp: (/* @__PURE__ */ new Date()).toISOString()
+        });
       }
-      res.json({ ok: true, status: 200, timestamp: (/* @__PURE__ */ new Date()).toISOString() });
-    } catch (error) {
-      res.json({ ok: false, error: error.message, timestamp: (/* @__PURE__ */ new Date()).toISOString() });
+      return res.json({
+        ok: true,
+        status: 200,
+        stores,
+        timestamp: (/* @__PURE__ */ new Date()).toISOString()
+      });
+    } catch (err) {
+      return res.json({
+        ok: false,
+        error: err?.message || "Error inesperado en health Shopify",
+        timestamp: (/* @__PURE__ */ new Date()).toISOString()
+      });
+    }
+  });
+  app.get("/api/health/ww", async (req, res) => {
+    try {
+      const shop = process.env.SHOPIFY_SHOP_NAME_1;
+      const token = process.env.SHOPIFY_ACCESS_TOKEN_1;
+      const apiVersion = process.env.SHOPIFY_API_VERSION_1;
+      if (!shop || !token) {
+        return res.json({
+          ok: false,
+          error: "WW no configurado: revisar SHOPIFY_SHOP_NAME_1 y SHOPIFY_ACCESS_TOKEN_1",
+          timestamp: (/* @__PURE__ */ new Date()).toISOString()
+        });
+      }
+      return res.json({
+        ok: true,
+        status: 200,
+        timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+        details: {
+          shop,
+          apiVersion: apiVersion || "unset"
+          // token no se devuelve por seguridad; si quieres mostrar en logs, enmascara
+        }
+      });
+    } catch (err) {
+      return res.json({
+        ok: false,
+        error: err?.message || "Error inesperado en WW",
+        timestamp: (/* @__PURE__ */ new Date()).toISOString()
+      });
+    }
+  });
+  app.get("/api/health/ct", async (req, res) => {
+    try {
+      const shop = process.env.SHOPIFY_SHOP_NAME_2;
+      const token = process.env.SHOPIFY_ACCESS_TOKEN_2;
+      const apiVersion = process.env.SHOPIFY_API_VERSION_2;
+      if (!shop || !token) {
+        return res.json({
+          ok: false,
+          error: "CT no configurado: revisar",
+          timestamp: (/* @__PURE__ */ new Date()).toISOString()
+        });
+      }
+      return res.json({
+        ok: true,
+        status: 200,
+        timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+        details: {
+          shop,
+          apiVersion: apiVersion || "unset"
+        }
+      });
+    } catch (err) {
+      return res.json({
+        ok: false,
+        error: err?.message || "Error inesperado en CT",
+        timestamp: (/* @__PURE__ */ new Date()).toISOString()
+      });
     }
   });
   app.get("/api/health/mlg", async (req, res) => {
     try {
-      const hasCredentials = process.env.MLG_EMAIL && process.env.MLG_PASSWORD && process.env.MLG_PROVIDER_ID;
+      const providerId = process.env.MLG_IDPROVEEDOR || process.env.MLG_PROVIDER_ID;
+      const hasCredentials = Boolean(
+        process.env.MLG_EMAIL && process.env.MLG_PASSWORD && providerId
+      );
       if (!hasCredentials) {
-        return res.json({ ok: false, error: "MLG credentials not configured", timestamp: (/* @__PURE__ */ new Date()).toISOString() });
+        return res.json({
+          ok: false,
+          error: "MLG no configurado: revisar MLG_EMAIL, MLG_PASSWORD y MLG_IDPROVEEDOR",
+          timestamp: (/* @__PURE__ */ new Date()).toISOString()
+        });
       }
-      res.json({ ok: true, status: 200, timestamp: (/* @__PURE__ */ new Date()).toISOString() });
-    } catch (error) {
-      res.json({ ok: false, error: error.message, timestamp: (/* @__PURE__ */ new Date()).toISOString() });
+      return res.json({ ok: true, status: 200, timestamp: (/* @__PURE__ */ new Date()).toISOString() });
+    } catch (err) {
+      return res.json({
+        ok: false,
+        error: err?.message || "Error inesperado en health MLG",
+        timestamp: (/* @__PURE__ */ new Date()).toISOString()
+      });
     }
   });
   app.get("/api/health/expresspl", async (req, res) => {
     try {
-      const hasCredentials = process.env.EXPRESSPL_BASE_URL && process.env.EXPRESSPL_LOGIN && process.env.EXPRESSPL_PASSWORD;
+      const hasCredentials = Boolean(
+        process.env.EXPRESSPL_BASE_URL && process.env.EXPRESSPL_LOGIN && process.env.EXPRESSPL_PASSWORD
+      );
       if (!hasCredentials) {
-        return res.json({ ok: false, error: "Express-PL credentials not configured", timestamp: (/* @__PURE__ */ new Date()).toISOString() });
+        return res.json({
+          ok: false,
+          error: "Express-PL no configurado: revisar EXPRESSPL_BASE_URL, EXPRESSPL_LOGIN, EXPRESSPL_PASSWORD",
+          timestamp: (/* @__PURE__ */ new Date()).toISOString()
+        });
       }
-      res.json({ ok: true, status: 200, timestamp: (/* @__PURE__ */ new Date()).toISOString() });
-    } catch (error) {
-      res.json({ ok: false, error: error.message, timestamp: (/* @__PURE__ */ new Date()).toISOString() });
+      return res.json({ ok: true, status: 200, timestamp: (/* @__PURE__ */ new Date()).toISOString() });
+    } catch (err) {
+      return res.json({
+        ok: false,
+        error: err?.message || "Error inesperado en health Express-PL",
+        timestamp: (/* @__PURE__ */ new Date()).toISOString()
+      });
     }
   });
   app.get("/api/integrations/shopify/ping", async (req, res) => {
@@ -4252,6 +4742,57 @@ async function registerRoutes(app) {
       res.status(500).json({ message: "No se pudo obtener la orden (detalles)" });
     }
   });
+  app.get("/api/orders/:id/flags", requiereAutenticacion, async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      if (!Number.isInteger(id) || id <= 0) {
+        return res.status(400).json({ message: "ID de orden inv\xE1lido" });
+      }
+      const q = sql4`
+        SELECT
+          -- Ítems sin mapeo
+          EXISTS (
+            SELECT 1
+            FROM order_items oi
+            LEFT JOIN LATERAL (
+              SELECT cp.*
+              FROM catalogo_productos cp
+              WHERE oi.sku IS NOT NULL AND (
+                lower(cp.sku_interno) = lower(oi.sku) OR lower(cp.sku) = lower(oi.sku)
+              )
+              ORDER BY (lower(cp.sku_interno) = lower(oi.sku)) DESC,
+                       (lower(cp.sku) = lower(oi.sku)) DESC
+              LIMIT 1
+            ) cp ON TRUE
+            WHERE oi.order_id = ${id}
+              AND cp.sku IS NULL AND cp.sku_interno IS NULL
+          ) AS has_unmapped,
+
+          -- Ítems con stock de marca en cero
+          EXISTS (
+            SELECT 1
+            FROM order_items oi
+            LEFT JOIN LATERAL (
+              SELECT cp.*
+              FROM catalogo_productos cp
+              WHERE oi.sku IS NOT NULL AND (
+                lower(cp.sku_interno) = lower(oi.sku) OR lower(cp.sku) = lower(oi.sku)
+              )
+              ORDER BY (lower(cp.sku_interno) = lower(oi.sku)) DESC,
+                       (lower(cp.sku) = lower(oi.sku)) DESC
+              LIMIT 1
+            ) cp ON TRUE
+            WHERE oi.order_id = ${id}
+              AND cp.stock = 0
+          ) AS has_zero_stock
+      `;
+      const r = await db.execute(q);
+      const row = r.rows[0] || {};
+      res.json({ has_unmapped: !!row.has_unmapped, has_zero_stock: !!row.has_zero_stock });
+    } catch (e) {
+      res.status(500).json({ message: e?.message || "No se pudieron calcular flags" });
+    }
+  });
   app.get("/api/orders/:id", requiereAutenticacion, async (req, res) => {
     try {
       const id = Number(req.params.id);
@@ -4286,6 +4827,34 @@ async function registerRoutes(app) {
       res.status(500).json({ message: "No se pudieron obtener items" });
     }
   });
+  app.put("/api/orders/:orderId/items/:itemId/sku", requiereAutenticacion, async (req, res) => {
+    try {
+      const orderId = Number(req.params.orderId);
+      const itemId = Number(req.params.itemId);
+      if (!Number.isInteger(orderId) || orderId <= 0 || !Number.isInteger(itemId) || itemId <= 0) {
+        return res.status(400).json({ message: "Par\xE1metros inv\xE1lidos" });
+      }
+      const bodySchema = z5.object({ sku: z5.string().min(1) });
+      const { sku } = bodySchema.parse(req.body);
+      const existsQ = sql4`
+        SELECT 1 FROM catalogo_productos cp
+        WHERE lower(cp.sku_interno) = lower(${sku}) OR lower(cp.sku) = lower(${sku})
+        LIMIT 1
+      `;
+      const exists = await db.execute(existsQ);
+      if (!exists.rows.length) {
+        return res.status(400).json({ message: "SKU no existe en cat\xE1logo" });
+      }
+      const upd = sql4`
+        UPDATE order_items SET sku = ${sku}
+        WHERE id = ${itemId} AND order_id = ${orderId}
+      `;
+      await db.execute(upd);
+      res.json({ ok: true });
+    } catch (e) {
+      res.status(400).json({ message: e?.message || "No se pudo reasignar el SKU" });
+    }
+  });
   app.post("/api/orders/:id/cancel", requiereAutenticacion, async (req, res) => {
     try {
       const id = Number(req.params.id);
@@ -4293,37 +4862,46 @@ async function registerRoutes(app) {
         return res.status(400).json({ message: "ID de orden inv\xE1lido" });
       const orden = await storage.getOrder(id);
       if (!orden) return res.status(404).json({ ok: false, errors: "Orden no encontrada" });
-      const { reason, staffNote, notifyCustomer, restock, refundToOriginal } = req.body;
-      const { shop, token, apiVersion } = getShopifyCredentials(String(orden.shopId));
-      const gid = orden.orderId && orden.orderId.startsWith("gid://") ? orden.orderId : `gid://shopify/Order/${orden.orderId || orden.id}`;
-      const mutation = `mutation orderCancel($id: ID!, $reason: OrderCancelReason, $staffNote: String, $email: Boolean, $restock: Boolean, $refund: Boolean){
-        orderCancel(id: $id, reason: $reason, staffNote: $staffNote, email: $email, restock: $restock, refund: $refund){
-          job { id }
-          userErrors { field message }
-        }
-      }`;
-      const variables = {
-        id: gid,
-        reason,
-        staffNote,
-        email: !!notifyCustomer,
-        restock: !!restock,
-        refund: !!refundToOriginal
-      };
-      const r = await fetch(`https://${shop}/admin/api/${apiVersion}/graphql.json`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Shopify-Access-Token": token
-        },
-        body: JSON.stringify({ query: mutation, variables })
-      });
-      const data = await r.json();
-      const userErrors = data?.data?.orderCancel?.userErrors || data?.errors;
-      if (!r.ok || userErrors && userErrors.length) {
-        return res.status(400).json({ ok: false, errors: userErrors });
+      if (orden.shopifyCancelledAt) {
+        return res.status(400).json({ ok: false, errors: "La orden ya est\xE1 cancelada" });
       }
-      return res.json({ ok: true, job: data?.data?.orderCancel?.job });
+      const { reason, staffNote, notifyCustomer, restock, refundToOriginal } = req.body;
+      const gid = orden.orderId && orden.orderId.startsWith("gid://") ? orden.orderId : `gid://shopify/Order/${orden.orderId || orden.id}`;
+      {
+        if (orden.shopId !== 1 && orden.shopId !== 2) {
+          return res.status(400).json({ ok: false, errors: "La orden no corresponde a Shopify (shopId 1 o 2)" });
+        }
+        const reasonEff = typeof reason === "string" && reason ? reason : "OTHER";
+        const staffNoteEff = typeof staffNote === "string" ? staffNote : "";
+        const notifyCustomerEff = notifyCustomer === void 0 ? true : !!notifyCustomer;
+        const restockEff = restock === void 0 ? true : !!restock;
+        const refundEff = !!refundToOriginal;
+        console.log("[cancel-order] start", { id, gid, reason: reasonEff });
+        const { cancelShopifyOrderAndWait: cancelShopifyOrderAndWait2 } = await Promise.resolve().then(() => (init_cancelOrder(), cancelOrder_exports));
+        const result = await cancelShopifyOrderAndWait2({
+          shopId: orden.shopId,
+          orderGid: gid,
+          reason: reasonEff,
+          staffNote: staffNoteEff,
+          email: notifyCustomerEff,
+          restock: restockEff,
+          refund: refundEff
+        });
+        if (!result.ok) {
+          console.warn("[cancel-order] shopify failed", result);
+          return res.status(400).json({ ok: false, errors: result.errors || [{ message: "Cancelaci\xF3n no confirmada en Shopify" }], stage: result.stage });
+        }
+        const o = result.order;
+        const { markOrderCancelledSafe: markOrderCancelledSafe2 } = await Promise.resolve().then(() => (init_storage(), storage_exports));
+        await markOrderCancelledSafe2(id, {
+          cancelledAt: o?.cancelledAt || null,
+          cancelReason: o?.cancelReason || reasonEff || null,
+          staffNote: staffNoteEff || null,
+          displayFinancialStatus: o?.displayFinancialStatus || null,
+          displayFulfillmentStatus: o?.displayFulfillmentStatus || null
+        });
+        return res.json({ ok: true, order: o });
+      }
     } catch (e) {
       console.error("cancel order", e?.message);
       res.status(500).json({ ok: false, errors: e?.message });
@@ -4586,11 +5164,11 @@ async function registerRoutes(app) {
   app.post("/api/notes", requiereAutenticacion, async (req, res) => {
     try {
       const userId = req.user.id;
-      const { text: text2 } = insertNoteSchema.parse(req.body);
-      console.log("Creando nota para usuario:", userId, "con contenido:", text2);
+      const { content } = insertNoteSchema.parse(req.body);
+      console.log("Creando nota para usuario:", userId, "con contenido:", content);
       const nota = await storage.createNote({
         userId,
-        content: text2
+        content
       });
       console.log("Nota creada:", nota);
       res.status(201).json({
@@ -4650,14 +5228,22 @@ async function registerRoutes(app) {
       res.status(500).json({ message: "No se pudieron obtener productos" });
     }
   });
-  app.get("/api/external-products", requiereAutenticacion, async (req, res) => {
+  app.get("/api/catalogo/search", requiereAutenticacion, async (req, res) => {
     try {
-      const page = req.query.page ? Number(req.query.page) : 1;
-      const pageSize = req.query.pageSize ? Number(req.query.pageSize) : 15;
-      const data = await storage.getExternalProductsPaginated(page, pageSize);
-      res.json(data);
-    } catch {
-      res.status(500).json({ message: "No se pudieron obtener productos" });
+      const q = String(req.query.q || "").trim();
+      if (!q) return res.json([]);
+      const pattern = `%${q.toLowerCase()}%`;
+      const r = await db.execute(sql4`
+        SELECT sku, sku_interno, nombre_producto, costo, stock
+        FROM catalogo_productos
+        WHERE lower(sku) LIKE ${pattern}
+           OR lower(sku_interno) LIKE ${pattern}
+           OR lower(nombre_producto) LIKE ${pattern}
+        LIMIT 20
+      `);
+      res.json(r.rows);
+    } catch (e) {
+      res.status(500).json({ message: e?.message || "Error en b\xFAsqueda de cat\xE1logo" });
     }
   });
   app.get("/api/admin/users", requiereAdmin, async (_req, res) => {
@@ -4866,8 +5452,8 @@ async function registerRoutes(app) {
         const text2 = await upstream.text();
         return res.status(502).json({ message: "MLG upstream error", status: upstream.status, body: text2 });
       }
-      const json2 = await upstream.json();
-      res.json({ ok: true, data: json2 });
+      const json = await upstream.json();
+      res.json({ ok: true, data: json });
     } catch (err) {
       res.status(500).json({ message: "MLG ping failed", error: String(err?.message ?? err) });
     }
@@ -5150,5 +5736,18 @@ aplicacion.use((req, res, next) => {
     } else {
       console.log("[CRON] Desactivado (ENABLE_CRON != 1)");
     }
+    (async () => {
+      try {
+        if (process.env.MLG_ENABLED === "true") {
+          const { startMlgSyncScheduler: startMlgSyncScheduler2 } = await Promise.resolve().then(() => (init_syncMlgSales(), syncMlgSales_exports));
+          startMlgSyncScheduler2();
+          console.log("[MLG] Sync scheduler started");
+        } else {
+          console.log("[MLG] Sync disabled (MLG_ENABLED != 'true')");
+        }
+      } catch (e) {
+        console.warn("[MLG] Could not start sync scheduler:", e?.message || e);
+      }
+    })();
   });
 })();

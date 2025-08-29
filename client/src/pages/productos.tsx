@@ -166,35 +166,36 @@ export default function ProductosPage() {
 
   const { data: catalogData, isLoading: catalogLoading } = useQuery<CatalogApiResponse>({
     queryKey: ['/api/unified-products/catalog', catalogPage, searchTerm, searchField, catalogFilters],
-    queryFn: () =>
-      apiRequest<CatalogApiResponse>(
-        '/api/unified-products/catalog',
-        {
-          params: {
-            page: catalogPage,
-            pageSize,
-            search: searchTerm,
-            searchField: searchField || undefined,
-            ...catalogFilters
-          }
-        }
-      ),
+    queryFn: () => {
+      const params = new URLSearchParams({
+        page: String(catalogPage),
+        pageSize: String(pageSize),
+        ...(searchTerm ? { search: searchTerm } : {}),
+        ...(searchField ? { searchField } : {}),
+        ...(catalogFilters.marca ? { marca: catalogFilters.marca } : {}),
+        ...(catalogFilters.categoria ? { categoria: catalogFilters.categoria } : {}),
+        ...(catalogFilters.condicion ? { condicion: catalogFilters.condicion } : {}),
+        ...(catalogFilters.marca_producto ? { marca_producto: catalogFilters.marca_producto } : {}),
+      });
+      return apiRequest('GET', `/api/unified-products/catalog?${params.toString()}`).then(res => res.json());
+    },
     enabled: activeTab === 'catalogo'
   });
 
   const { data: catalogFacets } = useQuery<FacetsResponse>({
     queryKey: ['/api/unified-products/catalog/facets'],
     queryFn: () =>
-      apiRequest<FacetsResponse>('/api/unified-products/catalog/facets'),
+      apiRequest('GET', '/api/unified-products/catalog/facets').then(res => res.json()),
     enabled: activeTab === 'catalogo'
   });
 
   const updateCatalogMutation = useMutation({
     mutationFn: ({ sku, updates }: { sku: string; updates: Partial<CatalogProduct> }) =>
-      apiRequest<{ success: boolean }>(
+      apiRequest(
+        'PATCH',
         `/api/unified-products/catalog/${encodeURIComponent(sku)}`,
-        { method: 'PATCH', data: updates }
-      ),
+        updates
+      ).then(res => res.json()),
     onSuccess: () => {
       toast({ description: 'Producto actualizado correctamente' });
       queryClient.invalidateQueries({ queryKey: ['/api/unified-products/catalog'] });
@@ -210,27 +211,28 @@ export default function ProductosPage() {
 
   const { data: shopifyData, isLoading: shopifyLoading } = useQuery<ShopifyApiResponse>({
     queryKey: ['/api/unified-products/shopify', shopifyPage, searchTerm, shopifyFilters],
-    queryFn: () =>
-      apiRequest<ShopifyApiResponse>(
-        '/api/unified-products/shopify',
-        {
-          params: {
-            page: shopifyPage,
-            pageSize,
-            search: searchTerm,
-            ...shopifyFilters
-          }
-        }
-      ),
+    queryFn: () => {
+      const params = new URLSearchParams({
+        page: String(shopifyPage),
+        pageSize: String(pageSize),
+        ...(searchTerm ? { search: searchTerm } : {}),
+        ...(shopifyFilters.shopId ? { shopId: shopifyFilters.shopId } : {}),
+        ...(shopifyFilters.status ? { status: shopifyFilters.status } : {}),
+        ...(shopifyFilters.vendor ? { vendor: shopifyFilters.vendor } : {}),
+        ...(shopifyFilters.productType ? { productType: shopifyFilters.productType } : {}),
+      });
+      return apiRequest('GET', `/api/unified-products/shopify?${params.toString()}`).then(res => res.json());
+    },
     enabled: activeTab === 'shopify'
   });
 
   const updateShopifyMutation = useMutation({
     mutationFn: ({ variantId, updates }: { variantId: number; updates: Partial<ShopifyProduct> }) =>
       apiRequest(
+        'PATCH',
         `/api/unified-products/shopify/variant/${variantId}`,
-        { method: 'PATCH', data: updates }
-      ),
+        updates
+      ).then(res => res.json()),
     onSuccess: () => {
       toast({ description: 'Variante actualizada correctamente' });
       queryClient.invalidateQueries({ queryKey: ['/api/unified-products/shopify'] });
@@ -247,17 +249,16 @@ export default function ProductosPage() {
   const { data: reconciliationStats } = useQuery<ReconciliationStats>({
     queryKey: ['/api/unified-products/reconciliation/stats'],
     queryFn: () =>
-      apiRequest<ReconciliationStats>('/api/unified-products/reconciliation/stats'),
+      apiRequest('GET', '/api/unified-products/reconciliation/stats').then(res => res.json()),
     enabled: activeTab === 'conciliacion'
   });
 
   const { data: unlinkedCatalog } = useQuery<UnlinkedCatalogResponse>({
     queryKey: ['/api/unified-products/reconciliation/unlinked/catalog', reconciliationPage],
-    queryFn: () =>
-      apiRequest<UnlinkedCatalogResponse>(
-        '/api/unified-products/reconciliation/unlinked/catalog',
-        { params: { page: reconciliationPage, pageSize } }
-      ),
+    queryFn: () => {
+      const params = new URLSearchParams({ page: String(reconciliationPage), pageSize: String(pageSize) });
+      return apiRequest('GET', `/api/unified-products/reconciliation/unlinked/catalog?${params.toString()}`).then(res => res.json());
+    },
     enabled: activeTab === 'conciliacion'
   });
 
@@ -852,7 +853,7 @@ export default function ProductosPage() {
       </div>
 
       {/* Pestañas principales */}
-      <Tabs value={activeTab} onValueChange={(v: 'catalogo' | 'shopify' | 'conciliacion') => setActiveTab(v)} className="space-y-4">
+      <Tabs value={activeTab} onValueChange={(v: string) => setActiveTab(v as 'catalogo' | 'shopify' | 'conciliacion')} className="space-y-4">
         <TabsList className="grid w-full grid-cols-3">
           <TabsTrigger value="catalogo" className="flex items-center gap-2" data-testid="tab-catalogo">
             <Package className="w-4 h-4" />

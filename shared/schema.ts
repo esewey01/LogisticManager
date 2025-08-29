@@ -372,6 +372,14 @@ export interface DashboardMetrics {
   byShop: Array<{ shopId: number; shopName?: string | null; count: number }>;
 }
 
+// DTOs usados por el cliente (no tablas)
+export type NoteDTO = {
+  id: number;
+  content: string;
+  date: string; // YYYY-MM-DD derivado de createdAt
+  createdAt?: Date | string;
+};
+
 // =========================================================
 // Alias opcionales en español
 // =========================================================

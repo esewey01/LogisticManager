@@ -84,6 +84,54 @@ def graphql_request(query: str, variables: Optional[Dict[str, Any]] = None) -> D
 def ensure_order_metafield_definition(namespace: str = MF_NAMESPACE, key: str = MF_KEY, mf_type: str = MF_TYPE):
     """
     Crea la definición para ORDER si no existe.
+    """
+    mutation = """
+    mutation CreateDef($definition: MetafieldDefinitionInput!) {
+      metafieldDefinitionCreate(definition: $definition) {
+        createdDefinition {
+          id
+          name
+          namespace
+          key
+          ownerType
+        }
+        userErrors { field message code }
+      }
+    }
+    """
+    variables = {
+      "definition": {
+        "name": "Fecha de Entrega",
+        "namespace": namespace,
+        "key": key,
+        "description": "Fecha de entrega real y confirmada por logística",
+        "type": mf_type,
+        "ownerType": "ORDER"
+      }
+    }
+    data = graphql_request(mutation, variables)["data"]["metafieldDefinitionCreate"]
+    if data.get("createdDefinition"):
+        cd = data["createdDefinition"]
+        print(f"✅ Definición lista: {cd['namespace']}.{cd['key']} (owner={cd['ownerType']})")
+        return cd.get("id")
+
+    errs = data.get("userErrors") or []
+    if errs:
+        # --- LÓGICA CORREGIDA AQUÍ ---
+        # Ahora verifica si el error es 'TAKEN' (ya existe) o si el mensaje lo menciona
+        is_taken_error = any(e.get("code") == "TAKEN" for e in errs)
+        msg_contains_already = any("already exists" in e.get("message", "").lower() for e in errs)
+        
+        if is_taken_error or msg_contains_already:
+            print(f"ℹ️ La definición {namespace}.{key} ya existe y no necesita ser creada.")
+            return None
+        # --- FIN DE LA LÓGICA CORREGIDA ---
+        
+        raise RuntimeError(f"metafieldDefinitionCreate userErrors: {errs}")
+
+    return None
+    """
+    Crea la definición para ORDER si no existe.
     - type: "date" o "date_time"
     - ownerType: "ORDER"
     """

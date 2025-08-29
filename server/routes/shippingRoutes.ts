@@ -52,9 +52,9 @@ export function registerShippingRoutes(app: Express) {
         try {
           const row = await almacenamiento.getCatalogoBySkuInterno(sku);
           dimsBySku[sku] = {
-            alto: Number(row?.alto_cm ?? 10) || 10,
-            ancho: Number(row?.ancho_cm ?? 10) || 10,
-            largo: Number(row?.largo_cm ?? 10) || 10,
+            alto: Number((row as any)?.alto ?? 10) || 10,
+            ancho: Number((row as any)?.ancho ?? 10) || 10,
+            largo: Number((row as any)?.largo ?? 10) || 10,
           };
         } catch (error) {
           // Si no existe en catálogo, usar defaults
@@ -73,19 +73,19 @@ export function registerShippingRoutes(app: Express) {
         rfc: "XAXX010101000",
         razonsocial: order.customerName || "Cliente",
         contacto: order.customerName || "Cliente",
-        telefono: order.phone || "",
-        celular: order.phone || "",
-        calle: order.shippingAddress || "",
+        telefono: (order as any).shipPhone || "",
+        celular: (order as any).shipPhone || "",
+        calle: (order as any).shipAddress1 || "",
         numinterior: "",
         numexterior: "",
-        codigoPostal: order.postalCode || "",
+        codigoPostal: (order as any).shipZip || "",
         colonia: "",
-        ciudad: order.city || "",
-        estado: order.province || "",
+        ciudad: (order as any).shipCity || "",
+        estado: (order as any).shipProvince || "",
         email: order.customerEmail || "contacto@ulum.mx",
-        pais: order.country || "MEX",
+        pais: (order as any).shipCountry || "MEX",
         entreCalles: "no",
-        referencia: order.notes || "no",
+        referencia: (order as any).orderNote || "no",
       };
 
       // 3) Payload Express-PL (con remitente fijo)

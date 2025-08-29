@@ -108,7 +108,7 @@ export default function Profile() {
   const onSubmit = (data: ProfileForm) => {
     // Sync theme changes
     if (data.theme && data.theme !== theme) {
-      setTheme(data.theme);
+      setTheme((data.theme === 'system' ? theme : (data.theme as 'light' | 'dark')));
     }
     
     updateProfileMutation.mutate(data);

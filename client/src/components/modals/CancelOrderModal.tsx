@@ -15,24 +15,36 @@ interface CancelOrderModalProps {
 export default function CancelOrderModal({ orderId, onClose, onCancelled }: CancelOrderModalProps) {
   const [reason, setReason] = useState("OTHER");
   const [staffNote, setStaffNote] = useState("");
-  const [notifyCustomer, setNotifyCustomer] = useState(false);
-  const [restock, setRestock] = useState(false);
+  const [notifyCustomer, setNotifyCustomer] = useState(true);
+  const [restock, setRestock] = useState(true);
   const [refundToOriginal, setRefundToOriginal] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   const handleSubmit = async () => {
     try {
       setLoading(true);
-      await apiRequest("POST", `/api/orders/${orderId}/cancel`, {
+      setErrorMsg(null);
+      const r = await apiRequest("POST", `/api/orders/${orderId}/cancel`, {
         reason,
         staffNote,
         notifyCustomer,
         restock,
         refundToOriginal,
-      }).then((r) => r.json());
+      });
+      const data = await r.json();
+      if (!data?.ok) {
+        console.error("[CancelOrderModal] error:", data?.errors || data);
+        const msg = Array.isArray(data?.errors)
+          ? data.errors.map((e: any) => e?.message || String(e)).join("; ")
+          : (data?.errors || data?.message || "Error al cancelar");
+        setErrorMsg(String(msg));
+        return;
+      }
       onCancelled();
     } catch (e) {
       console.error(e);
+      setErrorMsg((e as any)?.message || "Error de red al cancelar");
     } finally {
       setLoading(false);
     }
@@ -80,6 +92,11 @@ export default function CancelOrderModal({ orderId, onClose, onCancelled }: Canc
             <label htmlFor="refund" className="text-sm">Reembolsar al método original</label>
           </div>
         </div>
+        {errorMsg && (
+          <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded px-3 py-2">
+            {errorMsg}
+          </div>
+        )}
         <div className="flex justify-end space-x-2">
           <Button variant="outline" onClick={onClose}>Cerrar</Button>
           <Button onClick={handleSubmit} disabled={loading}>

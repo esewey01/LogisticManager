@@ -51,22 +51,22 @@ export default function Config() {
   }, [user, setLocation]);
 
   // Queries
-  const { data: brands = [], isLoading: brandsLoading } = useQuery({
+  const { data: brands = [], isLoading: brandsLoading } = useQuery<any[]>({
     queryKey: ["/api/brands"],
     enabled: user?.role === "admin",
   });
 
-  const { data: carriers = [], isLoading: carriersLoading } = useQuery({
+  const { data: carriers = [], isLoading: carriersLoading } = useQuery<any[]>({
     queryKey: ["/api/carriers"],
     enabled: user?.role === "admin",
   });
 
-  const { data: channels = [], isLoading: channelsLoading } = useQuery({
+  const { data: channels = [], isLoading: channelsLoading } = useQuery<any[]>({
     queryKey: ["/api/channels"],
     enabled: user?.role === "admin",
   });
 
-  const { data: shippingRules = [], isLoading: rulesLoading } = useQuery({
+  const { data: shippingRules = [], isLoading: rulesLoading } = useQuery<any[]>({
     queryKey: ["/api/shipping-rules"],
     enabled: user?.role === "admin",
   });

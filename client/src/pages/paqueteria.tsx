@@ -12,15 +12,15 @@ import {
 } from "@/components/ui/table";
 
 export default function Paqueteria() {
-  const { data: carriers = [], isLoading: carriersLoading } = useQuery({
+  const { data: carriers = [], isLoading: carriersLoading } = useQuery<any[]>({
     queryKey: ["/api/carriers"],
   });
 
-  const { data: tickets = [], isLoading: ticketsLoading } = useQuery({
+  const { data: tickets = [], isLoading: ticketsLoading } = useQuery<any[]>({
     queryKey: ["/api/tickets"],
   });
 
-  const { data: brands = [] } = useQuery({
+  const { data: brands = [] } = useQuery<any[]>({
     queryKey: ["/api/brands"],
   });
 

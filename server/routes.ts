@@ -1,12 +1,15 @@
 
 
 import type { Express } from "express";
+
 import { createServer, type Server } from "http";
 import { storage as almacenamiento } from "./storage"; // almacenamiento de datos (DAO)
 import bcrypt from "bcrypt";
 import session from "express-session";
 import MemoryStore from "memorystore";
 import { z } from "zod";
+import { db as baseDatos } from "./db";
+import { sql } from "drizzle-orm";
 import {
   insertOrderSchema,
   insertTicketSchema,
@@ -19,6 +22,8 @@ import { ProductService } from "./services/ProductService"; // Servicio de produ
 import multer, { type FileFilterCallback } from "multer";
 import type { Request, Response } from "express";
 import xlsx from "xlsx";
+
+
 
 
 
@@ -129,49 +134,179 @@ export async function registerRoutes(app: Express): Promise<Server> {
     console.log("Health check solicitado");
     res.json({
       ok: true,
-      ts: Date.now(),
+      timestamp: new Date().toISOString(), // ✅ normalizado (antes usabas ts)
     });
   });
 
-  // REFACTOR: Health check routes for external services
+  // --- Health checks ---
   app.get("/api/health/shopify", async (req, res) => {
     try {
+      // ✅ Aceptamos los nombres reales del .env que mostraste
       const stores = [
-        { url: process.env.SHOPIFY_STORE_1_URL, token: process.env.SHOPIFY_STORE_1_TOKEN },
-        { url: process.env.SHOPIFY_STORE_2_URL, token: process.env.SHOPIFY_STORE_2_TOKEN }
-      ].filter(store => store.url && store.token);
-      
+        {
+          name: process.env.SHOPIFY_SHOP_NAME_1,
+          token: process.env.SHOPIFY_ACCESS_TOKEN_1,
+          apiVersion: process.env.SHOPIFY_API_VERSION_1,
+        },
+        {
+          name: process.env.SHOPIFY_SHOP_NAME_2,
+          token: process.env.SHOPIFY_ACCESS_TOKEN_2,
+          apiVersion: process.env.SHOPIFY_API_VERSION_2,
+        },
+      ]
+        .filter(s => s.name && s.token)
+        .map(s => ({
+          shop: s.name!,
+          tokenMasked: s.token!.slice(0, 6) + "…", // solo para debug seguro
+          apiVersion: s.apiVersion || "unset",
+        }));
+
       if (stores.length === 0) {
-        return res.json({ ok: false, error: "No Shopify stores configured", timestamp: new Date().toISOString() });
+        return res.json({
+          ok: false,
+          error: "No hay tiendas Shopify configuradas (revisar SHOPIFY_SHOP_NAME_* y SHOPIFY_ACCESS_TOKEN_*)",
+          timestamp: new Date().toISOString(),
+        });
       }
-      
-      res.json({ ok: true, status: 200, timestamp: new Date().toISOString() });
-    } catch (error: any) {
-      res.json({ ok: false, error: error.message, timestamp: new Date().toISOString() });
+
+      // Aquí podrías opcionalmente hacer un ping real a /admin/api/<ver>/shop.json,
+      // pero para health básico basta con validar presencia de credenciales.
+      return res.json({
+        ok: true,
+        status: 200,
+        stores,
+        timestamp: new Date().toISOString(),
+      });
+    } catch (err: any) {
+      return res.json({
+        ok: false,
+        error: err?.message || "Error inesperado en health Shopify",
+        timestamp: new Date().toISOString(),
+      });
+    }
+  });
+  // Tienda 1: WW
+  app.get("/api/health/ww", async (req, res) => {
+    try {
+      const shop = process.env.SHOPIFY_SHOP_NAME_1;
+      const token = process.env.SHOPIFY_ACCESS_TOKEN_1;
+      const apiVersion = process.env.SHOPIFY_API_VERSION_1;
+
+      if (!shop || !token) {
+        return res.json({
+          ok: false,
+          error:
+            "WW no configurado: revisar SHOPIFY_SHOP_NAME_1 y SHOPIFY_ACCESS_TOKEN_1",
+          timestamp: new Date().toISOString(),
+        });
+      }
+
+      // Health básico: presencia de credenciales. (Opcional: ping real a /shop.json)
+      return res.json({
+        ok: true,
+        status: 200,
+        timestamp: new Date().toISOString(),
+        details: {
+          shop,
+          apiVersion: apiVersion || "unset",
+          // token no se devuelve por seguridad; si quieres mostrar en logs, enmascara
+        },
+      });
+    } catch (err: any) {
+      return res.json({
+        ok: false,
+        error: err?.message || "Error inesperado en WW",
+        timestamp: new Date().toISOString(),
+      });
+    }
+  });
+
+  // Tienda 2: CT
+  app.get("/api/health/ct", async (req, res) => {
+    try {
+      const shop = process.env.SHOPIFY_SHOP_NAME_2;
+      const token = process.env.SHOPIFY_ACCESS_TOKEN_2;
+      const apiVersion = process.env.SHOPIFY_API_VERSION_2;
+
+      if (!shop || !token) {
+        return res.json({
+          ok: false,
+          error:
+            "CT no configurado: revisar",
+          timestamp: new Date().toISOString(),
+        });
+      }
+
+      return res.json({
+        ok: true,
+        status: 200,
+        timestamp: new Date().toISOString(),
+        details: {
+          shop,
+          apiVersion: apiVersion || "unset",
+        },
+      });
+    } catch (err: any) {
+      return res.json({
+        ok: false,
+        error: err?.message || "Error inesperado en CT",
+        timestamp: new Date().toISOString(),
+      });
     }
   });
 
   app.get("/api/health/mlg", async (req, res) => {
     try {
-      const hasCredentials = process.env.MLG_EMAIL && process.env.MLG_PASSWORD && process.env.MLG_PROVIDER_ID;
+      // ✅ Admitimos ambos nombres para el proveedor
+      const providerId = process.env.MLG_IDPROVEEDOR || process.env.MLG_PROVIDER_ID;
+
+      const hasCredentials = Boolean(
+        process.env.MLG_EMAIL && process.env.MLG_PASSWORD && providerId,
+      );
+
       if (!hasCredentials) {
-        return res.json({ ok: false, error: "MLG credentials not configured", timestamp: new Date().toISOString() });
+        return res.json({
+          ok: false,
+          error:
+            "MLG no configurado: revisar MLG_EMAIL, MLG_PASSWORD y MLG_IDPROVEEDOR",
+          timestamp: new Date().toISOString(),
+        });
       }
-      res.json({ ok: true, status: 200, timestamp: new Date().toISOString() });
-    } catch (error: any) {
-      res.json({ ok: false, error: error.message, timestamp: new Date().toISOString() });
+
+      return res.json({ ok: true, status: 200, timestamp: new Date().toISOString() });
+    } catch (err: any) {
+      return res.json({
+        ok: false,
+        error: err?.message || "Error inesperado en health MLG",
+        timestamp: new Date().toISOString(),
+      });
     }
   });
 
   app.get("/api/health/expresspl", async (req, res) => {
     try {
-      const hasCredentials = process.env.EXPRESSPL_BASE_URL && process.env.EXPRESSPL_LOGIN && process.env.EXPRESSPL_PASSWORD;
+      const hasCredentials = Boolean(
+        process.env.EXPRESSPL_BASE_URL &&
+        process.env.EXPRESSPL_LOGIN &&
+        process.env.EXPRESSPL_PASSWORD,
+      );
+
       if (!hasCredentials) {
-        return res.json({ ok: false, error: "Express-PL credentials not configured", timestamp: new Date().toISOString() });
+        return res.json({
+          ok: false,
+          error:
+            "Express-PL no configurado: revisar EXPRESSPL_BASE_URL, EXPRESSPL_LOGIN, EXPRESSPL_PASSWORD",
+          timestamp: new Date().toISOString(),
+        });
       }
-      res.json({ ok: true, status: 200, timestamp: new Date().toISOString() });
-    } catch (error: any) {
-      res.json({ ok: false, error: error.message, timestamp: new Date().toISOString() });
+
+      return res.json({ ok: true, status: 200, timestamp: new Date().toISOString() });
+    } catch (err: any) {
+      return res.json({
+        ok: false,
+        error: err?.message || "Error inesperado en health Express-PL",
+        timestamp: new Date().toISOString(),
+      });
     }
   });
 
@@ -389,7 +524,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.put("/api/me", requiereAutenticacion, async (req: any, res) => {
     try {
       const updateData = req.body;
-      res.json({ 
+      res.json({
         message: "Perfil actualizado correctamente",
         profile: { ...req.user, ...updateData }
       });
@@ -772,31 +907,85 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // routes.ts (agrega este endpoint)
-app.get("/api/orders/:id/details", requiereAutenticacion, async (req, res) => {
-  try {
-    const id = Number(req.params.id);
-    console.log(`[GET /api/orders/:id/details] Solicitando detalles ID: ${id}`);
+  app.get("/api/orders/:id/details", requiereAutenticacion, async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      console.log(`[GET /api/orders/:id/details] Solicitando detalles ID: ${id}`);
 
-    if (Number.isNaN(id)) {
-      return res.status(400).json({ message: "ID de orden inválido" });
+      if (Number.isNaN(id)) {
+        return res.status(400).json({ message: "ID de orden inválido" });
+      }
+
+      // Usa el nuevo método
+      // Si tu almacenamiento es un objeto, asegúrate de que el método exista ahí.
+      const ordenDetallada = await (almacenamiento as any).getOrderDetails(id);
+
+      if (!ordenDetallada) {
+        return res.status(404).json({ message: "Orden no encontrada" });
+      }
+
+      // Seguridad JSON
+      const safe = JSON.parse(JSON.stringify(ordenDetallada));
+      res.json(safe);
+    } catch (error) {
+      console.error(`[GET /api/orders/:id/details] Error:`, error);
+      res.status(500).json({ message: "No se pudo obtener la orden (detalles)" });
     }
+  });
 
-    // Usa el nuevo método
-    // Si tu almacenamiento es un objeto, asegúrate de que el método exista ahí.
-    const ordenDetallada = await (almacenamiento as any).getOrderDetails(id);
+  // Flags: unmapped y stock cero por orden
+  app.get("/api/orders/:id/flags", requiereAutenticacion, async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      if (!Number.isInteger(id) || id <= 0) {
+        return res.status(400).json({ message: "ID de orden inválido" });
+      }
 
-    if (!ordenDetallada) {
-      return res.status(404).json({ message: "Orden no encontrada" });
+      const q = sql`
+        SELECT
+          -- Ítems sin mapeo
+          EXISTS (
+            SELECT 1
+            FROM order_items oi
+            LEFT JOIN LATERAL (
+              SELECT cp.*
+              FROM catalogo_productos cp
+              WHERE oi.sku IS NOT NULL AND (
+                lower(cp.sku_interno) = lower(oi.sku) OR lower(cp.sku) = lower(oi.sku)
+              )
+              ORDER BY (lower(cp.sku_interno) = lower(oi.sku)) DESC,
+                       (lower(cp.sku) = lower(oi.sku)) DESC
+              LIMIT 1
+            ) cp ON TRUE
+            WHERE oi.order_id = ${id}
+              AND cp.sku IS NULL AND cp.sku_interno IS NULL
+          ) AS has_unmapped,
+
+          -- Ítems con stock de marca en cero
+          EXISTS (
+            SELECT 1
+            FROM order_items oi
+            LEFT JOIN LATERAL (
+              SELECT cp.*
+              FROM catalogo_productos cp
+              WHERE oi.sku IS NOT NULL AND (
+                lower(cp.sku_interno) = lower(oi.sku) OR lower(cp.sku) = lower(oi.sku)
+              )
+              ORDER BY (lower(cp.sku_interno) = lower(oi.sku)) DESC,
+                       (lower(cp.sku) = lower(oi.sku)) DESC
+              LIMIT 1
+            ) cp ON TRUE
+            WHERE oi.order_id = ${id}
+              AND cp.stock = 0
+          ) AS has_zero_stock
+      `;
+      const r = await baseDatos.execute(q);
+      const row = (r.rows as any[])[0] || {};
+      res.json({ has_unmapped: !!row.has_unmapped, has_zero_stock: !!row.has_zero_stock });
+    } catch (e: any) {
+      res.status(500).json({ message: e?.message || "No se pudieron calcular flags" });
     }
-
-    // Seguridad JSON
-    const safe = JSON.parse(JSON.stringify(ordenDetallada));
-    res.json(safe);
-  } catch (error) {
-    console.error(`[GET /api/orders/:id/details] Error:`, error);
-    res.status(500).json({ message: "No se pudo obtener la orden (detalles)" });
-  }
-});
+  });
 
 
 
@@ -841,6 +1030,39 @@ app.get("/api/orders/:id/details", requiereAutenticacion, async (req, res) => {
     }
   });
 
+  // Reasignación de SKU para un item de una orden
+  app.put("/api/orders/:orderId/items/:itemId/sku", requiereAutenticacion, async (req, res) => {
+    try {
+      const orderId = Number(req.params.orderId);
+      const itemId = Number(req.params.itemId);
+      if (!Number.isInteger(orderId) || orderId <= 0 || !Number.isInteger(itemId) || itemId <= 0) {
+        return res.status(400).json({ message: "Parámetros inválidos" });
+      }
+
+      const bodySchema = z.object({ sku: z.string().min(1) });
+      const { sku } = bodySchema.parse(req.body);
+
+      const existsQ = sql`
+        SELECT 1 FROM catalogo_productos cp
+        WHERE lower(cp.sku_interno) = lower(${sku}) OR lower(cp.sku) = lower(${sku})
+        LIMIT 1
+      `;
+      const exists = await baseDatos.execute(existsQ);
+      if (!exists.rows.length) {
+        return res.status(400).json({ message: "SKU no existe en catálogo" });
+      }
+
+      const upd = sql`
+        UPDATE order_items SET sku = ${sku}
+        WHERE id = ${itemId} AND order_id = ${orderId}
+      `;
+      await baseDatos.execute(upd);
+      res.json({ ok: true });
+    } catch (e: any) {
+      res.status(400).json({ message: e?.message || "No se pudo reasignar el SKU" });
+    }
+  });
+
   app.post("/api/orders/:id/cancel", requiereAutenticacion, async (req, res) => {
     try {
       const id = Number(req.params.id);
@@ -850,43 +1072,60 @@ app.get("/api/orders/:id/details", requiereAutenticacion, async (req, res) => {
       const orden = await almacenamiento.getOrder(id);
       if (!orden) return res.status(404).json({ ok: false, errors: "Orden no encontrada" });
 
+      // [cancel-order] Evita cancelar nuevamente si ya aparece cancelada
+      if ((orden as any).shopifyCancelledAt) {
+        return res.status(400).json({ ok: false, errors: "La orden ya está cancelada" });
+      }
+
       const { reason, staffNote, notifyCustomer, restock, refundToOriginal } = req.body;
-      const { shop, token, apiVersion } = getShopifyCredentials(String(orden.shopId));
       const gid = (orden.orderId && orden.orderId.startsWith("gid://"))
         ? orden.orderId
         : `gid://shopify/Order/${orden.orderId || orden.id}`;
 
-      const mutation = `mutation orderCancel($id: ID!, $reason: OrderCancelReason, $staffNote: String, $email: Boolean, $restock: Boolean, $refund: Boolean){
-        orderCancel(id: $id, reason: $reason, staffNote: $staffNote, email: $email, restock: $restock, refund: $refund){
-          job { id }
-          userErrors { field message }
+      // [cancel-order] Nuevo flujo con polling y actualización segura en BD
+      {
+        if (orden.shopId !== 1 && orden.shopId !== 2) {
+          return res.status(400).json({ ok: false, errors: "La orden no corresponde a Shopify (shopId 1 o 2)" });
         }
-      }`;
 
-      const variables = {
-        id: gid,
-        reason,
-        staffNote,
-        email: !!notifyCustomer,
-        restock: !!restock,
-        refund: !!refundToOriginal,
-      };
+        const reasonEff = typeof reason === 'string' && reason ? reason : 'OTHER';
+        const staffNoteEff = typeof staffNote === 'string' ? staffNote : '';
+        const notifyCustomerEff = (notifyCustomer === undefined ? true : !!notifyCustomer);
+        const restockEff = (restock === undefined ? true : !!restock);
+        const refundEff = !!refundToOriginal;
 
-      const r = await fetch(`https://${shop}/admin/api/${apiVersion}/graphql.json`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Shopify-Access-Token": token,
-        },
-        body: JSON.stringify({ query: mutation, variables }),
-      });
+        console.log("[cancel-order] start", { id, gid, reason: reasonEff });
 
-      const data = await r.json();
-      const userErrors = data?.data?.orderCancel?.userErrors || data?.errors;
-      if (!r.ok || (userErrors && userErrors.length)) {
-        return res.status(400).json({ ok: false, errors: userErrors });
+        const { cancelShopifyOrderAndWait } = await import("./integrations/shopify/cancelOrder");
+        const result = await cancelShopifyOrderAndWait({
+          shopId: orden.shopId,
+          orderGid: gid,
+          reason: reasonEff,
+          staffNote: staffNoteEff,
+          email: notifyCustomerEff,
+          restock: restockEff,
+          refund: refundEff,
+        });
+
+        if (!result.ok) {
+          console.warn("[cancel-order] shopify failed", result);
+          return res.status(400).json({ ok: false, errors: (result as any).errors || [{ message: "Cancelación no confirmada en Shopify" }], stage: (result as any).stage });
+        }
+
+        const o = (result as any).order;
+        const { markOrderCancelledSafe } = await import("./storage");
+        await markOrderCancelledSafe(id, {
+          cancelledAt: o?.cancelledAt || null,
+          cancelReason: o?.cancelReason || reasonEff || null,
+          staffNote: staffNoteEff || null,
+          displayFinancialStatus: o?.displayFinancialStatus || null,
+          displayFulfillmentStatus: o?.displayFulfillmentStatus || null,
+        });
+
+        return res.json({ ok: true, order: o });
       }
-      return res.json({ ok: true, job: data?.data?.orderCancel?.job });
+
+      // legacy fallback removed in favor of helper with job polling
     } catch (e: any) {
       console.error("cancel order", e?.message);
       res.status(500).json({ ok: false, errors: e?.message });
@@ -923,12 +1162,16 @@ app.get("/api/orders/:id/details", requiereAutenticacion, async (req, res) => {
   // ———————————————————————————————————
   const upload = multer({
     storage: multer.memoryStorage(),
-    limits: { fileSize: 5 * 1024 * 1024 },
+    limits: { fileSize: 10 * 1024 * 1024 },
     fileFilter: (_req: Request, file: Express.Multer.File, cb: FileFilterCallback) => {
-      const ok =
-        file.mimetype === "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" ||
-        file.mimetype === "application/vnd.ms-excel";
-      if (!ok) return cb(new Error("Formato de archivo no permitido. Sube un .xlsx/.xls"));
+      const allowed = new Set([
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "application/vnd.ms-excel",
+        "text/csv",
+        "application/csv",
+      ]);
+      const ok = allowed.has(file.mimetype);
+      if (!ok) return cb(new Error("415: Tipo de archivo no soportado. Sube CSV o Excel (.xlsx/.xls)."));
       cb(null, true);
     },
   });
@@ -949,6 +1192,27 @@ app.get("/api/orders/:id/details", requiereAutenticacion, async (req, res) => {
         if (!ws) return res.status(400).json({ message: "El Excel no tiene hojas" });
 
         const rawRows = xlsx.utils.sheet_to_json<Record<string, unknown>>(ws, { defval: null, raw: true });
+        // Validación de columnas mínimas según modo (A: items JSON, B: filas por ítem)
+        {
+          const firstRow = rawRows[0] ?? {};
+          const modeA = Object.prototype.hasOwnProperty.call(firstRow, "items");
+          const requiredA = ["shopId", "orderId", "items"];
+          const requiredB = ["shopId", "orderId", "sku", "quantity"];
+          const required = modeA ? requiredA : requiredB;
+          const missing = required.filter((c) => !(c in firstRow));
+          if (missing.length) {
+            return res.status(400).json({
+              message: "Faltan columnas obligatorias",
+              missing,
+              requiredTemplate: (modeA ? requiredA : requiredB).concat([
+                "name", "orderNumber", "customerName", "customerEmail",
+                "subtotalPrice", "totalAmount", "currency", "financialStatus", "fulfillmentStatus",
+                "tags", "createdAt", "shopifyCreatedAt",
+                ...(modeA ? [] : ["price", "cost", "itemCurrency", "title"])
+              ]),
+            });
+          }
+        }
 
         // Validar columnas mínimas
         const requiredColumns = ["shopId", "orderId"];
@@ -1219,13 +1483,13 @@ app.get("/api/orders/:id/details", requiereAutenticacion, async (req, res) => {
   app.post("/api/notes", requiereAutenticacion, async (req: any, res) => {
     try {
       const userId = req.user.id;
-      const { text } = insertNoteSchema.parse(req.body);
+      const { content } = insertNoteSchema.parse(req.body);
 
-      console.log('Creando nota para usuario:', userId, 'con contenido:', text);
+      console.log('Creando nota para usuario:', userId, 'con contenido:', content);
 
       const nota = await almacenamiento.createNote({
         userId: userId,
-        content: text,
+        content,
       });
 
       console.log('Nota creada:', nota);
@@ -1294,16 +1558,27 @@ app.get("/api/orders/:id/details", requiereAutenticacion, async (req, res) => {
     }
   });
 
-  app.get("/api/external-products", requiereAutenticacion, async (req, res) => {
+  // Búsqueda simple en catálogo por sku/sku_interno/nombre (case-insensitive)
+  app.get("/api/catalogo/search", requiereAutenticacion, async (req, res) => {
     try {
-      const page = req.query.page ? Number(req.query.page) : 1;
-      const pageSize = req.query.pageSize ? Number(req.query.pageSize) : 15;
-      const data = await almacenamiento.getExternalProductsPaginated(page, pageSize);
-      res.json(data);
-    } catch {
-      res.status(500).json({ message: "No se pudieron obtener productos" });
+      const q = String(req.query.q || "").trim();
+      if (!q) return res.json([]);
+      const pattern = `%${q.toLowerCase()}%`;
+      const r = await baseDatos.execute(sql`
+        SELECT sku, sku_interno, nombre_producto, costo, stock
+        FROM catalogo_productos
+        WHERE lower(sku) LIKE ${pattern}
+           OR lower(sku_interno) LIKE ${pattern}
+           OR lower(nombre_producto) LIKE ${pattern}
+        LIMIT 20
+      `);
+      res.json(r.rows);
+    } catch (e: any) {
+      res.status(500).json({ message: e?.message || "Error en búsqueda de catálogo" });
     }
   });
+
+  // TODO: /api/external-products endpoint removed — external_products not in current schema
 
   // ---------- Admin ----------
   app.get("/api/admin/users", requiereAdmin, async (_req, res) => {
@@ -1570,7 +1845,7 @@ app.get("/api/orders/:id/details", requiereAutenticacion, async (req, res) => {
   // Register all MLG routes
   const { registerMlgRoutes } = await import("./routes/mlgRoutes");
   registerMlgRoutes(app);
-  
+
   // EXPRESSPL-INTEGRATION: Registrar rutas de envío
   const { registerShippingRoutes } = await import("./routes/shippingRoutes");
   registerShippingRoutes(app);

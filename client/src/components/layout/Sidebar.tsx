@@ -2,6 +2,7 @@ import { Link, useLocation } from "wouter";
 import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/hooks/useAuth";
 import { useQuery } from "@tanstack/react-query";
+import type { DashboardMetrics } from "@shared/schema";
 import { PieChart, ShoppingBag, Ticket, Package, Truck, Boxes, Layers, Users, Settings } from "lucide-react";
 
 interface SidebarProps {
@@ -13,7 +14,7 @@ export default function Sidebar({ collapsed }: SidebarProps) {
   const { user } = useAuth();
 
   // Fetch dashboard metrics for badges
-  const { data: metrics } = useQuery({
+  const { data: metrics } = useQuery<DashboardMetrics>({
     queryKey: ["/api/dashboard/metrics"],
     refetchInterval: 30000, // Refresh every 30 seconds
   });

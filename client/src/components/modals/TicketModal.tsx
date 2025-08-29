@@ -41,7 +41,7 @@ export default function TicketModal({
   const [notes, setNotes] = useState("");
   const queryClient = useQueryClient();
 
-  const { data: brands = [] } = useQuery({
+  const { data: brands = [] } = useQuery<any[]>({
     queryKey: ["/api/brands"],
     enabled: isOpen,
   });
@@ -78,9 +78,9 @@ export default function TicketModal({
     if (!selectedBrand) return;
 
     // Collect all products from orders
-    const allProducts = orders.reduce((acc, order) => {
+    const allProducts = orders.reduce((acc: any[], order: any) => {
       const orderProducts = Array.isArray(order.products) ? order.products : [];
-      return [...acc, ...orderProducts.map(p => ({
+      return [...acc, ...orderProducts.map((p: any) => ({
         ...p,
         orderId: order.id,
         orderDate: order.createdAt
@@ -100,9 +100,9 @@ export default function TicketModal({
   };
 
   // Group products by brand for better organization
-  const productsByBrand = orders.reduce((acc, order) => {
+  const productsByBrand = orders.reduce((acc: Record<string, any[]>, order: any) => {
     const orderProducts = Array.isArray(order.products) ? order.products : [];
-    orderProducts.forEach(product => {
+    orderProducts.forEach((product: any) => {
       // Try to determine brand from SKU or product name
       const brandKey = product.sku?.split('-')[0] || 'OTHER';
       if (!acc[brandKey]) {
@@ -117,14 +117,14 @@ export default function TicketModal({
     return acc;
   }, {} as Record<string, any[]>);
 
-  const allProducts = orders.reduce((acc, order) => {
+  const allProducts = orders.reduce((acc: any[], order: any) => {
     const orderProducts = Array.isArray(order.products) ? order.products : [];
-    return [...acc, ...orderProducts.map(p => ({
+    return [...acc, ...orderProducts.map((p: any) => ({
       ...p,
       orderId: order.id,
       orderDate: order.createdAt
     }))];
-  }, []);
+  }, [] as any[]);
 
   return (
     <Dialog open={isOpen} onOpenChange={handleClose}>
@@ -174,7 +174,7 @@ export default function TicketModal({
                 <div key={order.id} className="p-3 border rounded-lg">
                   <div className="flex items-center justify-between mb-2">
                     <span className="font-medium text-sm">
-                      {order.externalId || order.id.slice(0, 8)}
+                      {order.externalId || String(order.id).slice(0, 8)}
                     </span>
                     <Badge variant="outline" className="text-xs">
                       {Array.isArray(order.products) ? order.products.length : 0} items
@@ -208,7 +208,7 @@ export default function TicketModal({
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {allProducts.map((product, index) => (
+                  {allProducts.map((product: any, index: number) => (
                     <TableRow key={`${product.orderId}-${index}`}>
                       <TableCell className="font-medium">{product.sku}</TableCell>
                       <TableCell>{product.name}</TableCell>
@@ -216,7 +216,7 @@ export default function TicketModal({
                       <TableCell>${Number(product.price || 0).toFixed(2)}</TableCell>
                       <TableCell>
                         <Badge variant="outline" className="text-xs">
-                          {product.orderId.slice(0, 8)}
+                          {String(product.orderId).slice(0, 8)}
                         </Badge>
                       </TableCell>
                     </TableRow>

@@ -7,6 +7,7 @@ CREA LA APLICACION EXPRESS, CONFIGURA MIDDLEWARE PARA RECIBIR DATOS EN JSON Y FO
 // Compatibilidad fetch en runtimes sin fetch global
 // import fetchOrig from "node-fetch"; // Removed problematic import
 //SINCRONIZACION DE AMBAS TIENDAS
+import 'dotenv/config'
 import { startSchedulers } from "./scheduler";
 const _g: any = globalThis as any;
 // Modern Node.js has built-in fetch
@@ -137,5 +138,20 @@ aplicacion.use((req, res, next) => {
     } else {
       console.log("[CRON] Desactivado (ENABLE_CRON != 1)");
     }
+
+    // MLG sales sync (feature-flagged)
+    (async () => {
+      try {
+        if (process.env.MLG_ENABLED === "true") {
+          const { startMlgSyncScheduler } = await import("./integrations/mlg/syncMlgSales");
+          startMlgSyncScheduler();
+          console.log("[MLG] Sync scheduler started");
+        } else {
+          console.log("[MLG] Sync disabled (MLG_ENABLED != 'true')");
+        }
+      } catch (e) {
+        console.warn("[MLG] Could not start sync scheduler:", (e as any)?.message || e);
+      }
+    })();
   });
 })();

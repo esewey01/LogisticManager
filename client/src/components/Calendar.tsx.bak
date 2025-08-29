@@ -13,7 +13,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { Form, FormControl, FormField, FormItem, FormLabel } from "@/components/ui/form";
 import { insertNoteSchema } from "@shared/schema";
 import type { z } from "zod";
-import type { NoteDTO } from "@shared/schema";
+import type { Note } from "@shared/schema";
 
 type NoteFormData = z.infer<typeof insertNoteSchema>;
 
@@ -39,12 +39,13 @@ export default function Calendar({ className = "" }: CalendarProps) {
   const form = useForm<NoteFormData>({
     resolver: zodResolver(insertNoteSchema),
     defaultValues: {
-      content: "",
+      text: "",
+      date: new Date().toISOString().split('T')[0],
     },
   });
 
   // Obtener todas las notas
-  const { data: notes = [] } = useQuery<NoteDTO[]>({
+  const { data: notes = [] } = useQuery<Note[]>({
     queryKey: ["/api/notes"],
   });
 
@@ -99,7 +100,7 @@ export default function Calendar({ className = "" }: CalendarProps) {
   // Obtener notas por fecha
   const getNotesForDate = (date: Date) => {
     const dateStr = date.toISOString().split('T')[0];
-    return notes.filter((note: NoteDTO) => note.date === dateStr);
+    return notes.filter((note: Note) => note.date === dateStr);
   };
 
   // Navegar entre meses
@@ -118,6 +119,7 @@ export default function Calendar({ className = "" }: CalendarProps) {
   // Manejar clic en fecha
   const handleDateClick = (date: Date) => {
     setSelectedDate(date);
+    form.setValue("date", date.toISOString().split('T')[0]);
   };
 
   // Manejar envío de formulario
@@ -199,7 +201,7 @@ export default function Calendar({ className = "" }: CalendarProps) {
                 
                 {/* Mostrar primeras notas como puntos */}
                 <div className="absolute bottom-1 left-1 flex gap-1">
-                  {dayNotes.slice(0, 3).map((_: NoteDTO, noteIndex: number) => (
+                  {dayNotes.slice(0, 3).map((_: Note, noteIndex: number) => (
                     <div
                       key={noteIndex}
                       className="w-2 h-2 bg-primary rounded-full"
@@ -234,7 +236,7 @@ export default function Calendar({ className = "" }: CalendarProps) {
                     <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
                       <FormField
                         control={form.control}
-                        name={"content" as any}
+                        name="date"
                         render={({ field }) => (
                           <FormItem>
                             <FormLabel>Fecha</FormLabel>
@@ -246,7 +248,7 @@ export default function Calendar({ className = "" }: CalendarProps) {
                       />
                       <FormField
                         control={form.control}
-                        name="content"
+                        name="text"
                         render={({ field }) => (
                           <FormItem>
                             <FormLabel>Nota</FormLabel>
@@ -289,7 +291,7 @@ export default function Calendar({ className = "" }: CalendarProps) {
                   No hay notas para esta fecha
                 </p>
               ) : (
-                getNotesForDate(selectedDate).map((note: NoteDTO) => (
+                getNotesForDate(selectedDate).map((note: Note) => (
                   <div
                     key={note.id}
                     className="p-3 bg-muted/50 rounded-md"

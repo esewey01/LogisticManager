@@ -148,7 +148,7 @@ function DateRangeSelector({
 // ----------------------------------------------------------------
 function NoteItemEditable({ note }: { note: NoteDTO & { createdAt?: string | Date } }) {
   const [editing, setEditing] = useState(false);
-  const [text, setText] = useState(note.text);
+  const [text, setText] = useState(note.content);
   const queryClient = useQueryClient();
 
   const handleSave = async () => {
@@ -181,7 +181,7 @@ function NoteItemEditable({ note }: { note: NoteDTO & { createdAt?: string | Dat
         </div>
       ) : (
         <>
-          <p className="text-sm text-foreground whitespace-pre-wrap">{note.text}</p>
+          <p className="text-sm text-foreground whitespace-pre-wrap">{note.content}</p>
           <div className="mt-2 flex items-center justify-between">
             {created && <span className="text-xs text-muted">Creada: {created}</span>}
             <Badge variant="secondary" className="text-xs">Nota</Badge>
@@ -274,7 +274,7 @@ export default function Dashboard() {
   const topSkus = topSkusResp?.topSkus ?? [];
 
   // Notas (últimos 30 días)
-  const { data: notesResp } = useQuery<{ notes: NoteDTO[] }>({
+  const { data: notes = [] } = useQuery<NoteDTO[]>({
     queryKey: ["notes"],
     queryFn: () => {
       const thirtyDaysAgo = new Date();
@@ -285,13 +285,12 @@ export default function Dashboard() {
       ).then((res) => res.json());
     },
   });
-  const notes = notesResp?.notes ?? [];
 
   const [newNote, setNewNote] = useState("");
 
   const addNote = async () => {
     if (!newNote.trim()) return;
-    await apiRequest("POST", "/api/notes", { text: newNote.trim() });
+    await apiRequest("POST", "/api/notes", { content: newNote.trim() });
     setNewNote("");
     queryClient.invalidateQueries({ queryKey: ["notes"] });
   };
@@ -313,7 +312,7 @@ export default function Dashboard() {
   const managedPct = Math.round((metrics?.managed || 0) / totalOrders * 100);
 
   return (
-    <div className="min-h-screen bg-gray-50 p-4 sm:p-6">
+    <div className="min-h-screen p-4 sm:p-6">
       <div className="max-w-7xl mx-auto space-y-6">
         {/* Header */}
         <header className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
