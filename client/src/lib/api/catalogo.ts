@@ -11,6 +11,26 @@ export type CatalogoItem = {
   categoria?: string | null;
 };
 
+export type CatalogoProductoFull = {
+  sku: string | null;
+  marca: string | null;
+  sku_interno: string | null;
+  codigo_barras: string | null;
+  nombre_producto: string | null;
+  modelo: string | null;
+  categoria: string | null;
+  condicion: string | null;
+  marca_producto: string | null;
+  variante: string | null;
+  largo: number | null;
+  ancho: number | null;
+  alto: number | null;
+  peso: number | null;
+  foto: string | null;
+  costo: number | null;
+  stock: number | null;
+};
+
 export type CatalogoResponse = {
   data: CatalogoItem[];
   page: number;
@@ -104,3 +124,23 @@ export const downloadCatalogTemplate = (format: "csv" | "xlsx" = "csv") => {
   a.remove();
 };
 
+export const fetchCatalogItem = async (skuInterno: string): Promise<CatalogoProductoFull> => {
+  const res = await apiRequest("GET", `/api/catalogo/${encodeURIComponent(skuInterno)}`);
+  return res.json();
+};
+
+export const updateCatalogItem = async (
+  skuInterno: string,
+  updates: Partial<CatalogoProductoFull>
+): Promise<CatalogoProductoFull> => {
+  const res = await apiRequest("PUT", `/api/catalogo/${encodeURIComponent(skuInterno)}` , updates);
+  return res.json();
+};
+
+export const fetchCatalogShopifyLink = async (
+  skuInterno: string
+): Promise<{ connected: boolean; store?: string }> => {
+  const qs = new URLSearchParams({ sku_interno: skuInterno });
+  const res = await apiRequest("GET", `/api/catalogo/shopify-link?${qs.toString()}`);
+  return res.json();
+};

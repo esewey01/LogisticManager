@@ -4,6 +4,8 @@ import { apiRequest } from "@/lib/queryClient";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
@@ -12,15 +14,29 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
 import { Separator } from "@/components/ui/separator";
-import { Eye, Undo2, Trash2 } from "lucide-react";
+import { Eye, Undo2, Trash2, Copy, ExternalLink } from "lucide-react";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
+import { useToast } from "@/hooks/use-toast";
 
 /** Estructura que devuelve GET /api/tickets (getTicketsView) */
 type TicketRow = {
   id: number | string;
   ticketNumber: string;
-  status: string;                 // open | closed (estado del ticket)
-  stockStatus?: string | null;    // ok | apart | stock_out (estado de stock)
+  status: string;                 // ABIERTO, ETIQUETA_GENERADA, ... | open (compat)
+  // Logística
+  serviceId?: number | null;
+  serviceName?: string | null;
+  carrierId?: number | null;
+  carrierName?: string | null;
+  trackingNumber?: string | null;
+  labelUrl?: string | null;
+  serviceLevel?: string | null;
+  packageCount?: number | null;
+  weightKg?: string | number | null;
+  lengthCm?: string | number | null;
+  widthCm?: string | number | null;
+  heightCm?: string | number | null;
+  stockStatus?: string | null;    // ok | apart | stock_out (legacy, puede omitirse)
   notes?: string | null;
   createdAt?: string | null;
   updatedAt?: string | null;
@@ -51,6 +67,28 @@ export default function Tickets() {
     refetchOnWindowFocus: false,
   });
 
+  // Servicios logísticos
+  const { data: services = [] } = useQuery<Array<{ id: number; name: string }>>({
+    queryKey: ["/api/logistic-services"],
+    queryFn: async () => {
+      const r = await apiRequest("GET", "/api/logistic-services");
+      if (!r.ok) throw new Error(await r.text());
+      return r.json();
+    },
+    staleTime: 60_000,
+  });
+
+  // Paqueterías
+  const { data: carriers = [] } = useQuery<Array<{ id: number; name: string }>>({
+    queryKey: ["/api/carriers"],
+    queryFn: async () => {
+      const r = await apiRequest("GET", "/api/carriers");
+      if (!r.ok) throw new Error(await r.text());
+      return r.json();
+    },
+    staleTime: 60_000,
+  });
+
   // ====== MUTATIONS ======
   const revertMutation = useMutation({
     mutationFn: async ({ ticketId, revertShopify = true }: { ticketId: number; revertShopify?: boolean }) => {
@@ -73,6 +111,48 @@ export default function Tickets() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/tickets"] });
     },
+  });
+
+  // Actualizar servicio/carrier
+  const setServiceMutation = useMutation({
+    mutationFn: async ({ ticketId, serviceId, carrierId }: { ticketId: number; serviceId: number; carrierId?: number | null }) => {
+      const r = await apiRequest("PATCH", `/api/tickets/${ticketId}/service`, { serviceId, carrierId: carrierId ?? null });
+      if (!r.ok) throw new Error(await r.text());
+      return true;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/tickets"] });
+      toast({ title: "Servicio actualizado" });
+    },
+    onError: async (e: any) => toast({ variant: "destructive", title: "Error", description: String(e?.message || e) }),
+  });
+
+  // Actualizar datos de envío
+  const shippingDataMutation = useMutation({
+    mutationFn: async ({ ticketId, payload }: { ticketId: number; payload: any }) => {
+      const r = await apiRequest("PATCH", `/api/tickets/${ticketId}/shipping-data`, payload);
+      if (!r.ok) throw new Error(await r.text());
+      return true;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/tickets"] });
+      toast({ title: "Datos de envío actualizados" });
+    },
+    onError: async (e: any) => toast({ variant: "destructive", title: "Error", description: String(e?.message || e) }),
+  });
+
+  // Actualizar tracking
+  const trackingMutation = useMutation({
+    mutationFn: async ({ ticketId, payload }: { ticketId: number; payload: any }) => {
+      const r = await apiRequest("PATCH", `/api/tickets/${ticketId}/tracking`, payload);
+      if (!r.ok) throw new Error(await r.text());
+      return true;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/tickets"] });
+      toast({ title: "Tracking actualizado" });
+    },
+    onError: async (e: any) => toast({ variant: "destructive", title: "Error", description: String(e?.message || e) }),
   });
 
   // ====== UI STATE (Modal) ======
@@ -107,11 +187,15 @@ export default function Tickets() {
     return first(skus) ?? "—";
   };
 
-  // badge para estado del ticket (open/closed)
+  // badge para estado del ticket (mapa extendido)
   const ticketStatusBadgeClass = (status?: string) => {
-    const s = (status || "").toLowerCase();
-    if (s === "open") return "bg-yellow-100 text-yellow-800";
-    if (s === "closed") return "bg-green-100 text-green-800";
+    const s = (status || "").toUpperCase();
+    if (s === "ABIERTO" || s === "OPEN") return "bg-yellow-100 text-yellow-800";
+    if (s === "ETIQUETA_GENERADA") return "bg-blue-100 text-blue-800";
+    if (s === "EN_TRÁNSITO" || s === "EN_TRANSITO") return "bg-indigo-100 text-indigo-800";
+    if (s === "ENTREGADO" || s === "CLOSED") return "bg-green-100 text-green-800";
+    if (s === "CANCELADO") return "bg-red-100 text-red-800";
+    if (s === "FALLIDO") return "bg-orange-100 text-orange-800";
     return "bg-gray-100 text-gray-800";
   };
 
@@ -198,12 +282,11 @@ export default function Tickets() {
                 <TableHead>Ticket</TableHead>
                 {/* Cliente → Pedido (nombre del pedido) */}
                 <TableHead>Pedido</TableHead>
-                <TableHead>Marca</TableHead>
                 {/* Producto debe mostrar el SKU */}
                 <TableHead>Producto (SKU)</TableHead>
-                <TableHead>Items</TableHead>
-                <TableHead>Estado Stock</TableHead>
-                <TableHead>Estado</TableHead>
+                <TableHead>Servicio logístico</TableHead>
+                <TableHead>Paquetería</TableHead>
+                <TableHead>Tracking</TableHead>
                 <TableHead>Fecha</TableHead>
                 <TableHead className="text-right">Acciones</TableHead>
               </TableRow>
@@ -227,28 +310,34 @@ export default function Tickets() {
                     </TableCell>
 
                     {/* MARCA (del catálogo) */}
-                    <TableCell>
-                      <Badge variant="outline">{brandLabel}</Badge>
-                    </TableCell>
-
                     {/* PRODUCTO (SKU) */}
                     <TableCell>
                       <span className="font-mono">{skuLabel}</span>
                     </TableCell>
 
-                    {/* ITEMS */}
-                    <TableCell>{t!.itemsCount ?? 0}</TableCell>
+                    {/* SERVICIO LOGÍSTICO */}
+                    <TableCell>{(t as any).serviceName || "—"}</TableCell>
 
-                    {/* ESTADO STOCK */}
-                    <TableCell>
-                      <Badge className={stockBadgeClass(t!.stockStatus)}>{stockLabel(t!.stockStatus)}</Badge>
-                    </TableCell>
+                    {/* PAQUETERÍA */}
+                    <TableCell>{(t as any).carrierName || "—"}</TableCell>
 
-                    {/* ESTADO TICKET */}
+                    {/* TRACKING */}
                     <TableCell>
-                      <Badge className={ticketStatusBadgeClass(t!.status)}>
-                        {(t!.status || "").toUpperCase()}
-                      </Badge>
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono text-xs">{(t as any).trackingNumber || "—"}</span>
+                        {(t as any).trackingNumber && (
+                          <Button variant="ghost" size="icon" onClick={() => navigator.clipboard.writeText(String((t as any).trackingNumber))} aria-label="Copiar tracking">
+                            <Copy className="h-4 w-4" />
+                          </Button>
+                        )}
+                        {(t as any).labelUrl && (
+                          <Button variant="outline" size="icon" asChild aria-label="Ver etiqueta">
+                            <a href={(t as any).labelUrl} target="_blank" rel="noopener noreferrer">
+                              <ExternalLink className="h-4 w-4" />
+                            </a>
+                          </Button>
+                        )}
+                      </div>
                     </TableCell>
 
                     {/* FECHA */}
@@ -362,54 +451,44 @@ export default function Tickets() {
                     {(selected?.status || "").toUpperCase()}
                   </Badge>
                 </div>
-                <div>
-                  <p className="text-xs text-muted-foreground">Estado stock</p>
-                  <Badge className={stockBadgeClass(selected?.stockStatus)}>
-                    {stockLabel(selected?.stockStatus)}
-                  </Badge>
-                </div>
               </div>
             </div>
 
             <Separator />
 
-            {/* Marca y SKUs */}
-            <div className="space-y-2">
-              <p className="text-xs text-muted-foreground">Marca</p>
-              <Badge variant="outline">{getBrandLabel(selected)}</Badge>
-
-              <p className="text-xs text-muted-foreground mt-3">Productos (SKUs)</p>
-              <div className="flex flex-wrap gap-2">
-                {(selected?.skus && selected.skus.length > 0) ? (
-                  selected.skus.map((sku, idx) => (
-                    <Badge key={`${sku}-${idx}`} variant="secondary" className="font-mono">
-                      {sku}
-                    </Badge>
-                  ))
-                ) : (
-                  <span>—</span>
-                )}
-              </div>
-            </div>
-
-            <Separator />
-
-            {/* Notas y fechas */}
-            <div className="space-y-1">
-              <p className="text-xs text-muted-foreground">Notas</p>
-              <p className="text-sm">{selected?.notes || "—"}</p>
-            </div>
-
+            {/* Servicio logístico y Paquetería */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                <p className="text-xs text-muted-foreground">Creado</p>
-                <p className="text-sm">{formatDateTime(selected?.createdAt)}</p>
+                <p className="text-xs text-muted-foreground mb-1">Servicio logístico</p>
+                <Select
+                  value={String(selected?.serviceId ?? "")}
+                  onValueChange={(v) => selected && setServiceMutation.mutate({ ticketId: Number(selected.id), serviceId: Number(v) })}
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Selecciona servicio" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {services.map((s) => (
+                      <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
               <div>
-                <p className="text-xs text-muted-foreground">Actualizado</p>
-                <p className="text-sm">{formatDateTime(selected?.updatedAt)}</p>
+                <p className="text-xs text-muted-foreground mb-1">Paquetería</p>
+                <CarrierSelect ticket={selected} onSet={(carrierId) => selected && setServiceMutation.mutate({ ticketId: Number(selected.id), serviceId: Number(selected.serviceId), carrierId })} />
               </div>
             </div>
+
+            <Separator />
+
+            {/* Datos de envío */}
+            <ShippingDataEditor ticket={selected} onSave={(payload) => selected && shippingDataMutation.mutate({ ticketId: Number(selected.id), payload })} />
+
+            <Separator />
+
+            {/* Tracking */}
+            <TrackingEditor ticket={selected} onSave={(payload) => selected && trackingMutation.mutate({ ticketId: Number(selected.id), payload })} />
           </div>
 
           <DialogFooter className="gap-2">
@@ -431,6 +510,140 @@ export default function Tickets() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+    </div>
+  );
+}
+
+// --- Componentes auxiliares para edición logística ---
+function CarrierSelect({ ticket, onSet }: { ticket: TicketRow | null; onSet: (carrierId: number | null) => void }) {
+  const serviceId = ticket?.serviceId ? Number(ticket.serviceId) : undefined;
+  const enabled = !!serviceId;
+  const { data: carriers = [], isFetching } = useQuery<Array<{ id: number; name: string }>>({
+    queryKey: ["/api/service-carriers", serviceId],
+    queryFn: async () => {
+      if (!serviceId) return [] as any;
+      const r = await apiRequest("GET", `/api/service-carriers?serviceId=${serviceId}`);
+      if (!r.ok) throw new Error(await r.text());
+      return r.json();
+    },
+    enabled,
+    staleTime: 30_000,
+  });
+
+  return (
+    <Select
+      value={String(ticket?.carrierId ?? "")}
+      onValueChange={(v) => onSet(v ? Number(v) : null)}
+      disabled={!enabled || isFetching}
+    >
+      <SelectTrigger className="w-full">
+        <SelectValue placeholder={enabled ? (isFetching ? "Cargando..." : "Selecciona paquetería") : "Selecciona servicio primero"} />
+      </SelectTrigger>
+      <SelectContent>
+        {carriers.map((c) => (
+          <SelectItem key={c.id} value={String(c.id)}>{c.name}</SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+}
+
+function ShippingDataEditor({ ticket, onSave }: { ticket: TicketRow | null; onSave: (payload: any) => void }) {
+  const { toast } = useToast();
+  const [pkg, setPkg] = React.useState<number | string>(ticket?.packageCount ?? 1);
+  const [w, setW] = React.useState<number | string>(ticket?.weightKg ?? "");
+  const [l, setL] = React.useState<number | string>(ticket?.lengthCm ?? "");
+  const [wi, setWi] = React.useState<number | string>(ticket?.widthCm ?? "");
+  const [h, setH] = React.useState<number | string>(ticket?.heightCm ?? "");
+  const [lvl, setLvl] = React.useState<string>(ticket?.serviceLevel ?? "");
+
+  React.useEffect(() => {
+    setPkg(ticket?.packageCount ?? 1);
+    setW(ticket?.weightKg ?? "");
+    setL(ticket?.lengthCm ?? "");
+    setWi(ticket?.widthCm ?? "");
+    setH(ticket?.heightCm ?? "");
+    setLvl(ticket?.serviceLevel ?? "");
+  }, [ticket?.id]);
+
+  const handleSave = () => {
+    const package_count = Number(pkg);
+    const weight_kg = w === "" ? null : Number(w);
+    const length_cm = l === "" ? null : Number(l);
+    const width_cm = wi === "" ? null : Number(wi);
+    const height_cm = h === "" ? null : Number(h);
+    const service_level = lvl || null;
+    if (Number.isFinite(package_count) && package_count < 1) {
+      toast({ variant: "destructive", title: "Validación", description: "El número de paquetes debe ser ≥ 1" });
+      return;
+    }
+    if (weight_kg != null && !(Number(weight_kg) > 0)) {
+      toast({ variant: "destructive", title: "Validación", description: "El peso debe ser mayor a 0" });
+      return;
+    }
+    onSave({ package_count, weight_kg, length_cm, width_cm, height_cm, service_level });
+  };
+
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-6 gap-3 items-end">
+      <div className="md:col-span-2">
+        <p className="text-xs text-muted-foreground mb-1">Nivel de servicio</p>
+        <Input value={lvl} onChange={(e) => setLvl(e.target.value)} placeholder="E.g. Express, Ground" />
+      </div>
+      <div>
+        <p className="text-xs text-muted-foreground mb-1">Paquetes</p>
+        <Input type="number" value={pkg as any} onChange={(e) => setPkg(e.target.value)} min={1} />
+      </div>
+      <div>
+        <p className="text-xs text-muted-foreground mb-1">Peso (kg)</p>
+        <Input type="number" step="0.01" value={w as any} onChange={(e) => setW(e.target.value)} />
+      </div>
+      <div>
+        <p className="text-xs text-muted-foreground mb-1">Largo (cm)</p>
+        <Input type="number" step="0.1" value={l as any} onChange={(e) => setL(e.target.value)} />
+      </div>
+      <div>
+        <p className="text-xs text-muted-foreground mb-1">Ancho (cm)</p>
+        <Input type="number" step="0.1" value={wi as any} onChange={(e) => setWi(e.target.value)} />
+      </div>
+      <div>
+        <p className="text-xs text-muted-foreground mb-1">Alto (cm)</p>
+        <Input type="number" step="0.1" value={h as any} onChange={(e) => setH(e.target.value)} />
+      </div>
+      <div className="md:col-span-6">
+        <Button onClick={handleSave}>Guardar datos de envío</Button>
+      </div>
+    </div>
+  );
+}
+
+function TrackingEditor({ ticket, onSave }: { ticket: TicketRow | null; onSave: (payload: any) => void }) {
+  const [tracking, setTracking] = React.useState<string>(ticket?.trackingNumber ?? "");
+  const [url, setUrl] = React.useState<string>(ticket?.labelUrl ?? "");
+  React.useEffect(() => {
+    setTracking(ticket?.trackingNumber ?? "");
+    setUrl(ticket?.labelUrl ?? "");
+  }, [ticket?.id]);
+  const handleSave = () => onSave({ tracking_number: tracking || null, label_url: url || null });
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-6 gap-3 items-end">
+      <div className="md:col-span-2">
+        <p className="text-xs text-muted-foreground mb-1">Tracking</p>
+        <Input value={tracking} onChange={(e) => setTracking(e.target.value)} placeholder="Número de guía" />
+      </div>
+      <div className="md:col-span-3">
+        <p className="text-xs text-muted-foreground mb-1">URL de etiqueta</p>
+        <Input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://..." />
+      </div>
+      <div className="md:col-span-1 flex gap-2">
+        <Button variant="secondary" onClick={() => navigator.clipboard.writeText(tracking)} disabled={!tracking}>Copiar</Button>
+        {url && (
+          <Button variant="outline" asChild>
+            <a href={url} target="_blank" rel="noopener noreferrer">Ver etiqueta</a>
+          </Button>
+        )}
+        <Button onClick={handleSave}>Guardar</Button>
+      </div>
     </div>
   );
 }

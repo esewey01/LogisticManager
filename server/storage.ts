@@ -9,8 +9,11 @@ import {
   catalogoProductos as tablaProductosCatalogo,
   channels as tablaCanales,
   carriers as tablaPaqueterias,
+  logisticServices as tablaServiciosLogisticos,
+  serviceCarriers as tablaServicioPaqueterias,
   orders as tablaOrdenes,
   tickets as tablaTickets,
+  ticketEvents as tablaEventosTicket,
   notes as tablaNotas,
   products as tablaProductos,
   variants as tablaVariantes,
@@ -27,10 +30,13 @@ import {
   type InsertChannel as InsertarCanal,
   type Carrier as Paqueteria,
   type InsertCarrier as InsertarPaqueteria,
+  type LogisticService as ServicioLogistico,
+  type InsertLogisticService as InsertarServicioLogistico,
   type Order as Orden,
   type InsertOrder as InsertarOrden,
   type Ticket as Ticket,
   type InsertTicket as InsertarTicket,
+  type TicketEvent as EventoTicket,
   type Note as Nota,
   type InsertNote as InsertarNota,
   type DashboardMetrics,
@@ -128,6 +134,10 @@ export interface IStorage {
   getCarrier(id: number): Promise<Paqueteria | undefined>;
   createCarrier(carrier: InsertarPaqueteria): Promise<Paqueteria>;
 
+  // Servicios logísticos
+  getLogisticServices(): Promise<ServicioLogistico[]>;
+  getServiceCarriers(serviceId: number): Promise<Paqueteria[]>;
+
   // Órdenes
   getOrders(filters?: {
     channelId?: number;
@@ -153,6 +163,19 @@ export interface IStorage {
   getTicket(id: number): Promise<Ticket | undefined>;
   createTicket(ticket: InsertarTicket): Promise<Ticket>;
   updateTicket(id: number, updates: Partial<InsertarTicket>): Promise<Ticket>;
+  // Nuevas operaciones de Tickets (logística)
+  setTicketService(ticketId: number, params: { serviceId: number; carrierId?: number | null }): Promise<void>;
+  updateTicketShippingData(ticketId: number, data: {
+    weightKg?: number | null;
+    lengthCm?: number | null;
+    widthCm?: number | null;
+    heightCm?: number | null;
+    packageCount?: number | null;
+    serviceLevel?: string | null;
+  }): Promise<void>;
+  updateTicketStatus(ticketId: number, status: string): Promise<void>;
+  updateTicketTracking(ticketId: number, data: { trackingNumber?: string | null; labelUrl?: string | null; carrierId?: number | null }): Promise<void>;
+  writeTicketEvent(ticketId: number, eventType: string, payload?: unknown): Promise<void>;
   createBulkTickets(
     orderIds: (number | string)[],
     notes?: string,
@@ -464,6 +487,29 @@ export class DatabaseStorage implements IStorage {
       .values(datos)
       .returning();
     return paqueteriaNueva;
+  }
+
+  // ==== SERVICIOS LOGÍSTICOS ====
+  /** Devuelve servicios logísticos activos. */
+  async getLogisticServices(): Promise<ServicioLogistico[]> {
+    return await baseDatos
+      .select()
+      .from(tablaServiciosLogisticos)
+      .where(eq(tablaServiciosLogisticos.isActive, true))
+      .orderBy(asc(tablaServiciosLogisticos.name));
+  }
+
+  /** Devuelve paqueterías compatibles con un servicio. */
+  async getServiceCarriers(serviceId: number): Promise<Paqueteria[]> {
+    const q = sql`
+      SELECT c.*
+      FROM carriers c
+      JOIN service_carriers sc ON sc.carrier_id = c.id
+      WHERE sc.service_id = ${serviceId} AND c.is_active = TRUE
+      ORDER BY c.name ASC
+    `;
+    const r = await baseDatos.execute(q);
+    return r.rows as any;
   }
 
   // ==== ÓRDENES ====
@@ -826,6 +872,18 @@ async getOrderDetails(idParam: unknown) {
       t.ticket_number                                                         AS "ticketNumber",
       t.status                                                                AS "status",
       t.notes                                                                 AS "notes",
+      t.service_id                                                            AS "serviceId",
+      ls.name                                                                 AS "serviceName",
+      t.carrier_id                                                            AS "carrierId",
+      c.name                                                                  AS "carrierName",
+      t.tracking_number                                                       AS "trackingNumber",
+      t.label_url                                                             AS "labelUrl",
+      t.service_level                                                         AS "serviceLevel",
+      t.package_count                                                         AS "packageCount",
+      t.weight_kg                                                             AS "weightKg",
+      t.length_cm                                                             AS "lengthCm",
+      t.width_cm                                                              AS "widthCm",
+      t.height_cm                                                             AS "heightCm",
       t.created_at                                                            AS "createdAt",
       t.updated_at                                                            AS "updatedAt",
       COALESCE(o.id::text, '')                                                AS "orderPk",
@@ -846,6 +904,8 @@ async getOrderDetails(idParam: unknown) {
     LEFT JOIN orders o           ON o.id = t.order_id::bigint
     LEFT JOIN order_items oi     ON oi.order_id = o.id
     LEFT JOIN catalogo_productos cp ON cp.sku = oi.sku   -- usa SKU externo del item
+    LEFT JOIN logistic_services ls ON ls.id = t.service_id
+    LEFT JOIN carriers c           ON c.id  = t.carrier_id
     GROUP BY t.id, o.id
     ORDER BY t.created_at DESC
   `);
@@ -892,6 +952,83 @@ async getOrderDetails(idParam: unknown) {
       .where(eq(tablaTickets.id, id))
       .returning();
     return ticket;
+  }
+
+  // === Auditoría de tickets ===
+  async writeTicketEvent(ticketId: number, eventType: string, payload?: unknown): Promise<void> {
+    await baseDatos.insert(tablaEventosTicket).values({
+      ticketId,
+      eventType,
+      payload: payload as any,
+    });
+  }
+
+  // === Operaciones logísticas de tickets ===
+  async setTicketService(ticketId: number, params: { serviceId: number; carrierId?: number | null }): Promise<void> {
+    const { serviceId, carrierId } = params;
+
+    // Valida servicio
+    const [serv] = await baseDatos.select().from(tablaServiciosLogisticos).where(eq(tablaServiciosLogisticos.id, serviceId));
+    if (!serv || (serv as any).isActive === false) throw new Error("Servicio logístico inválido o inactivo");
+
+    // Si hay carrier, valida compatibilidad (si existe en bridge)
+    if (carrierId != null) {
+      const [compat] = await baseDatos
+        .select()
+        .from(tablaServicioPaqueterias)
+        .where(and(eq(tablaServicioPaqueterias.serviceId, serviceId), eq(tablaServicioPaqueterias.carrierId, carrierId)));
+      if (!compat) throw new Error("La paquetería no es compatible con el servicio seleccionado");
+    }
+
+    await baseDatos.update(tablaTickets)
+      .set({ serviceId, carrierId: carrierId ?? null, updatedAt: new Date() })
+      .where(eq(tablaTickets.id, ticketId));
+
+    await this.writeTicketEvent(ticketId, 'SERVICE_SET', { serviceId, carrierId: carrierId ?? null });
+  }
+
+  async updateTicketShippingData(ticketId: number, data: {
+    weightKg?: number | null;
+    lengthCm?: number | null;
+    widthCm?: number | null;
+    heightCm?: number | null;
+    packageCount?: number | null;
+    serviceLevel?: string | null;
+  }): Promise<void> {
+    const payload: any = { updatedAt: new Date() };
+    if (typeof data.weightKg !== 'undefined') payload.weightKg = data.weightKg as any;
+    if (typeof data.lengthCm !== 'undefined') payload.lengthCm = data.lengthCm as any;
+    if (typeof data.widthCm !== 'undefined') payload.widthCm = data.widthCm as any;
+    if (typeof data.heightCm !== 'undefined') payload.heightCm = data.heightCm as any;
+    if (typeof data.packageCount !== 'undefined') payload.packageCount = data.packageCount as any;
+    if (typeof data.serviceLevel !== 'undefined') payload.serviceLevel = data.serviceLevel as any;
+
+    await baseDatos.update(tablaTickets).set(payload).where(eq(tablaTickets.id, ticketId));
+    await this.writeTicketEvent(ticketId, 'SHIPPING_DATA_UPDATED', data);
+  }
+
+  async updateTicketStatus(ticketId: number, status: string): Promise<void> {
+    await baseDatos.update(tablaTickets).set({ status, updatedAt: new Date() }).where(eq(tablaTickets.id, ticketId));
+    await this.writeTicketEvent(ticketId, 'STATUS_CHANGED', { status });
+  }
+
+  async updateTicketTracking(ticketId: number, data: { trackingNumber?: string | null; labelUrl?: string | null; carrierId?: number | null }): Promise<void> {
+    const update: any = { updatedAt: new Date() };
+    if (typeof data.trackingNumber !== 'undefined') update.trackingNumber = data.trackingNumber ?? null;
+    if (typeof data.labelUrl !== 'undefined') update.labelUrl = data.labelUrl ?? null;
+    if (typeof data.carrierId !== 'undefined') update.carrierId = data.carrierId ?? null;
+
+    await baseDatos.update(tablaTickets).set(update).where(eq(tablaTickets.id, ticketId));
+
+    // Si el ticket estaba ABIERTO/open y se asigna tracking/label, llevar a ETIQUETA_GENERADA
+    const [t] = await baseDatos.select().from(tablaTickets).where(eq(tablaTickets.id, ticketId));
+    const prevStatus = (t as any)?.status || '';
+    if ((data.trackingNumber || data.labelUrl) && (/^(ABIERTO|open)$/i).test(prevStatus)) {
+      await baseDatos.update(tablaTickets).set({ status: 'ETIQUETA_GENERADA', updatedAt: new Date() }).where(eq(tablaTickets.id, ticketId));
+      await this.writeTicketEvent(ticketId, 'STATUS_CHANGED', { status: 'ETIQUETA_GENERADA', reason: 'tracking/label assigned' });
+    }
+
+    await this.writeTicketEvent(ticketId, 'TRACKING_UPDATED', data);
   }
 
   /** Obtiene el siguiente número de ticket secuencial empezando en 30000. */

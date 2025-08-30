@@ -9,12 +9,13 @@ import session from "express-session";
 import MemoryStore from "memorystore";
 import { z } from "zod";
 import { db as baseDatos } from "./db";
-import { sql } from "drizzle-orm";
+import { sql, type SQL } from "drizzle-orm";
 import {
   insertOrderSchema,
   insertTicketSchema,
   insertNoteSchema,
   createBulkTicketsSchema,
+  TICKET_STATUS,
 } from "@shared/schema";
 import { syncShopifyOrders, getOrdersCount, syncShopifyOrdersBackfill, syncShopifyOrdersIncremental } from "./syncShopifyOrders"; // archivo de sincrinizacion
 import { getShopifyCredentials } from "./shopifyEnv"; // Helper para múltiples tiendas
@@ -1248,6 +1249,193 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // GET /api/catalogo/:sku_interno
+  // Devuelve TODOS los campos de catalogo_productos para un sku_interno dado (identificador natural para este flujo).
+  app.get("/api/catalogo/:sku_interno", requiereAutenticacion, async (req, res) => {
+    try {
+      const skuInterno = String(req.params.sku_interno || "").trim();
+      if (!skuInterno) return res.status(400).json({ message: "sku_interno requerido" });
+
+      const r = await baseDatos.execute(sql`
+        SELECT sku, marca, sku_interno, codigo_barras, nombre_producto, modelo, categoria,
+               condicion, marca_producto, variante, largo, ancho, alto, peso, foto, costo, stock
+        FROM catalogo_productos
+        WHERE lower(sku_interno) = lower(${skuInterno})
+        LIMIT 1
+      `);
+      const row: any = r.rows[0];
+      if (!row) return res.status(404).json({ message: "Producto no encontrado" });
+
+      // Normaliza tipos numéricos
+      const parseNum = (v: any) => (v == null ? null : Number(v));
+      const out = jsonSafe({
+        sku: row.sku ?? null,
+        marca: row.marca ?? null,
+        sku_interno: row.sku_interno ?? null,
+        codigo_barras: row.codigo_barras ?? null,
+        nombre_producto: row.nombre_producto ?? null,
+        modelo: row.modelo ?? null,
+        categoria: row.categoria ?? null,
+        condicion: row.condicion ?? null,
+        marca_producto: row.marca_producto ?? null,
+        variante: row.variante ?? null,
+        largo: parseNum(row.largo),
+        ancho: parseNum(row.ancho),
+        alto: parseNum(row.alto),
+        peso: parseNum(row.peso),
+        foto: row.foto ?? null,
+        costo: parseNum(row.costo),
+        stock: row.stock == null ? 0 : Number(row.stock),
+      });
+      return res.json(out);
+    } catch (error: any) {
+      console.error("Error en GET /api/catalogo/:sku_interno:", error);
+      return res.status(500).json({ message: error?.message || "Error al obtener producto" });
+    }
+  });
+
+  // PUT /api/catalogo/:sku_interno
+  // Actualiza campos editables del producto. sku_interno se usa como identificador natural en este flujo.
+  app.put("/api/catalogo/:sku_interno", requiereAutenticacion, async (req, res) => {
+    try {
+      const skuInterno = String(req.params.sku_interno || "").trim();
+      if (!skuInterno) return res.status(400).json({ message: "sku_interno requerido" });
+
+      // Validación/sanitización básica
+      const b = req.body || {};
+      const str = (v: any, max = 255) => {
+        if (v == null) return null;
+        const s = String(v).trim();
+        if (s.length === 0) return null;
+        return s.slice(0, max);
+      };
+      const num = (v: any) => {
+        if (v == null || v === "") return null;
+        const n = Number(v);
+        return Number.isFinite(n) ? n : NaN;
+      };
+      const intNonNeg = (v: any) => {
+        if (v == null || v === "") return 0;
+        const n = Number(v);
+        if (!Number.isFinite(n) || n < 0) return NaN;
+        return Math.floor(n);
+      };
+
+      const updates: Record<string, any> = {};
+      // Textuales editables
+      const textualFields = [
+        "sku", "sku_interno", "codigo_barras", "nombre_producto", "modelo",
+        "condicion", "variante", "marca", "marca_producto", "categoria", "foto",
+      ] as const;
+      for (const f of textualFields) {
+        if (f in b) updates[f] = str(b[f]);
+      }
+
+      // Numéricos (>=0 donde aplica)
+      const numericNonNeg = ["largo", "ancho", "alto", "peso", "costo"] as const;
+      for (const f of numericNonNeg) {
+        if (f in b) {
+          const n = num(b[f]);
+          if (n != null && !Number.isFinite(n)) return res.status(400).json({ message: `${f} inválido` });
+          if (n != null && n < 0) return res.status(400).json({ message: `${f} no puede ser negativo` });
+          updates[f] = n;
+        }
+      }
+      if ("stock" in b) {
+        const s = intNonNeg(b.stock);
+        if (!Number.isFinite(s as any)) return res.status(400).json({ message: `stock inválido` });
+        updates.stock = s;
+      }
+
+      if (Object.keys(updates).length === 0) {
+        return res.status(400).json({ message: "No hay campos para actualizar" });
+      }
+
+      // Construir SET dinámico seguro
+      const setFragments: SQL[] = [];
+      for (const [k, v] of Object.entries(updates)) {
+        setFragments.push(sql`${sql.raw(k)} = ${v}`);
+      }
+      const updateSQL = sql`
+        UPDATE catalogo_productos
+        SET ${sql.join(setFragments, sql`, `)}
+        WHERE lower(sku_interno) = lower(${skuInterno})
+      `;
+      const result = await baseDatos.execute(updateSQL);
+
+      // Si no afectó filas, 404
+      const rowCount = (result as any).rowCount ?? 0;
+      if (rowCount === 0) return res.status(404).json({ message: "Producto no encontrado" });
+
+      // Devuelve el recurso actualizado
+      const nuevoSkuInterno = updates.sku_interno ?? skuInterno;
+      const r2 = await baseDatos.execute(sql`
+        SELECT sku, marca, sku_interno, codigo_barras, nombre_producto, modelo, categoria,
+               condicion, marca_producto, variante, largo, ancho, alto, peso, foto, costo, stock
+        FROM catalogo_productos
+        WHERE lower(sku_interno) = lower(${nuevoSkuInterno})
+        LIMIT 1
+      `);
+      const row: any = r2.rows[0];
+      if (!row) return res.status(404).json({ message: "Producto no encontrado tras actualizar" });
+      const parseNum = (v: any) => (v == null ? null : Number(v));
+      return res.json(jsonSafe({
+        sku: row.sku ?? null,
+        marca: row.marca ?? null,
+        sku_interno: row.sku_interno ?? null,
+        codigo_barras: row.codigo_barras ?? null,
+        nombre_producto: row.nombre_producto ?? null,
+        modelo: row.modelo ?? null,
+        categoria: row.categoria ?? null,
+        condicion: row.condicion ?? null,
+        marca_producto: row.marca_producto ?? null,
+        variante: row.variante ?? null,
+        largo: parseNum(row.largo),
+        ancho: parseNum(row.ancho),
+        alto: parseNum(row.alto),
+        peso: parseNum(row.peso),
+        foto: row.foto ?? null,
+        costo: parseNum(row.costo),
+        stock: row.stock == null ? 0 : Number(row.stock),
+      }));
+    } catch (error: any) {
+      console.error("Error en PUT /api/catalogo/:sku_interno:", error);
+      return res.status(500).json({ message: error?.message || "Error al actualizar producto" });
+    }
+  });
+
+  // GET /api/catalogo/shopify-link?sku_interno=...
+  // Comportamiento tolerante: si no hay mapeo real, devuelve connected=false. Si existe, informa tienda.
+  app.get("/api/catalogo/shopify-link", requiereAutenticacion, async (req, res) => {
+    try {
+      const skuInterno = String(req.query.sku_interno || "").trim();
+      if (!skuInterno) return res.status(400).json({ connected: false });
+
+      // Intenta mapear vía product_links -> variants -> products para obtener shop_id
+      try {
+        const q = sql`
+          SELECT p.shop_id
+          FROM product_links pl
+          LEFT JOIN variants v ON v.id = pl.variant_id
+          LEFT JOIN products p ON p.id = v.product_id
+          WHERE lower(pl.catalogo_sku) = lower(${skuInterno})
+          LIMIT 1
+        `;
+        const r = await baseDatos.execute(q);
+        const shopId = r.rows[0]?.shop_id as number | undefined;
+        if (!shopId) return res.json({ connected: false });
+        // Etiqueta amigable
+        const store = shopId === 1 ? "WW" : shopId === 2 ? "CT" : `Tienda ${shopId}`;
+        return res.json({ connected: true, store });
+      } catch {
+        return res.json({ connected: false });
+      }
+    } catch (error: any) {
+      // Tolerante: nunca falla
+      return res.json({ connected: false });
+    }
+  });
+
   // Filtro de marcas unificado: union de products.vendor y catalogo_productos.marca
   app.get("/api/orders/brands", requiereAutenticacion, async (req, res) => {
     try {
@@ -1898,6 +2086,92 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json(data);
     } catch {
       res.status(500).json({ message: "No se pudieron obtener productos" });
+    }
+  });
+
+  // Catálogo: servicios logísticos
+  app.get("/api/logistic-services", requiereAutenticacion, async (_req, res) => {
+    try {
+      const servicios = await almacenamiento.getLogisticServices();
+      res.json(servicios);
+    } catch (e) {
+      res.status(500).json({ message: "No se pudieron obtener servicios logísticos" });
+    }
+  });
+
+  // Relación servicio -> paqueterías compatibles
+  app.get("/api/service-carriers", requiereAutenticacion, async (req, res) => {
+    try {
+      const serviceId = Number(req.query.serviceId);
+      if (!Number.isFinite(serviceId) || serviceId <= 0) return res.json([]);
+      const carriers = await almacenamiento.getServiceCarriers(serviceId);
+      res.json(carriers);
+    } catch (e) {
+      res.status(500).json({ message: "No se pudieron obtener paqueterías del servicio" });
+    }
+  });
+
+  // PATCH servicio/carrier del ticket
+  app.patch("/api/tickets/:id/service", requiereAutenticacion, async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      const { serviceId, carrierId } = req.body || {};
+      if (!Number.isFinite(serviceId)) return res.status(400).json({ message: "serviceId es requerido" });
+      await almacenamiento.setTicketService(id, { serviceId: Number(serviceId), carrierId: carrierId != null ? Number(carrierId) : null });
+      res.status(204).send();
+    } catch (e: any) {
+      res.status(400).json({ message: e?.message || "No se pudo actualizar el servicio" });
+    }
+  });
+
+  // PATCH datos de envío
+  app.patch("/api/tickets/:id/shipping-data", requiereAutenticacion, async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      const { weight_kg, length_cm, width_cm, height_cm, package_count, service_level } = req.body || {};
+      if (package_count != null && Number(package_count) < 1) return res.status(400).json({ message: "El número de paquetes debe ser ≥ 1" });
+      if (weight_kg != null && !(Number(weight_kg) > 0)) return res.status(400).json({ message: "El peso debe ser mayor a 0" });
+      await almacenamiento.updateTicketShippingData(id, {
+        weightKg: weight_kg != null ? Number(weight_kg) : null,
+        lengthCm: length_cm != null ? Number(length_cm) : null,
+        widthCm: width_cm != null ? Number(width_cm) : null,
+        heightCm: height_cm != null ? Number(height_cm) : null,
+        packageCount: package_count != null ? Number(package_count) : null,
+        serviceLevel: service_level ?? null,
+      });
+      res.status(204).send();
+    } catch (e: any) {
+      res.status(400).json({ message: e?.message || "No se pudo actualizar los datos de envío" });
+    }
+  });
+
+  // PATCH status
+  app.patch("/api/tickets/:id/status", requiereAutenticacion, async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      const { status } = req.body || {};
+      const allowed = new Set(Object.values(TICKET_STATUS).concat(['open','closed']));
+      if (!status || !allowed.has(String(status))) return res.status(400).json({ message: "Estado inválido" });
+      await almacenamiento.updateTicketStatus(id, String(status));
+      res.status(204).send();
+    } catch (e: any) {
+      res.status(400).json({ message: e?.message || "No se pudo actualizar el estado" });
+    }
+  });
+
+  // PATCH tracking/label
+  app.patch("/api/tickets/:id/tracking", requiereAutenticacion, async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      const { tracking_number, label_url, carrierId } = req.body || {};
+      await almacenamiento.updateTicketTracking(id, {
+        trackingNumber: typeof tracking_number !== 'undefined' ? String(tracking_number || '') || null : undefined,
+        labelUrl: typeof label_url !== 'undefined' ? String(label_url || '') || null : undefined,
+        carrierId: typeof carrierId !== 'undefined' ? (carrierId != null ? Number(carrierId) : null) : undefined,
+      });
+      res.status(204).send();
+    } catch (e: any) {
+      res.status(400).json({ message: e?.message || "No se pudo actualizar el tracking" });
     }
   });
 

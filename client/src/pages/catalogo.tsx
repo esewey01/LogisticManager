@@ -11,6 +11,8 @@ import { useToast } from "@/hooks/use-toast";
 import { Search, Download, Upload, X } from "lucide-react";
 import { CatalogoResponse, exportCatalogo, fetchCatalogo, importCatalogo, downloadCatalogTemplate } from "@/lib/api/catalogo";
 import { debounce } from "lodash";
+import ProductDetailsModal from "@/components/catalogo/ProductDetailsModal";
+import { isCombo } from "@/lib/utils/product";
 
 export default function Catalogo() {
   const { toast } = useToast();
@@ -84,6 +86,9 @@ export default function Catalogo() {
   const total = data?.total ?? 0;
   const totalPages = data?.totalPages ?? Math.max(1, Math.ceil(total / pageSize));
 
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const [selectedSkuInterno, setSelectedSkuInterno] = useState<string>("");
+
   const clearFilters = () => {
     setSearchInput("");
     setQ("");
@@ -140,6 +145,7 @@ export default function Catalogo() {
   };
 
   return (
+    <>
     <div className="p-6">
       <div className="max-w-7xl mx-auto space-y-4">
         <div className="flex items-center justify-between">
@@ -248,7 +254,12 @@ export default function Catalogo() {
                   ) : items.map((p) => (
                     <TableRow key={`${p.sku || ''}-${p.sku_interno || ''}`}>
                       <TableCell className="font-mono text-sm">{p.sku}</TableCell>
-                      <TableCell className="font-mono text-sm">{p.sku_interno}</TableCell>
+                      <TableCell className="font-mono text-sm flex items-center gap-2">
+                        <span>{p.sku_interno}</span>
+                        {isCombo(p.sku_interno || '') && (
+                          <Badge variant="secondary">Combo</Badge>
+                        )}
+                      </TableCell>
                       <TableCell className="max-w-xs truncate">{p.nombre_producto}</TableCell>
                       <TableCell>${typeof p.costo === 'number' ? p.costo.toFixed(2) : '0.00'}</TableCell>
                       <TableCell><Badge variant={(p.stock ?? 0) > 0 ? 'default' : 'destructive'}>{p.stock ?? 0}</Badge></TableCell>
@@ -260,7 +271,9 @@ export default function Catalogo() {
                         )}
                       </TableCell>
                       <TableCell>
-                        <Button size="sm" variant="ghost">Ver</Button>
+                        <Button size="sm" variant="ghost" onClick={() => { setSelectedSkuInterno(p.sku_interno || ""); setDetailsOpen(true); }}>
+                          Ver / Editar
+                        </Button>
                       </TableCell>
                     </TableRow>
                   ))}
@@ -288,6 +301,11 @@ export default function Catalogo() {
         </Card>
       </div>
     </div>
+    <ProductDetailsModal open={detailsOpen} onOpenChange={setDetailsOpen} skuInterno={selectedSkuInterno} />
+    </>
   );
 }
 
+// Modal de detalle reutilizable
+// Nota: se monta fuera del Card para conservar z-index y estilo consistente con Pedidos.
+// Insertado al final para evitar interferir con importaciones/exports existentes.

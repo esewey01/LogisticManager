@@ -77,6 +77,42 @@ export type Carrier = typeof carriers.$inferSelect;
 export type InsertCarrier = typeof carriers.$inferInsert;
 
 // =========================================================
+// LOGISTIC SERVICES (Servicios de logística)
+// =========================================================
+export const logisticServices = pgTable(
+  "logistic_services",
+  {
+    id: serial("id").primaryKey(),
+    name: text("name").notNull(),
+    code: text("code").notNull(),
+    isActive: boolean("is_active").notNull().default(true),
+    createdAt: timestamp("created_at").defaultNow(),
+    updatedAt: timestamp("updated_at"),
+  },
+  (t) => ({
+    uxCode: uniqueIndex("logistic_services_code_unique").on(t.code),
+  }),
+);
+export type LogisticService = typeof logisticServices.$inferSelect;
+export type InsertLogisticService = typeof logisticServices.$inferInsert;
+
+// =========================================================
+// SERVICE_CARRIERS (relación servicio-paquetería)
+// =========================================================
+export const serviceCarriers = pgTable(
+  "service_carriers",
+  {
+    serviceId: integer("service_id").notNull().references(() => logisticServices.id),
+    carrierId: integer("carrier_id").notNull().references(() => carriers.id),
+  },
+  (t) => ({
+    pk: uniqueIndex("service_carriers_pk").on(t.serviceId, t.carrierId),
+  }),
+);
+export type ServiceCarrier = typeof serviceCarriers.$inferSelect;
+export type InsertServiceCarrier = typeof serviceCarriers.$inferInsert;
+
+// =========================================================
 // CATALOGO_PRODUCTOS (sin PK explícita en la BD)
 // =========================================================
 export const catalogoProductos = pgTable("catalogo_productos", {
@@ -300,8 +336,25 @@ export const tickets = pgTable(
     id: serial("id").primaryKey(),
     ticketNumber: serial("ticket_number").notNull(), // SERIAL en la BD
     orderId: bigint("order_id", { mode: "number" }).notNull().references(() => orders.id),
-    status: text("status").notNull().default("open"),
+    // Estado del ticket (compat: algunos flujos usan 'open'/'closed')
+    status: text("status").default("open"),
+    // Logística
+    serviceId: integer("service_id").references(() => logisticServices.id),
+    carrierId: integer("carrier_id").references(() => carriers.id),
+    trackingNumber: text("tracking_number"),
+    labelUrl: text("label_url"),
+    serviceLevel: text("service_level"),
+    packageCount: integer("package_count"),
+    weightKg: decimal("weight_kg"),
+    lengthCm: decimal("length_cm"),
+    widthCm: decimal("width_cm"),
+    heightCm: decimal("height_cm"),
+    shippedAt: timestamp("shipped_at"),
+    deliveredAt: timestamp("delivered_at"),
+    canceledAt: timestamp("canceled_at"),
+    slaDueAt: timestamp("sla_due_at"),
     notes: text("notes"),
+    externalRefs: jsonb("external_refs"),
     createdAt: timestamp("created_at").defaultNow(),
     updatedAt: timestamp("updated_at"),
   },
@@ -309,10 +362,33 @@ export const tickets = pgTable(
     uxTicketNumber: uniqueIndex("tickets_ticket_number_unique").on(t.ticketNumber),
     idxOrder: index("ix_tickets_order").on(t.orderId),
     idxStatus: index("ix_tickets_status").on(t.status),
+    idxService: index("ix_tickets_service").on(t.serviceId),
+    idxCarrier: index("ix_tickets_carrier").on(t.carrierId),
+    idxTracking: index("ix_tickets_tracking").on(t.trackingNumber),
   }),
 );
 export type Ticket = typeof tickets.$inferSelect;
 export type InsertTicket = typeof tickets.$inferInsert;
+
+// =========================================================
+// TICKET_EVENTS (auditoría de cambios de ticket)
+// =========================================================
+export const ticketEvents = pgTable(
+  "ticket_events",
+  {
+    id: serial("id").primaryKey(),
+    ticketId: integer("ticket_id").notNull().references(() => tickets.id),
+    eventType: text("event_type").notNull(),
+    payload: jsonb("payload"),
+    createdAt: timestamp("created_at").defaultNow(),
+  },
+  (t) => ({
+    idxTicket: index("ix_ticket_events_ticket").on(t.ticketId),
+    idxType: index("ix_ticket_events_type").on(t.eventType),
+  }),
+);
+export type TicketEvent = typeof ticketEvents.$inferSelect;
+export type InsertTicketEvent = typeof ticketEvents.$inferInsert;
 
 // =========================================================
 // Zod Schemas mínimos (alineados al SQL; no fuerzan campos que la BD deja opcionales)
@@ -388,9 +464,12 @@ export {
   brands as marcas,
   channels as canales,
   carriers as paqueterias,
+  logisticServices as serviciosLogisticos,
+  serviceCarriers as serviciosPaqueterias,
   orders as ordenes,
   tickets as ticketsTabla,
   notes as notas,
+  ticketEvents as eventosTicket,
 };
 
 export type {
@@ -402,10 +481,29 @@ export type {
   InsertChannel as InsertarCanal,
   Carrier as Paqueteria,
   InsertCarrier as InsertarPaqueteria,
+  LogisticService as ServicioLogistico,
+  InsertLogisticService as InsertarServicioLogistico,
+  ServiceCarrier as ServicioPaqueteria,
+  InsertServiceCarrier as InsertarServicioPaqueteria,
   Order as Orden,
   InsertOrder as InsertarOrden,
   Ticket as TicketTipo,
   InsertTicket as InsertarTicket,
+  TicketEvent as EventoTicket,
+  InsertTicketEvent as InsertarEventoTicket,
   Note as Nota,
   InsertNote as InsertarNota,
 };
+
+// =========================================================
+// Constantes de estados de ticket (para validación en rutas)
+// =========================================================
+export const TICKET_STATUS = {
+  ABIERTO: "ABIERTO",
+  ETIQUETA_GENERADA: "ETIQUETA_GENERADA",
+  EN_TRANSITO: "EN_TRÁNSITO",
+  ENTREGADO: "ENTREGADO",
+  CANCELADO: "CANCELADO",
+  FALLIDO: "FALLIDO",
+} as const;
+export type TicketStatus = typeof TICKET_STATUS[keyof typeof TICKET_STATUS] | "open" | "closed";

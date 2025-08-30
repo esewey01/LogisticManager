@@ -422,6 +422,50 @@ export default function Pedidos() {
     return null;
   };
 
+  // === Totales mini-cards (por orden)
+  const { todayCount, pendingCount, withStockCount, apartarCount, okCount } = React.useMemo(() => {
+    const today = new Date();
+    const isSameDay = (a: Date, b: Date) =>
+      a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+
+    let _today = 0;
+    let _pending = 0;
+    let _withStock = 0;
+    let _apartar = 0;
+    let _ok = 0;
+
+    for (const o of orders) {
+      // fecha del pedido
+      const d = new Date(o.createdAt);
+      if (isSameDay(d, today)) _today++;
+
+      // estado (usa tu helper para cascada camel/snake/uiStatus)
+      const f = getFulfillmentFromOrder ? getFulfillmentFromOrder(o as any) : (o as any)?.fulfillmentStatus ?? (o as any)?.fulfillment_status ?? null;
+      if (!f || String(f).toUpperCase() === "UNFULFILLED") _pending++;
+
+      // items y stock
+      const items = parseItems ? parseItems((o as any).items) : Array.isArray((o as any).items) ? (o as any).items : [];
+      let hasWithStock = false;
+      let hasApartar = false;
+      let hasOk = false;
+
+      for (const it of items) {
+        const n = (it as any)?.stockFromCatalog;
+        if (typeof n === "number") {
+          if (n >= 1) hasWithStock = true;
+          if (n > 0 && n <= 15) hasApartar = true;
+          if (n > 15) hasOk = true;
+        }
+      }
+
+      if (hasWithStock) _withStock++;
+      if (hasApartar) _apartar++;
+      if (hasOk) _ok++;
+    }
+
+    return { todayCount: _today, pendingCount: _pending, withStockCount: _withStock, apartarCount: _apartar, okCount: _ok };
+  }, [orders]);
+
   // === Estado: mapeo visual restaurado + "Cancelada"
   const renderStatusBadge = (status?: string | null) => {
     const raw = (status ?? "").toString();
@@ -469,6 +513,44 @@ export default function Pedidos() {
         <div className="mb-8">
           <h1 className="text-2xl font-semibold mb-2">Gestión de Pedidos</h1>
           <p className="text">Administra y procesa los pedidos del sistema</p>
+        </div>
+
+        {/* Mini Summary Cards */}
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-4">
+          <Card className="border-muted">
+            <CardContent className="p-3">
+              <p className="text-xs text-muted-foreground">Órdenes de hoy</p>
+              <p className="text-xl font-bold">{todayCount}</p>
+            </CardContent>
+          </Card>
+
+          <Card className="border-muted">
+            <CardContent className="p-3">
+              <p className="text-xs text-muted-foreground">Pendientes</p>
+              <p className="text-xl font-bold text-blue-700">{pendingCount}</p>
+            </CardContent>
+          </Card>
+
+          <Card className="border-muted">
+            <CardContent className="p-3">
+              <p className="text-xs text-muted-foreground">Con stock (≥1)</p>
+              <p className="text-xl font-bold text-emerald-700">{withStockCount}</p>
+            </CardContent>
+          </Card>
+
+          <Card className="border-muted">
+            <CardContent className="p-3">
+              <p className="text-xs text-muted-foreground">Apartar (1–15)</p>
+              <p className="text-xl font-bold text-yellow-700">{apartarCount}</p>
+            </CardContent>
+          </Card>
+
+          <Card className="border-muted">
+            <CardContent className="p-3">
+              <p className="text-xs text-muted-foreground">OK (&gt;15)</p>
+              <p className="text-xl font-bold text-green-700">{okCount}</p>
+            </CardContent>
+          </Card>
         </div>
 
         {/* Filters and Actions */}

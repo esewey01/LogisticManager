@@ -166,7 +166,7 @@ function NoteItemEditable({ note }: { note: NoteDTO & { createdAt?: string | Dat
   const created = note.createdAt ? new Date(note.createdAt).toLocaleString() : null;
 
   return (
-    <div className="p-3 bg-amber-50 border border-amber-200 rounded-2xl relative group hover:shadow-sm transition-shadow">
+    <div className="p-3 border border-amber-200 rounded-2xl relative group hover:shadow-sm transition-shadow">
       {editing ? (
         <div className="space-y-2">
           <Textarea value={text} onChange={(e) => setText(e.target.value)} className="min-h-16" />
@@ -318,7 +318,7 @@ export default function Dashboard() {
         <header className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
             <h1 className="text-2xl font-bold text-foreground">Dashboard</h1>
-            <p className="text-sm text-gray-600">
+            <p className="text-sm">
               Rango:{" "}
               <span className="font-medium">{from.toLocaleDateString()}</span> –{" "}
               <span className="font-medium">{to.toLocaleDateString()}</span>
@@ -372,14 +372,14 @@ export default function Dashboard() {
                     const maxQty = Math.max(...topSkus.map((t) => t.totalQty), 1);
                     const pct = (s.totalQty / maxQty) * 100;
                     return (
-                      <div key={idx} className="p-2 bg-gray-50 rounded-2xl">
+                      <div key={idx} className="p-2 rounded-2xl">
                         <div className="flex justify-between mb-1">
                           <span className="font-medium text-foreground">{s.sku || "SIN SKU"}</span>
 
-                          <p className="mt-1 text-xs text-gray-600">
+                          <p className="mt-1 text-xs">
                             Ingresos: ${s.revenue.toLocaleString()} MXN
                           </p>
-                          <span className="text-gray-700">{s.totalQty} veces</span>
+                          <span className="text">{s.totalQty} veces</span>
                         </div>
                         <MicroBar value={s.totalQty} max={maxQty} className="w-full h-2" />
 
@@ -423,7 +423,7 @@ export default function Dashboard() {
                     const max = Math.max(...weeklyData.map((d) => d.count));
                     return (
                       <div key={item.day} className="flex items-center gap-3">
-                        <span className="text-sm text-gray-700 w-20">{item.day}</span>
+                        <span className="text-sm w-20">{item.day}</span>
                         <div className="flex-1">
                           <MicroBar value={item.count} max={max} className="w-full" />
                         </div>
@@ -453,11 +453,11 @@ export default function Dashboard() {
             </CardHeader>
             <CardContent>
               <div className="grid grid-cols-2 gap-4">
-                <div className="p-4 bg-gray-50 rounded-2xl text-center">
+                <div className="p-4 rounded-2xl text-center">
                   <p className="text-sm text-muted">Cantidad</p>
                   <p className="text-2xl font-bold text-foreground">{todayOrders?.count ?? 0}</p>
                 </div>
-                <div className="p-4 bg-gray-50 rounded-2xl text-center">
+                <div className="p-4 rounded-2xl text-center">
                   <p className="text-sm text-muted">Total vendido</p>
                   <p className="text-2xl font-bold text-green-600">
                     ${(todayOrders?.totalAmount ?? 0).toLocaleString()} MXN
@@ -487,10 +487,10 @@ export default function Dashboard() {
                   {channelData.map((item) => {
                     const max = Math.max(...channelData.map((c) => c.orders));
                     return (
-                      <div key={item.channelCode} className="p-3 bg-gray-50 rounded-2xl">
+                      <div key={item.channelCode} className="p-3 rounded-2xl">
                         <div className="flex justify-between mb-1">
                           <span className="font-medium text-foreground">{item.channelName}</span>
-                          <span className="text-gray-700">{item.orders} en total</span>
+                          <span className="text">{item.orders} en total</span>
                         </div>
                         <MicroBar value={item.orders} max={max} className="w-full h-2" />
                       </div>
@@ -526,7 +526,7 @@ export default function Dashboard() {
                     onClick={() =>
                       setNewNote((prev) => (prev ? `${prev} #${tag}` : `#${tag}`))
                     }
-                    className="text-xs px-2 py-1 rounded border border-gray-200 hover:bg-gray-50 text-gray-700"
+                    className="text-xs px-2 py-1 rounded border border-gray-200 hover:bg-gray-50"
                   >
                     #{tag}
                   </button>
