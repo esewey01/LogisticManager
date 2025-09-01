@@ -9,6 +9,9 @@ import session from "express-session";
 import MemoryStore from "memorystore";
 import { z } from "zod";
 import { db as baseDatos } from "./db";
+import { searchMercadoLibre } from "./integrations/mercadoLibre";
+import { searchAmazon } from "./integrations/amazon";
+import { seedLogistics } from "./db/catalogs";
 import { sql, type SQL } from "drizzle-orm";
 import {
   insertOrderSchema,
@@ -2112,6 +2115,87 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // PATCH servicio/carrier del ticket
+  // Meta de logística para UI (servicios, paqueterías y compatibilidades)
+  app.get("/api/logistics/meta", requiereAutenticacion, async (_req, res) => {
+    try {
+      const [services, carriers, serviceCarriers] = await Promise.all([
+        almacenamiento.getLogisticServices(),
+        almacenamiento.getCarriers(),
+        almacenamiento.getAllServiceCarriers(),
+      ]);
+      res.json({ services, carriers, serviceCarriers });
+    } catch (e: any) {
+      res.status(500).json({ message: e?.message || "No se pudo cargar meta de logística" });
+    }
+  });
+
+  // =================== Búsqueda de alternativas (Mercado Libre / Amazon) ===================
+  // GET /api/search -> unificado (marketplace = 'all' | 'ml' | 'amazon')
+  app.get("/api/search", requiereAutenticacion, async (req, res) => {
+    try {
+      const q = String(req.query.q || "").trim();
+      const marketplace = String(req.query.marketplace || "all"); // 'all' | 'ml' | 'amazon'
+      const limit = Number(req.query.limit || 20);
+
+      if (!q) return res.status(400).json({ error: "Missing q" });
+
+      const tasks: Promise<any[]>[] = [];
+      if (marketplace === "all" || marketplace === "ml") {
+        tasks.push(searchMercadoLibre(q, limit));
+      }
+      if (marketplace === "all" || marketplace === "amazon") {
+        tasks.push(searchAmazon(q, Math.min(limit, 10)));
+      }
+
+      const settled = await Promise.allSettled(tasks);
+      const results = settled
+        .filter((s): s is PromiseFulfilledResult<any[]> => s.status === "fulfilled")
+        .flatMap((s) => s.value);
+
+      res.json({ q, marketplace, results });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || "Search failed" });
+    }
+  });
+
+  // Endpoints específicos (opcional)
+  app.get("/api/search/mercadolibre", requiereAutenticacion, async (req, res) => {
+    const q = String(req.query.q || "").trim();
+    const limit = Number(req.query.limit || 20);
+    if (!q) return res.status(400).json({ error: "Missing q" });
+    try {
+      const results = await searchMercadoLibre(q, limit);
+      res.json({ q, results });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || "ML search failed" });
+    }
+  });
+
+  app.get("/api/search/amazon", requiereAutenticacion, async (req, res) => {
+    const q = String(req.query.q || "").trim();
+    const limit = Number(req.query.limit || 10);
+    if (!q) return res.status(400).json({ error: "Missing q" });
+    try {
+      const results = await searchAmazon(q, limit);
+      res.json({ q, results });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || "Amazon search failed" });
+    }
+  });
+
+  // Admin: reintenta el seeding de catálogos logísticos manualmente (opcional)
+  app.post("/api/admin/seed-logistics", requiereAutenticacion, requiereAdmin, async (_req, res) => {
+    try {
+      if ((process.env.ADMIN_SEED_ENABLED || "0") !== "1") {
+        return res.status(403).json({ message: "Seeding no habilitado (ADMIN_SEED_ENABLED != '1')" });
+      }
+      const r = await seedLogistics();
+      return res.json({ seeded: true, services: r.services, carriers: r.carriers, mappings: r.mappings });
+    } catch (e: any) {
+      return res.status(500).json({ message: e?.message || "Error al ejecutar seeding" });
+    }
+  });
+
   app.patch("/api/tickets/:id/service", requiereAutenticacion, async (req, res) => {
     try {
       const id = Number(req.params.id);
@@ -2121,6 +2205,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(204).send();
     } catch (e: any) {
       res.status(400).json({ message: e?.message || "No se pudo actualizar el servicio" });
+    }
+  });
+
+  // PATCH masivo de servicio/carrier de tickets
+  app.patch("/api/tickets/bulk/service", requiereAutenticacion, async (req, res) => {
+    try {
+      const body = req.body || {};
+      const ids: number[] = Array.isArray(body.ids) ? body.ids.map((x: any) => Number(x)).filter((n: any) => Number.isFinite(n)) : [];
+      const serviceId = Number(body.serviceId);
+      const carrierId = typeof body.carrierId === 'undefined' ? undefined : (body.carrierId === null ? null : Number(body.carrierId));
+
+      if (!ids.length) return res.status(400).json({ message: "Debe proporcionar IDs de tickets a actualizar." });
+      if (!Number.isFinite(serviceId) || serviceId <= 0) return res.status(400).json({ message: "serviceId es requerido y debe ser válido." });
+
+      const r = await almacenamiento.bulkUpdateTicketService({ ids, serviceId, carrierId });
+      res.json({ updated: r.updated, skipped: r.skipped, ids: r.ids });
+    } catch (e: any) {
+      const msg = String(e?.message || e || "Error en actualización masiva");
+      const isCompat = /compatible|compatibilidad/i.test(msg);
+      res.status(isCompat ? 400 : 500).json({ message: msg });
     }
   });
 

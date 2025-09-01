@@ -26,6 +26,7 @@ import { apiRequest } from "@/lib/queryClient";
 import OrderDetailsModalNew from "@/components/modals/OrderDetailsModalNew";
 import CancelOrderModal from "@/components/modals/CancelOrderModal";
 import ImportOrdersModal from "@/components/modals/ImportOrdersModal";
+import SearchAlternativesModal from "@/components/modals/SearchAlternativesModal";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
 import { Separator } from "@/components/ui/separator";
@@ -175,6 +176,8 @@ export default function Pedidos() {
   const [selectedOrders, setSelectedOrders] = useState<Array<number | string>>([]);
   const [selectedOrderId, setSelectedOrderId] = useState<number | null>(null);
   const [cancelOrderId, setCancelOrderId] = useState<number | string | null>(null);
+  const [showSearchModal, setShowSearchModal] = useState(false);
+  const [searchSeed, setSearchSeed] = useState<string>("");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
   const [sortField, setSortField] = useState<keyof OrderRow | null>(null);
@@ -949,16 +952,33 @@ export default function Pedidos() {
                                 cls = "text-xs px-2 py-0.5 bg-green-100 text-green-800 border-green-200";
                               }
                               return (
-                                <Tooltip key={idx}>
-                                  <TooltipTrigger asChild>
-                                    <div>
-                                      <Badge variant="outline" className={cls}>
-                                        {label}
-                                      </Badge>
-                                    </div>
-                                  </TooltipTrigger>
-                                  <TooltipContent>Stock: {stock ?? "N/D"}</TooltipContent>
-                                </Tooltip>
+                                <div key={idx} className="flex items-center gap-2">
+                                  <Tooltip>
+                                    <TooltipTrigger asChild>
+                                      <div>
+                                        <Badge variant="outline" className={cls}>
+                                          {label}
+                                        </Badge>
+                                      </div>
+                                    </TooltipTrigger>
+                                    <TooltipContent>Stock: {stock ?? "N/D"}</TooltipContent>
+                                  </Tooltip>
+                                  {label === "Stock Out" && (
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      className="h-6 px-2"
+                                      onClick={() => {
+                                        const seed = (it?.sku as string) || (it as any)?.title || "";
+                                        setSearchSeed(seed);
+                                        setShowSearchModal(true);
+                                      }}
+                                      title="Buscar alternativas (Mercado Libre/Amazon)"
+                                    >
+                                      Buscar
+                                    </Button>
+                                  )}
+                                </div>
                               );
                             })}
                           </div>
@@ -1087,6 +1107,12 @@ export default function Pedidos() {
       )}
 
       {showImportModal && <ImportOrdersModal open={showImportModal} onClose={() => setShowImportModal(false)} />}
+
+      <SearchAlternativesModal
+        open={showSearchModal}
+        onClose={() => setShowSearchModal(false)}
+        seedQuery={searchSeed}
+      />
     </>
   );
 }

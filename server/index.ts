@@ -22,6 +22,7 @@ import fileUpload from "express-fileupload";
 
 // Importa función que registra todas las rutas de la API
 import { registerRoutes } from "./routes";
+import { seedLogisticsIfEmpty } from "./db/catalogs";
 
 // Importa utilidades para integrar Vite (frontend) y servir archivos
 import { setupVite, serveStatic, log } from "./vite";
@@ -133,6 +134,19 @@ aplicacion.use((req, res, next) => {
   // Inicia el servidor en todas las interfaces de red (0.0.0.0) para compatibilidad con Replit
   servidor.listen({ port: puerto, host: "0.0.0.0" }, () => {
     log(` Servidor trabajando en el puerto ${puerto}`);
+    // Seeding de catálogos logísticos al arranque (idempotente si están vacíos)
+    (async () => {
+      try {
+        const r = await seedLogisticsIfEmpty();
+        if (r.seeded) {
+          console.info(`[Boot] Catálogos logísticos sembrados. Servicios=${r.services}, Paqueterías=${r.carriers}, Vínculos=${r.mappings}`);
+        } else {
+          console.info(`[Boot] Catálogos logísticos ya presentes. Servicios=${r.services}, Paqueterías=${r.carriers}, Vínculos=${r.mappings}`);
+        }
+      } catch (e: any) {
+        console.warn('[Boot] No se pudo completar el seeding logístico:', e?.message || e);
+      }
+    })();
     if (process.env.ENABLE_CRON === "1") {
       startSchedulers();
     } else {

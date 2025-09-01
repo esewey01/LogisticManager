@@ -11,15 +11,18 @@ var __export = (target, all) => {
 // shared/schema.ts
 var schema_exports = {};
 __export(schema_exports, {
+  TICKET_STATUS: () => TICKET_STATUS,
   brands: () => brands,
   canales: () => channels,
   carriers: () => carriers,
   catalogoProductos: () => catalogoProductos,
   channels: () => channels,
   createBulkTicketsSchema: () => createBulkTicketsSchema,
+  eventosTicket: () => ticketEvents,
   insertNoteSchema: () => insertNoteSchema,
   insertOrderSchema: () => insertOrderSchema,
   insertTicketSchema: () => insertTicketSchema,
+  logisticServices: () => logisticServices,
   marcas: () => brands,
   notas: () => notes,
   notes: () => notes,
@@ -29,6 +32,10 @@ __export(schema_exports, {
   paqueterias: () => carriers,
   productLinks: () => productLinks,
   products: () => products,
+  serviceCarriers: () => serviceCarriers,
+  serviciosLogisticos: () => logisticServices,
+  serviciosPaqueterias: () => serviceCarriers,
+  ticketEvents: () => ticketEvents,
   tickets: () => tickets,
   ticketsTabla: () => tickets,
   users: () => users,
@@ -49,7 +56,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { index, uniqueIndex } from "drizzle-orm/pg-core";
 import { z } from "zod";
-var users, brands, carriers, catalogoProductos, channels, notes, orders, orderItems, products, variants, productLinks, tickets, insertOrderSchema, insertTicketSchema, createBulkTicketsSchema, insertNoteSchema;
+var users, brands, carriers, logisticServices, serviceCarriers, catalogoProductos, channels, notes, orders, orderItems, products, variants, productLinks, tickets, ticketEvents, insertOrderSchema, insertTicketSchema, createBulkTicketsSchema, insertNoteSchema, TICKET_STATUS;
 var init_schema = __esm({
   "shared/schema.ts"() {
     "use strict";
@@ -91,6 +98,30 @@ var init_schema = __esm({
       },
       (t) => ({
         uxCode: uniqueIndex("carriers_code_unique").on(t.code)
+      })
+    );
+    logisticServices = pgTable(
+      "logistic_services",
+      {
+        id: serial("id").primaryKey(),
+        name: text("name").notNull(),
+        code: text("code").notNull(),
+        isActive: boolean("is_active").notNull().default(true),
+        createdAt: timestamp("created_at").defaultNow(),
+        updatedAt: timestamp("updated_at")
+      },
+      (t) => ({
+        uxCode: uniqueIndex("logistic_services_code_unique").on(t.code)
+      })
+    );
+    serviceCarriers = pgTable(
+      "service_carriers",
+      {
+        serviceId: integer("service_id").notNull().references(() => logisticServices.id),
+        carrierId: integer("carrier_id").notNull().references(() => carriers.id)
+      },
+      (t) => ({
+        pk: uniqueIndex("service_carriers_pk").on(t.serviceId, t.carrierId)
       })
     );
     catalogoProductos = pgTable("catalogo_productos", {
@@ -268,15 +299,49 @@ var init_schema = __esm({
         ticketNumber: serial("ticket_number").notNull(),
         // SERIAL en la BD
         orderId: bigint("order_id", { mode: "number" }).notNull().references(() => orders.id),
-        status: text("status").notNull().default("open"),
+        // Estado del ticket (compat: algunos flujos usan 'open'/'closed')
+        status: text("status").default("open"),
+        // Logística
+        serviceId: integer("service_id").references(() => logisticServices.id),
+        carrierId: integer("carrier_id").references(() => carriers.id),
+        trackingNumber: text("tracking_number"),
+        labelUrl: text("label_url"),
+        serviceLevel: text("service_level"),
+        packageCount: integer("package_count"),
+        weightKg: decimal("weight_kg"),
+        lengthCm: decimal("length_cm"),
+        widthCm: decimal("width_cm"),
+        heightCm: decimal("height_cm"),
+        shippedAt: timestamp("shipped_at"),
+        deliveredAt: timestamp("delivered_at"),
+        canceledAt: timestamp("canceled_at"),
+        slaDueAt: timestamp("sla_due_at"),
         notes: text("notes"),
+        externalRefs: jsonb("external_refs"),
         createdAt: timestamp("created_at").defaultNow(),
         updatedAt: timestamp("updated_at")
       },
       (t) => ({
         uxTicketNumber: uniqueIndex("tickets_ticket_number_unique").on(t.ticketNumber),
         idxOrder: index("ix_tickets_order").on(t.orderId),
-        idxStatus: index("ix_tickets_status").on(t.status)
+        idxStatus: index("ix_tickets_status").on(t.status),
+        idxService: index("ix_tickets_service").on(t.serviceId),
+        idxCarrier: index("ix_tickets_carrier").on(t.carrierId),
+        idxTracking: index("ix_tickets_tracking").on(t.trackingNumber)
+      })
+    );
+    ticketEvents = pgTable(
+      "ticket_events",
+      {
+        id: serial("id").primaryKey(),
+        ticketId: integer("ticket_id").notNull().references(() => tickets.id),
+        eventType: text("event_type").notNull(),
+        payload: jsonb("payload"),
+        createdAt: timestamp("created_at").defaultNow()
+      },
+      (t) => ({
+        idxTicket: index("ix_ticket_events_ticket").on(t.ticketId),
+        idxType: index("ix_ticket_events_type").on(t.eventType)
       })
     );
     insertOrderSchema = z.object({
@@ -322,10 +387,23 @@ var init_schema = __esm({
     insertNoteSchema = z.object({
       content: z.string().min(1)
     });
+    TICKET_STATUS = {
+      ABIERTO: "ABIERTO",
+      ETIQUETA_GENERADA: "ETIQUETA_GENERADA",
+      EN_TRANSITO: "EN_TR\xC1NSITO",
+      ENTREGADO: "ENTREGADO",
+      CANCELADO: "CANCELADO",
+      FALLIDO: "FALLIDO"
+    };
   }
 });
 
 // server/db.ts
+var db_exports = {};
+__export(db_exports, {
+  db: () => db,
+  pool: () => pool
+});
 import { Pool } from "pg";
 import { drizzle } from "drizzle-orm/node-postgres";
 import "dotenv/config";
@@ -482,12 +560,23 @@ import {
 async function markOrderCancelledSafe(idNum, payload) {
   try {
     const updateData = {};
-    if (typeof payload.cancelledAt !== "undefined") updateData["shopifyCancelledAt"] = payload.cancelledAt;
-    if (typeof payload.cancelReason !== "undefined") updateData["cancelReason"] = payload.cancelReason;
-    if (typeof payload.staffNote !== "undefined") updateData["orderNote"] = payload.staffNote;
-    if (typeof payload.displayFinancialStatus !== "undefined") updateData["financialStatus"] = payload.displayFinancialStatus;
-    if (typeof payload.displayFulfillmentStatus !== "undefined") updateData["fulfillmentStatus"] = payload.displayFulfillmentStatus;
-    if (Object.keys(updateData).length === 0) return { ok: true, skipped: true };
+    let cancelledAtDate = void 0;
+    if (typeof payload.cancelledAt === "string") {
+      const d = new Date(payload.cancelledAt);
+      cancelledAtDate = isNaN(d.getTime()) ? null : d;
+    } else if (payload.cancelledAt instanceof Date) {
+      cancelledAtDate = isNaN(payload.cancelledAt.getTime()) ? null : payload.cancelledAt;
+    } else if (payload.cancelledAt === null) {
+      cancelledAtDate = null;
+    }
+    if (typeof payload.cancelledAt !== "undefined") updateData["shopifyCancelledAt"] = cancelledAtDate;
+    if (typeof payload.cancelReason !== "undefined") updateData["cancelReason"] = payload.cancelReason ?? null;
+    if (typeof payload.staffNote !== "undefined") updateData["orderNote"] = payload.staffNote ?? null;
+    if (typeof payload.displayFinancialStatus !== "undefined") updateData["financialStatus"] = payload.displayFinancialStatus ?? null;
+    if (typeof payload.displayFulfillmentStatus !== "undefined") updateData["fulfillmentStatus"] = payload.displayFulfillmentStatus ?? null;
+    if (Object.keys(updateData).length === 0) {
+      return { ok: true, skipped: true };
+    }
     await db.update(orders).set(updateData).where(eq2(orders.id, idNum));
     return { ok: true };
   } catch (e) {
@@ -594,6 +683,23 @@ var init_storage = __esm({
       async createCarrier(datos) {
         const [paqueteriaNueva] = await db.insert(carriers).values(datos).returning();
         return paqueteriaNueva;
+      }
+      // ==== SERVICIOS LOGÍSTICOS ====
+      /** Devuelve servicios logísticos activos. */
+      async getLogisticServices() {
+        return await db.select().from(logisticServices).where(eq2(logisticServices.isActive, true)).orderBy(asc(logisticServices.name));
+      }
+      /** Devuelve paqueterías compatibles con un servicio. */
+      async getServiceCarriers(serviceId) {
+        const q = sql`
+      SELECT c.*
+      FROM carriers c
+      JOIN service_carriers sc ON sc.carrier_id = c.id
+      WHERE sc.service_id = ${serviceId} AND c.is_active = TRUE
+      ORDER BY c.name ASC
+    `;
+        const r = await db.execute(q);
+        return r.rows;
       }
       // ==== ÓRDENES ====
       /** Lista órdenes con filtros opcionales (canal, gestionada, con ticket). */
@@ -881,6 +987,18 @@ var init_storage = __esm({
       t.ticket_number                                                         AS "ticketNumber",
       t.status                                                                AS "status",
       t.notes                                                                 AS "notes",
+      t.service_id                                                            AS "serviceId",
+      ls.name                                                                 AS "serviceName",
+      t.carrier_id                                                            AS "carrierId",
+      c.name                                                                  AS "carrierName",
+      t.tracking_number                                                       AS "trackingNumber",
+      t.label_url                                                             AS "labelUrl",
+      t.service_level                                                         AS "serviceLevel",
+      t.package_count                                                         AS "packageCount",
+      t.weight_kg                                                             AS "weightKg",
+      t.length_cm                                                             AS "lengthCm",
+      t.width_cm                                                              AS "widthCm",
+      t.height_cm                                                             AS "heightCm",
       t.created_at                                                            AS "createdAt",
       t.updated_at                                                            AS "updatedAt",
       COALESCE(o.id::text, '')                                                AS "orderPk",
@@ -901,6 +1019,8 @@ var init_storage = __esm({
     LEFT JOIN orders o           ON o.id = t.order_id::bigint
     LEFT JOIN order_items oi     ON oi.order_id = o.id
     LEFT JOIN catalogo_productos cp ON cp.sku = oi.sku   -- usa SKU externo del item
+    LEFT JOIN logistic_services ls ON ls.id = t.service_id
+    LEFT JOIN carriers c           ON c.id  = t.carrier_id
     GROUP BY t.id, o.id
     ORDER BY t.created_at DESC
   `);
@@ -924,6 +1044,55 @@ var init_storage = __esm({
       async updateTicket(id, updates) {
         const [ticket] = await db.update(tickets).set({ ...updates, updatedAt: /* @__PURE__ */ new Date() }).where(eq2(tickets.id, id)).returning();
         return ticket;
+      }
+      // === Auditoría de tickets ===
+      async writeTicketEvent(ticketId, eventType, payload) {
+        await db.insert(ticketEvents).values({
+          ticketId,
+          eventType,
+          payload
+        });
+      }
+      // === Operaciones logísticas de tickets ===
+      async setTicketService(ticketId, params) {
+        const { serviceId, carrierId } = params;
+        const [serv] = await db.select().from(logisticServices).where(eq2(logisticServices.id, serviceId));
+        if (!serv || serv.isActive === false) throw new Error("Servicio log\xEDstico inv\xE1lido o inactivo");
+        if (carrierId != null) {
+          const [compat] = await db.select().from(serviceCarriers).where(and(eq2(serviceCarriers.serviceId, serviceId), eq2(serviceCarriers.carrierId, carrierId)));
+          if (!compat) throw new Error("La paqueter\xEDa no es compatible con el servicio seleccionado");
+        }
+        await db.update(tickets).set({ serviceId, carrierId: carrierId ?? null, updatedAt: /* @__PURE__ */ new Date() }).where(eq2(tickets.id, ticketId));
+        await this.writeTicketEvent(ticketId, "SERVICE_SET", { serviceId, carrierId: carrierId ?? null });
+      }
+      async updateTicketShippingData(ticketId, data) {
+        const payload = { updatedAt: /* @__PURE__ */ new Date() };
+        if (typeof data.weightKg !== "undefined") payload.weightKg = data.weightKg;
+        if (typeof data.lengthCm !== "undefined") payload.lengthCm = data.lengthCm;
+        if (typeof data.widthCm !== "undefined") payload.widthCm = data.widthCm;
+        if (typeof data.heightCm !== "undefined") payload.heightCm = data.heightCm;
+        if (typeof data.packageCount !== "undefined") payload.packageCount = data.packageCount;
+        if (typeof data.serviceLevel !== "undefined") payload.serviceLevel = data.serviceLevel;
+        await db.update(tickets).set(payload).where(eq2(tickets.id, ticketId));
+        await this.writeTicketEvent(ticketId, "SHIPPING_DATA_UPDATED", data);
+      }
+      async updateTicketStatus(ticketId, status) {
+        await db.update(tickets).set({ status, updatedAt: /* @__PURE__ */ new Date() }).where(eq2(tickets.id, ticketId));
+        await this.writeTicketEvent(ticketId, "STATUS_CHANGED", { status });
+      }
+      async updateTicketTracking(ticketId, data) {
+        const update = { updatedAt: /* @__PURE__ */ new Date() };
+        if (typeof data.trackingNumber !== "undefined") update.trackingNumber = data.trackingNumber ?? null;
+        if (typeof data.labelUrl !== "undefined") update.labelUrl = data.labelUrl ?? null;
+        if (typeof data.carrierId !== "undefined") update.carrierId = data.carrierId ?? null;
+        await db.update(tickets).set(update).where(eq2(tickets.id, ticketId));
+        const [t] = await db.select().from(tickets).where(eq2(tickets.id, ticketId));
+        const prevStatus = t?.status || "";
+        if ((data.trackingNumber || data.labelUrl) && /^(ABIERTO|open)$/i.test(prevStatus)) {
+          await db.update(tickets).set({ status: "ETIQUETA_GENERADA", updatedAt: /* @__PURE__ */ new Date() }).where(eq2(tickets.id, ticketId));
+          await this.writeTicketEvent(ticketId, "STATUS_CHANGED", { status: "ETIQUETA_GENERADA", reason: "tracking/label assigned" });
+        }
+        await this.writeTicketEvent(ticketId, "TRACKING_UPDATED", data);
       }
       /** Obtiene el siguiente número de ticket secuencial empezando en 30000. */
       async getNextTicketNumber() {
@@ -1509,16 +1678,36 @@ var init_storage = __esm({
           search,
           searchType = "all",
           sortField,
-          sortOrder = "desc"
+          sortOrder = "desc",
+          brand,
+          stockState
         } = params;
         const conds = [];
         if (statusFilter === "unmanaged") {
           conds.push(sql`LOWER(COALESCE(o.fulfillment_status, '')) IN ('', 'unfulfilled')`);
         } else if (statusFilter === "managed") {
           conds.push(sql`LOWER(COALESCE(o.fulfillment_status, '')) = 'fulfilled'`);
+        } else if (statusFilter === "cancelled" || statusFilter === "canceladas") {
+          conds.push(sql`LOWER(COALESCE(o.fulfillment_status, '')) = 'restocked'`);
         }
         if (channelId !== void 0 && channelId !== null) {
           conds.push(sql`o.shop_id = ${channelId}`);
+        }
+        if (brand && brand.trim() !== "") {
+          const b = brand.toLowerCase();
+          conds.push(sql`(
+        LOWER(COALESCE(p.vendor, '')) = ${b} OR
+        LOWER(COALESCE(cp.marca, '')) = ${b}
+      )`);
+        }
+        if (stockState) {
+          if (stockState === "out") {
+            conds.push(sql`COALESCE(cp.stock, -1) = 0`);
+          } else if (stockState === "apartar") {
+            conds.push(sql`COALESCE(cp.stock, 0) BETWEEN 1 AND 15`);
+          } else if (stockState === "ok") {
+            conds.push(sql`COALESCE(cp.stock, 0) > 15`);
+          }
         }
         if (search) {
           const searchPattern = `%${search.toLowerCase()}%`;
@@ -1593,7 +1782,13 @@ var init_storage = __esm({
             'price', oi.price,
             'vendorFromShop', p.vendor,
             'catalogBrand', cp.marca,
-            'stockFromCatalog', cp.stock
+            'stockFromCatalog', cp.stock,
+            'stockState', CASE 
+              WHEN cp.stock IS NULL THEN 'Desconocido'
+              WHEN cp.stock = 0 THEN 'Stock Out'
+              WHEN cp.stock <= 15 THEN 'Apartar'
+              ELSE 'OK'
+            END
           )
         ) FILTER (WHERE oi.id IS NOT NULL),
         '[]'::json
@@ -2139,6 +2334,8 @@ var init_productStorage = __esm({
           categoria,
           condicion,
           marca_producto,
+          stockEq0,
+          stockGte,
           orderBy = "nombre_producto",
           orderDir = "asc"
         } = params;
@@ -2169,6 +2366,8 @@ var init_productStorage = __esm({
         if (categoria) whereParts.push(sql3`categoria = ${categoria}`);
         if (condicion) whereParts.push(sql3`condicion = ${condicion}`);
         if (marca_producto) whereParts.push(sql3`marca_producto = ${marca_producto}`);
+        if (stockEq0) whereParts.push(sql3`COALESCE(stock, 0) = 0`);
+        if (typeof stockGte === "number" && !Number.isNaN(stockGte)) whereParts.push(sql3`COALESCE(stock, 0) >= ${stockGte}`);
         const whereSQL = sql3.join(whereParts, sql3` AND `);
         const productos = await db.execute(sql3`
     SELECT
@@ -4777,6 +4976,8 @@ async function registerRoutes(app) {
       const pageSize = req.query.pageSize ? Number(req.query.pageSize) : 50;
       const search = req.query.search;
       const searchType = req.query.searchType;
+      const brand = req.query.brand || void 0;
+      const stockState = req.query.stock_state;
       const sortField = req.query.sortField || void 0;
       const sortOrder = (req.query.sortOrder || "desc").toLowerCase() === "asc" ? "asc" : "desc";
       const data = await storage.getOrdersPaginated({
@@ -4787,7 +4988,9 @@ async function registerRoutes(app) {
         search,
         searchType,
         sortField,
-        sortOrder
+        sortOrder,
+        brand,
+        stockState
       });
       res.json(data);
     } catch (e) {
@@ -4810,6 +5013,463 @@ async function registerRoutes(app) {
     } catch (error) {
       console.error(`[GET /api/orders/:id/details] Error:`, error);
       res.status(500).json({ message: "No se pudo obtener la orden (detalles)" });
+    }
+  });
+  app.get("/api/catalogo", requiereAutenticacion, async (req, res) => {
+    try {
+      const { productStorage: productStorage2 } = await Promise.resolve().then(() => (init_productStorage(), productStorage_exports));
+      const page = req.query.page ? Number(req.query.page) : 1;
+      const pageSize = req.query.pageSize ? Number(req.query.pageSize) : 50;
+      const q = req.query.q || "";
+      const campo = req.query.campo;
+      const marca = req.query.marca || void 0;
+      const categoria = req.query.categoria || void 0;
+      const stockEq0 = req.query.stock_eq0 === "true";
+      const stockGteRaw = req.query.stock_gte;
+      const stockGte = stockGteRaw != null && stockGteRaw !== "" ? Number(stockGteRaw) : void 0;
+      const sort = req.query.sort || "";
+      let orderBy;
+      let orderDir = "asc";
+      if (sort) {
+        const [f, d] = sort.split(":");
+        orderBy = f;
+        orderDir = d === "desc" ? "desc" : "asc";
+      }
+      let searchField;
+      if (campo === "sku") searchField = "sku";
+      else if (campo === "sku_interno") searchField = "sku_interno";
+      else if (campo === "nombre") searchField = "nombre_producto";
+      const result = await productStorage2.getCatalogProducts({
+        page,
+        pageSize,
+        search: q || void 0,
+        searchField,
+        marca,
+        categoria,
+        stockEq0,
+        stockGte,
+        orderBy,
+        orderDir
+      });
+      const totalPages = Math.max(1, Math.ceil((result.total || 0) / pageSize));
+      res.json({
+        data: result.rows.map((p) => ({
+          sku: p.sku,
+          sku_interno: p.sku_interno,
+          nombre_producto: p.nombre_producto,
+          costo: p.costo != null ? Number(p.costo) : null,
+          stock: p.stock != null ? Number(p.stock) : 0,
+          estado: p.estado ?? (Number(p.stock ?? 0) > 0 ? "ACTIVO" : "INACTIVO"),
+          marca: p.marca ?? p.marca_producto ?? null,
+          categoria: p.categoria ?? null
+        })),
+        page,
+        pageSize,
+        total: result.total || 0,
+        totalPages
+      });
+    } catch (error) {
+      console.error("Error en GET /api/catalogo:", error);
+      res.status(500).json({ message: "Error al obtener el cat\xE1logo" });
+    }
+  });
+  app.get("/api/catalogo/export", requiereAutenticacion, async (req, res) => {
+    try {
+      const { productStorage: productStorage2 } = await Promise.resolve().then(() => (init_productStorage(), productStorage_exports));
+      const q = req.query.q || "";
+      const campo = req.query.campo;
+      const marca = req.query.marca || void 0;
+      const categoria = req.query.categoria || void 0;
+      const stockEq0 = req.query.stock_eq0 === "true";
+      const stockGteRaw = req.query.stock_gte;
+      const stockGte = stockGteRaw != null && stockGteRaw !== "" ? Number(stockGteRaw) : void 0;
+      const sort = req.query.sort || "";
+      const format = (req.query.format || "csv").toLowerCase();
+      let orderBy;
+      let orderDir = "asc";
+      if (sort) {
+        const [f, d] = sort.split(":");
+        orderBy = f;
+        orderDir = d === "desc" ? "desc" : "asc";
+      }
+      let searchField;
+      if (campo === "sku") searchField = "sku";
+      else if (campo === "sku_interno") searchField = "sku_interno";
+      else if (campo === "nombre") searchField = "nombre_producto";
+      const first = await productStorage2.getCatalogProducts({
+        page: 1,
+        pageSize: 5e3,
+        search: q || void 0,
+        searchField,
+        marca,
+        categoria,
+        stockEq0,
+        stockGte,
+        orderBy,
+        orderDir
+      });
+      const rows = [...first.rows];
+      const total = first.total || 0;
+      let loaded = first.rows.length;
+      let page = 2;
+      const pageSize = 5e3;
+      while (loaded < total) {
+        const r = await productStorage2.getCatalogProducts({
+          page,
+          pageSize,
+          search: q || void 0,
+          searchField,
+          marca,
+          categoria,
+          stockEq0,
+          stockGte,
+          orderBy,
+          orderDir
+        });
+        rows.push(...r.rows);
+        loaded += r.rows.length;
+        page++;
+        if (r.rows.length === 0) break;
+      }
+      const mapped = rows.map((p) => ({
+        "Sku Externo": p.sku ?? "",
+        "Sku Interno": p.sku_interno ?? "",
+        "Producto": p.nombre_producto ?? "",
+        "Costo": p.costo != null ? Number(p.costo) : "",
+        "Inventario": p.stock != null ? Number(p.stock) : 0,
+        "Estado": p.estado ?? (Number(p.stock ?? 0) > 0 ? "ACTIVO" : "INACTIVO"),
+        "Marca": p.marca ?? p.marca_producto ?? "",
+        "Categoria": p.categoria ?? ""
+      }));
+      if (format === "xlsx") {
+        const wb = xlsx.utils.book_new();
+        const ws = xlsx.utils.json_to_sheet(mapped, { cellDates: false });
+        xlsx.utils.book_append_sheet(wb, ws, "catalogo");
+        const buf = xlsx.write(wb, { bookType: "xlsx", type: "buffer" });
+        res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+        res.setHeader("Content-Disposition", `attachment; filename="catalogo_${(/* @__PURE__ */ new Date()).toISOString().slice(0, 10)}.xlsx"`);
+        return res.send(buf);
+      }
+      const headers = ["Sku Externo", "Sku Interno", "Producto", "Costo", "Inventario", "Estado", "Marca", "Categoria"];
+      const lines = [headers.join(",")];
+      for (const r of mapped) {
+        const row = headers.map((h) => {
+          const v = r[h];
+          if (v == null) return "";
+          const s = String(v);
+          return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+        }).join(",");
+        lines.push(row);
+      }
+      const csv = lines.join("\n");
+      res.setHeader("Content-Type", "text/csv; charset=utf-8");
+      res.setHeader("Content-Disposition", `attachment; filename="catalogo_${(/* @__PURE__ */ new Date()).toISOString().slice(0, 10)}.csv"`);
+      return res.send(csv);
+    } catch (error) {
+      console.error("Error en GET /api/catalogo/export:", error);
+      res.status(500).json({ message: "Error al exportar cat\xE1logo" });
+    }
+  });
+  const uploadCatalog = multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: 20 * 1024 * 1024 },
+    fileFilter: (_req, file, cb) => {
+      const allowed = /* @__PURE__ */ new Set([
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "application/vnd.ms-excel",
+        "text/csv",
+        "application/csv"
+      ]);
+      if (!allowed.has(file.mimetype)) return cb(new Error("415: Tipo de archivo no soportado. Sube CSV/XLSX."));
+      cb(null, true);
+    }
+  });
+  app.post("/api/catalogo/import", requiereAutenticacion, uploadCatalog.single("file"), async (req, res) => {
+    try {
+      if (!req.file?.buffer) return res.status(400).json({ message: "No se recibi\xF3 archivo" });
+      const wb = xlsx.read(req.file.buffer, { type: "buffer" });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      if (!ws) return res.status(400).json({ message: "El archivo no tiene hojas" });
+      const rows = xlsx.utils.sheet_to_json(ws, { defval: null, raw: true });
+      if (!rows.length) return res.status(400).json({ message: "El archivo est\xE1 vac\xEDo" });
+      const required = ["sku", "sku_interno", "nombre_producto", "costo", "stock", "estado", "marca", "categoria"];
+      const first = rows[0] || {};
+      const missing = required.filter((h) => !(h in first));
+      if (missing.length) {
+        return res.status(400).json({ message: "Faltan columnas obligatorias", missing, required });
+      }
+      const batchSize = 500;
+      let inserted = 0;
+      let updated = 0;
+      const errors = [];
+      const { db: baseDatos } = await Promise.resolve().then(() => (init_db(), db_exports));
+      for (let i = 0; i < rows.length; i += batchSize) {
+        const slice = rows.slice(i, i + batchSize);
+        try {
+          await baseDatos.transaction(async (tx) => {
+            for (let j = 0; j < slice.length; j++) {
+              const rowIndex = i + j + 2;
+              const r = slice[j];
+              try {
+                const sku = (r.sku ?? "").toString().trim();
+                const sku_interno = (r.sku_interno ?? "").toString().trim();
+                const nombre = (r.nombre_producto ?? "").toString().trim();
+                let costo = r.costo;
+                if (typeof costo === "string") costo = costo.replace(",", ".");
+                const costoNum = costo == null || costo === "" ? null : Number(costo);
+                let stock = r.stock;
+                const stockNum = stock == null || stock === "" ? 0 : Number(stock);
+                const estado = (r.estado ?? "").toString().trim().toUpperCase();
+                const marca = r.marca != null ? String(r.marca) : null;
+                const categoria = r.categoria != null ? String(r.categoria) : null;
+                if (!sku_interno && !sku) throw new Error("Fila sin sku_interno ni sku");
+                if (!nombre) throw new Error("nombre_producto requerido");
+                if (costoNum != null && (Number.isNaN(costoNum) || Number(costoNum) < 0)) throw new Error("costo inv\xE1lido");
+                if (Number.isNaN(stockNum) || stockNum < 0) throw new Error("stock inv\xE1lido");
+                if (estado && !["ACTIVO", "INACTIVO"].includes(estado)) throw new Error("estado inv\xE1lido");
+                const existsByInternal = await tx.execute(sql4`SELECT 1 FROM catalogo_productos WHERE sku_interno = ${sku_interno} LIMIT 1`);
+                if (existsByInternal.rowCount > 0) {
+                  await tx.execute(sql4`
+                    UPDATE catalogo_productos
+                    SET nombre_producto = ${nombre}, costo = ${costoNum}, stock = ${stockNum}, marca = ${marca}, categoria = ${categoria}
+                    WHERE sku_interno = ${sku_interno}
+                  `);
+                  updated++;
+                } else if (sku) {
+                  const existsBySku = await tx.execute(sql4`SELECT 1 FROM catalogo_productos WHERE sku = ${sku} LIMIT 1`);
+                  if (existsBySku.rowCount > 0) {
+                    await tx.execute(sql4`
+                      UPDATE catalogo_productos
+                      SET nombre_producto = ${nombre}, costo = ${costoNum}, stock = ${stockNum}, sku_interno = ${sku_interno || null}, marca = ${marca}, categoria = ${categoria}
+                      WHERE sku = ${sku}
+                    `);
+                    updated++;
+                  } else {
+                    await tx.execute(sql4`
+                      INSERT INTO catalogo_productos (sku, sku_interno, nombre_producto, costo, stock, marca, categoria)
+                      VALUES (${sku || null}, ${sku_interno || null}, ${nombre}, ${costoNum}, ${stockNum}, ${marca}, ${categoria})
+                    `);
+                    inserted++;
+                  }
+                } else {
+                  await tx.execute(sql4`
+                    INSERT INTO catalogo_productos (sku, sku_interno, nombre_producto, costo, stock, marca, categoria)
+                    VALUES (${null}, ${sku_interno || null}, ${nombre}, ${costoNum}, ${stockNum}, ${marca}, ${categoria})
+                  `);
+                  inserted++;
+                }
+              } catch (e) {
+                errors.push({ rowIndex, message: e?.message || "Error desconocido" });
+                throw e;
+              }
+            }
+          });
+        } catch (e) {
+          continue;
+        }
+      }
+      let reportBase64;
+      if (errors.length) {
+        const h = "rowIndex,message";
+        const lines = [h, ...errors.map((e) => `${e.rowIndex},"${String(e.message).replace(/"/g, '""')}"`)];
+        const csv = lines.join("\n");
+        reportBase64 = Buffer.from(csv, "utf8").toString("base64");
+      }
+      res.json({ inserted, updated, errors: errors.length, errorRows: errors, reportBase64 });
+    } catch (error) {
+      console.error("Error en POST /api/catalogo/import:", error);
+      res.status(500).json({ message: error?.message || "Error al importar cat\xE1logo" });
+    }
+  });
+  app.get("/api/catalogo/:sku_interno", requiereAutenticacion, async (req, res) => {
+    try {
+      const skuInterno = String(req.params.sku_interno || "").trim();
+      if (!skuInterno) return res.status(400).json({ message: "sku_interno requerido" });
+      const r = await db.execute(sql4`
+        SELECT sku, marca, sku_interno, codigo_barras, nombre_producto, modelo, categoria,
+               condicion, marca_producto, variante, largo, ancho, alto, peso, foto, costo, stock
+        FROM catalogo_productos
+        WHERE lower(sku_interno) = lower(${skuInterno})
+        LIMIT 1
+      `);
+      const row = r.rows[0];
+      if (!row) return res.status(404).json({ message: "Producto no encontrado" });
+      const parseNum = (v) => v == null ? null : Number(v);
+      const out = jsonSafe({
+        sku: row.sku ?? null,
+        marca: row.marca ?? null,
+        sku_interno: row.sku_interno ?? null,
+        codigo_barras: row.codigo_barras ?? null,
+        nombre_producto: row.nombre_producto ?? null,
+        modelo: row.modelo ?? null,
+        categoria: row.categoria ?? null,
+        condicion: row.condicion ?? null,
+        marca_producto: row.marca_producto ?? null,
+        variante: row.variante ?? null,
+        largo: parseNum(row.largo),
+        ancho: parseNum(row.ancho),
+        alto: parseNum(row.alto),
+        peso: parseNum(row.peso),
+        foto: row.foto ?? null,
+        costo: parseNum(row.costo),
+        stock: row.stock == null ? 0 : Number(row.stock)
+      });
+      return res.json(out);
+    } catch (error) {
+      console.error("Error en GET /api/catalogo/:sku_interno:", error);
+      return res.status(500).json({ message: error?.message || "Error al obtener producto" });
+    }
+  });
+  app.put("/api/catalogo/:sku_interno", requiereAutenticacion, async (req, res) => {
+    try {
+      const skuInterno = String(req.params.sku_interno || "").trim();
+      if (!skuInterno) return res.status(400).json({ message: "sku_interno requerido" });
+      const b = req.body || {};
+      const str = (v, max = 255) => {
+        if (v == null) return null;
+        const s = String(v).trim();
+        if (s.length === 0) return null;
+        return s.slice(0, max);
+      };
+      const num = (v) => {
+        if (v == null || v === "") return null;
+        const n = Number(v);
+        return Number.isFinite(n) ? n : NaN;
+      };
+      const intNonNeg = (v) => {
+        if (v == null || v === "") return 0;
+        const n = Number(v);
+        if (!Number.isFinite(n) || n < 0) return NaN;
+        return Math.floor(n);
+      };
+      const updates = {};
+      const textualFields = [
+        "sku",
+        "sku_interno",
+        "codigo_barras",
+        "nombre_producto",
+        "modelo",
+        "condicion",
+        "variante",
+        "marca",
+        "marca_producto",
+        "categoria",
+        "foto"
+      ];
+      for (const f of textualFields) {
+        if (f in b) updates[f] = str(b[f]);
+      }
+      const numericNonNeg = ["largo", "ancho", "alto", "peso", "costo"];
+      for (const f of numericNonNeg) {
+        if (f in b) {
+          const n = num(b[f]);
+          if (n != null && !Number.isFinite(n)) return res.status(400).json({ message: `${f} inv\xE1lido` });
+          if (n != null && n < 0) return res.status(400).json({ message: `${f} no puede ser negativo` });
+          updates[f] = n;
+        }
+      }
+      if ("stock" in b) {
+        const s = intNonNeg(b.stock);
+        if (!Number.isFinite(s)) return res.status(400).json({ message: `stock inv\xE1lido` });
+        updates.stock = s;
+      }
+      if (Object.keys(updates).length === 0) {
+        return res.status(400).json({ message: "No hay campos para actualizar" });
+      }
+      const setFragments = [];
+      for (const [k, v] of Object.entries(updates)) {
+        setFragments.push(sql4`${sql4.raw(k)} = ${v}`);
+      }
+      const updateSQL = sql4`
+        UPDATE catalogo_productos
+        SET ${sql4.join(setFragments, sql4`, `)}
+        WHERE lower(sku_interno) = lower(${skuInterno})
+      `;
+      const result = await db.execute(updateSQL);
+      const rowCount = result.rowCount ?? 0;
+      if (rowCount === 0) return res.status(404).json({ message: "Producto no encontrado" });
+      const nuevoSkuInterno = updates.sku_interno ?? skuInterno;
+      const r2 = await db.execute(sql4`
+        SELECT sku, marca, sku_interno, codigo_barras, nombre_producto, modelo, categoria,
+               condicion, marca_producto, variante, largo, ancho, alto, peso, foto, costo, stock
+        FROM catalogo_productos
+        WHERE lower(sku_interno) = lower(${nuevoSkuInterno})
+        LIMIT 1
+      `);
+      const row = r2.rows[0];
+      if (!row) return res.status(404).json({ message: "Producto no encontrado tras actualizar" });
+      const parseNum = (v) => v == null ? null : Number(v);
+      return res.json(jsonSafe({
+        sku: row.sku ?? null,
+        marca: row.marca ?? null,
+        sku_interno: row.sku_interno ?? null,
+        codigo_barras: row.codigo_barras ?? null,
+        nombre_producto: row.nombre_producto ?? null,
+        modelo: row.modelo ?? null,
+        categoria: row.categoria ?? null,
+        condicion: row.condicion ?? null,
+        marca_producto: row.marca_producto ?? null,
+        variante: row.variante ?? null,
+        largo: parseNum(row.largo),
+        ancho: parseNum(row.ancho),
+        alto: parseNum(row.alto),
+        peso: parseNum(row.peso),
+        foto: row.foto ?? null,
+        costo: parseNum(row.costo),
+        stock: row.stock == null ? 0 : Number(row.stock)
+      }));
+    } catch (error) {
+      console.error("Error en PUT /api/catalogo/:sku_interno:", error);
+      return res.status(500).json({ message: error?.message || "Error al actualizar producto" });
+    }
+  });
+  app.get("/api/catalogo/shopify-link", requiereAutenticacion, async (req, res) => {
+    try {
+      const skuInterno = String(req.query.sku_interno || "").trim();
+      if (!skuInterno) return res.status(400).json({ connected: false });
+      try {
+        const q = sql4`
+          SELECT p.shop_id
+          FROM product_links pl
+          LEFT JOIN variants v ON v.id = pl.variant_id
+          LEFT JOIN products p ON p.id = v.product_id
+          WHERE lower(pl.catalogo_sku) = lower(${skuInterno})
+          LIMIT 1
+        `;
+        const r = await db.execute(q);
+        const shopId = r.rows[0]?.shop_id;
+        if (!shopId) return res.json({ connected: false });
+        const store = shopId === 1 ? "WW" : shopId === 2 ? "CT" : `Tienda ${shopId}`;
+        return res.json({ connected: true, store });
+      } catch {
+        return res.json({ connected: false });
+      }
+    } catch (error) {
+      return res.json({ connected: false });
+    }
+  });
+  app.get("/api/orders/brands", requiereAutenticacion, async (req, res) => {
+    try {
+      const shopIdRaw = req.query.shopId ?? req.query.channelId;
+      const shopId = shopIdRaw && shopIdRaw !== "all" ? Number(shopIdRaw) : void 0;
+      const result = await db.execute(sql4`
+        (
+          SELECT DISTINCT TRIM(COALESCE(p.vendor, '')) AS marca
+          FROM products p
+          ${shopId !== void 0 ? sql4`WHERE p.vendor IS NOT NULL AND p.vendor <> '' AND p.shop_id = ${shopId}` : sql4`WHERE p.vendor IS NOT NULL AND p.vendor <> ''`}
+        )
+        UNION
+        (
+          SELECT DISTINCT TRIM(COALESCE(cp.marca, '')) AS marca
+          FROM catalogo_productos cp
+          WHERE cp.marca IS NOT NULL AND cp.marca <> ''
+        )
+        ORDER BY marca ASC
+      `);
+      const brands2 = (result.rows || []).map((r) => r.marca).filter((s) => typeof s === "string" && s.trim().length > 0);
+      res.json(brands2);
+    } catch (e) {
+      res.status(500).json({ message: "No se pudieron obtener marcas" });
     }
   });
   app.get("/api/orders/:id/flags", requiereAutenticacion, async (req, res) => {
@@ -5331,6 +5991,80 @@ async function registerRoutes(app) {
       res.json(data);
     } catch {
       res.status(500).json({ message: "No se pudieron obtener productos" });
+    }
+  });
+  app.get("/api/logistic-services", requiereAutenticacion, async (_req, res) => {
+    try {
+      const servicios = await storage.getLogisticServices();
+      res.json(servicios);
+    } catch (e) {
+      res.status(500).json({ message: "No se pudieron obtener servicios log\xEDsticos" });
+    }
+  });
+  app.get("/api/service-carriers", requiereAutenticacion, async (req, res) => {
+    try {
+      const serviceId = Number(req.query.serviceId);
+      if (!Number.isFinite(serviceId) || serviceId <= 0) return res.json([]);
+      const carriers2 = await storage.getServiceCarriers(serviceId);
+      res.json(carriers2);
+    } catch (e) {
+      res.status(500).json({ message: "No se pudieron obtener paqueter\xEDas del servicio" });
+    }
+  });
+  app.patch("/api/tickets/:id/service", requiereAutenticacion, async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      const { serviceId, carrierId } = req.body || {};
+      if (!Number.isFinite(serviceId)) return res.status(400).json({ message: "serviceId es requerido" });
+      await storage.setTicketService(id, { serviceId: Number(serviceId), carrierId: carrierId != null ? Number(carrierId) : null });
+      res.status(204).send();
+    } catch (e) {
+      res.status(400).json({ message: e?.message || "No se pudo actualizar el servicio" });
+    }
+  });
+  app.patch("/api/tickets/:id/shipping-data", requiereAutenticacion, async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      const { weight_kg, length_cm, width_cm, height_cm, package_count, service_level } = req.body || {};
+      if (package_count != null && Number(package_count) < 1) return res.status(400).json({ message: "El n\xFAmero de paquetes debe ser \u2265 1" });
+      if (weight_kg != null && !(Number(weight_kg) > 0)) return res.status(400).json({ message: "El peso debe ser mayor a 0" });
+      await storage.updateTicketShippingData(id, {
+        weightKg: weight_kg != null ? Number(weight_kg) : null,
+        lengthCm: length_cm != null ? Number(length_cm) : null,
+        widthCm: width_cm != null ? Number(width_cm) : null,
+        heightCm: height_cm != null ? Number(height_cm) : null,
+        packageCount: package_count != null ? Number(package_count) : null,
+        serviceLevel: service_level ?? null
+      });
+      res.status(204).send();
+    } catch (e) {
+      res.status(400).json({ message: e?.message || "No se pudo actualizar los datos de env\xEDo" });
+    }
+  });
+  app.patch("/api/tickets/:id/status", requiereAutenticacion, async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      const { status } = req.body || {};
+      const allowed = new Set(Object.values(TICKET_STATUS).concat(["open", "closed"]));
+      if (!status || !allowed.has(String(status))) return res.status(400).json({ message: "Estado inv\xE1lido" });
+      await storage.updateTicketStatus(id, String(status));
+      res.status(204).send();
+    } catch (e) {
+      res.status(400).json({ message: e?.message || "No se pudo actualizar el estado" });
+    }
+  });
+  app.patch("/api/tickets/:id/tracking", requiereAutenticacion, async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      const { tracking_number, label_url, carrierId } = req.body || {};
+      await storage.updateTicketTracking(id, {
+        trackingNumber: typeof tracking_number !== "undefined" ? String(tracking_number || "") || null : void 0,
+        labelUrl: typeof label_url !== "undefined" ? String(label_url || "") || null : void 0,
+        carrierId: typeof carrierId !== "undefined" ? carrierId != null ? Number(carrierId) : null : void 0
+      });
+      res.status(204).send();
+    } catch (e) {
+      res.status(400).json({ message: e?.message || "No se pudo actualizar el tracking" });
     }
   });
   app.get("/api/catalogo/search", requiereAutenticacion, async (req, res) => {

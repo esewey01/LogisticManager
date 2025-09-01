@@ -50,19 +50,20 @@ import {
 } from "@shared/schema";
 
 import { db as baseDatos } from "./db";
-import {
-  eq,
-  and,
-  or,
-  isNull,
-  isNotNull,
-  desc,
-  asc,
-  sql,
-  count,
-  gte,
-  lte,
-} from "drizzle-orm";
+  import {
+    eq,
+    and,
+    or,
+    isNull,
+    isNotNull,
+    desc,
+    asc,
+    sql,
+    count,
+    gte,
+    lte,
+    inArray,
+  } from "drizzle-orm";
 //Shopify fulfillment
 import { fulfillOrderInShopify } from "./shopifyFulfillment";
 
@@ -512,6 +513,15 @@ export class DatabaseStorage implements IStorage {
     return r.rows as any;
   }
 
+  /** Devuelve todos los pares servicio-paqueterA-a (para meta de UI). */
+  async getAllServiceCarriers(): Promise<Array<{ serviceId: number; carrierId: number }>> {
+    const r = await baseDatos.execute(sql`
+      SELECT service_id AS "serviceId", carrier_id AS "carrierId" 
+      FROM service_carriers
+    `);
+    return r.rows as any;
+  }
+
   // ==== ÓRDENES ====
 
   /** Lista órdenes con filtros opcionales (canal, gestionada, con ticket). */
@@ -866,49 +876,53 @@ async getOrderDetails(idParam: unknown) {
   //Vista para obtener tickets en la tabla de tickets
   // storage.ts
   async getTicketsView() {
+    // Importante: evitar GROUP BY con columnas sin agregar. Usamos una subconsulta
+    // agregada por order_id para contar items y juntar SKUs/marcas, y hacemos LEFT JOIN.
     const result = await baseDatos.execute(sql`
-    SELECT 
-      t.id,
-      t.ticket_number                                                         AS "ticketNumber",
-      t.status                                                                AS "status",
-      t.notes                                                                 AS "notes",
-      t.service_id                                                            AS "serviceId",
-      ls.name                                                                 AS "serviceName",
-      t.carrier_id                                                            AS "carrierId",
-      c.name                                                                  AS "carrierName",
-      t.tracking_number                                                       AS "trackingNumber",
-      t.label_url                                                             AS "labelUrl",
-      t.service_level                                                         AS "serviceLevel",
-      t.package_count                                                         AS "packageCount",
-      t.weight_kg                                                             AS "weightKg",
-      t.length_cm                                                             AS "lengthCm",
-      t.width_cm                                                              AS "widthCm",
-      t.height_cm                                                             AS "heightCm",
-      t.created_at                                                            AS "createdAt",
-      t.updated_at                                                            AS "updatedAt",
-      COALESCE(o.id::text, '')                                                AS "orderPk",
-      COALESCE(o.order_id, '')                                                AS "orderId",
-      COALESCE(o.name, '')                                                    AS "orderName",
-      COALESCE(o.customer_name, '')                                           AS "customerName",
-      o.shop_id                                                               AS "shopId",
-      COALESCE(COUNT(oi.id), 0)::int                                          AS "itemsCount",
-      COALESCE(
-        ARRAY_AGG(DISTINCT oi.sku) FILTER (WHERE oi.sku IS NOT NULL),
-        ARRAY[]::text[]
-      )                                                                        AS "skus",
-      COALESCE(
-        ARRAY_AGG(DISTINCT cp.marca) FILTER (WHERE cp.marca IS NOT NULL),
-        ARRAY[]::text[]
-      )                                                                        AS "brands"
-    FROM tickets t
-    LEFT JOIN orders o           ON o.id = t.order_id::bigint
-    LEFT JOIN order_items oi     ON oi.order_id = o.id
-    LEFT JOIN catalogo_productos cp ON cp.sku = oi.sku   -- usa SKU externo del item
-    LEFT JOIN logistic_services ls ON ls.id = t.service_id
-    LEFT JOIN carriers c           ON c.id  = t.carrier_id
-    GROUP BY t.id, o.id
-    ORDER BY t.created_at DESC
-  `);
+      WITH items_agg AS (
+        SELECT 
+          oi.order_id,
+          COUNT(oi.id)::int AS items_count,
+          COALESCE(ARRAY_AGG(DISTINCT oi.sku) FILTER (WHERE oi.sku IS NOT NULL), ARRAY[]::text[]) AS skus,
+          COALESCE(ARRAY_AGG(DISTINCT cp.marca) FILTER (WHERE cp.marca IS NOT NULL), ARRAY[]::text[]) AS brands
+        FROM order_items oi
+        LEFT JOIN catalogo_productos cp ON cp.sku = oi.sku
+        GROUP BY oi.order_id
+      )
+      SELECT 
+        t.id,
+        t.ticket_number                                                         AS "ticketNumber",
+        t.status                                                                AS "status",
+        t.notes                                                                 AS "notes",
+        t.service_id                                                            AS "serviceId",
+        ls.name                                                                 AS "serviceName",
+        t.carrier_id                                                            AS "carrierId",
+        c.name                                                                  AS "carrierName",
+        t.tracking_number                                                       AS "trackingNumber",
+        t.label_url                                                             AS "labelUrl",
+        t.service_level                                                         AS "serviceLevel",
+        t.package_count                                                         AS "packageCount",
+        t.weight_kg                                                             AS "weightKg",
+        t.length_cm                                                             AS "lengthCm",
+        t.width_cm                                                              AS "widthCm",
+        t.height_cm                                                             AS "heightCm",
+        t.created_at                                                            AS "createdAt",
+        t.updated_at                                                            AS "updatedAt",
+        COALESCE(o.id::text, '')                                                AS "orderPk",
+        COALESCE(o.order_id, '')                                                AS "orderId",
+        COALESCE(o.name, '')                                                    AS "orderName",
+        COALESCE(o.customer_name, '')                                           AS "customerName",
+        o.shop_id                                                               AS "shopId",
+        COALESCE(ia.items_count, 0)                                             AS "itemsCount",
+        COALESCE(ia.skus, ARRAY[]::text[])                                      AS "skus",
+        COALESCE(ia.brands, ARRAY[]::text[])                                    AS "brands"
+      FROM tickets t
+      LEFT JOIN orders o           ON o.id = t.order_id::bigint
+      LEFT JOIN items_agg ia       ON ia.order_id = o.id
+      LEFT JOIN logistic_services ls ON ls.id = t.service_id
+      LEFT JOIN carriers c           ON c.id  = t.carrier_id
+      ORDER BY t.created_at DESC
+    `);
 
     return result.rows as any[];
   }
@@ -985,6 +999,52 @@ async getOrderDetails(idParam: unknown) {
       .where(eq(tablaTickets.id, ticketId));
 
     await this.writeTicketEvent(ticketId, 'SERVICE_SET', { serviceId, carrierId: carrierId ?? null });
+  }
+
+  /**
+   * Actualiza servicio y paqueterA-a de varios tickets en una sola operaciA3n.
+   * Valida servicio/carrier activos y compatibilidad (si existe la tabla puente).
+   */
+  async bulkUpdateTicketService(params: { ids: number[]; serviceId: number; carrierId?: number | null }): Promise<{ updated: number; skipped: number; ids: number[] }> {
+    const { ids, serviceId, carrierId } = params;
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return { updated: 0, skipped: 0, ids: [] };
+    }
+
+    // Valida servicio activo
+    const [serv] = await baseDatos
+      .select()
+      .from(tablaServiciosLogisticos)
+      .where(and(eq(tablaServiciosLogisticos.id, serviceId), eq(tablaServiciosLogisticos.isActive, true)));
+    if (!serv) throw new Error("Servicio logA-stico invA�lido o inactivo");
+
+    // Si viene carrierId, valida activo y compatibilidad
+    if (typeof carrierId !== 'undefined' && carrierId !== null) {
+      const [car] = await baseDatos
+        .select()
+        .from(tablaPaqueterias)
+        .where(and(eq(tablaPaqueterias.id, Number(carrierId)), eq(tablaPaqueterias.isActive, true)));
+      if (!car) throw new Error("PaqueterA-a invA�lida o inactiva");
+
+      // Compatibilidad segA?n tabla puente
+      const [compat] = await baseDatos
+        .select()
+        .from(tablaServicioPaqueterias)
+        .where(and(eq(tablaServicioPaqueterias.serviceId, serviceId), eq(tablaServicioPaqueterias.carrierId, Number(carrierId))));
+      if (!compat) throw new Error("La paqueterA-a no es compatible con el servicio seleccionado.");
+    }
+
+    // Actualizar en bloque
+    const updatedRows = await baseDatos
+      .update(tablaTickets)
+      .set({ serviceId, carrierId: typeof carrierId === 'undefined' ? null : carrierId, updatedAt: new Date() })
+      .where(inArray(tablaTickets.id, ids))
+      .returning({ id: tablaTickets.id });
+
+    const updatedIds = (updatedRows || []).map((r) => Number(r.id));
+    const updated = updatedIds.length;
+    const skipped = Math.max(0, ids.length - updated);
+    return { updated, skipped, ids: updatedIds };
   }
 
   async updateTicketShippingData(ticketId: number, data: {

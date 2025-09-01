@@ -17,6 +17,7 @@ import { Separator } from "@/components/ui/separator";
 import { Eye, Undo2, Trash2, Copy, ExternalLink } from "lucide-react";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import { useToast } from "@/hooks/use-toast";
+import { Checkbox } from "@/components/ui/checkbox";
 
 /** Estructura que devuelve GET /api/tickets (getTicketsView) */
 type TicketRow = {
@@ -54,6 +55,7 @@ type TicketRow = {
 
 export default function Tickets() {
   const queryClient = useQueryClient();
+  const { toast } = useToast();
 
   // ====== DATA ======
   const { data: tickets = [], isLoading } = useQuery<TicketRow[]>({
@@ -65,6 +67,17 @@ export default function Tickets() {
     },
     staleTime: 30_000,
     refetchOnWindowFocus: false,
+  });
+
+  // Meta de logística para UI
+  const { data: logisticsMeta } = useQuery<{ services: Array<{ id: number; name: string; code?: string; active?: boolean }>; carriers: Array<{ id: number; name: string; code?: string; active?: boolean }>; serviceCarriers?: Array<{ serviceId: number; carrierId: number }> }>({
+    queryKey: ["/api/logistics/meta"],
+    queryFn: async () => {
+      const r = await apiRequest("GET", "/api/logistics/meta");
+      if (!r.ok) throw new Error(await r.text());
+      return r.json();
+    },
+    staleTime: 60_000,
   });
 
   // Servicios logísticos
@@ -127,6 +140,23 @@ export default function Tickets() {
     onError: async (e: any) => toast({ variant: "destructive", title: "Error", description: String(e?.message || e) }),
   });
 
+  // Bulk update servicio/carrier
+  const bulkServiceMutation = useMutation({
+    mutationFn: async (payload: { ids: number[]; serviceId: number; carrierId?: number | null }) => {
+      const r = await apiRequest("PATCH", "/api/tickets/bulk/service", payload);
+      if (!r.ok) throw new Error(await r.text());
+      return r.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/tickets"] });
+      toast({ title: "Actualización aplicada", description: "Servicio/paquetería actualizados." });
+      setSelectedIds(new Set());
+      setBulkService("");
+      setBulkCarrier("");
+    },
+    onError: async (e: any) => toast({ variant: "destructive", title: "Error", description: String(e?.message || e) }),
+  });
+
   // Actualizar datos de envío
   const shippingDataMutation = useMutation({
     mutationFn: async ({ ticketId, payload }: { ticketId: number; payload: any }) => {
@@ -158,6 +188,33 @@ export default function Tickets() {
   // ====== UI STATE (Modal) ======
   const [selected, setSelected] = React.useState<TicketRow | null>(null);
   const [isModalOpen, setModalOpen] = React.useState(false);
+  // Selección múltiple
+  const [selectedIds, setSelectedIds] = React.useState<Set<number>>(new Set());
+  const allVisibleIds = React.useMemo(() => tickets.map((t) => Number(t.id)), [tickets]);
+  const allSelected = selectedIds.size > 0 && allVisibleIds.every((id) => selectedIds.has(id));
+
+  const toggleAllVisible = (checked: boolean | string) => {
+    if (checked) setSelectedIds(new Set(allVisibleIds));
+    else setSelectedIds(new Set());
+  };
+  const toggleOne = (id: number, checked: boolean | string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (checked) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  };
+
+  // Estado de selects en barra masiva
+  const [bulkService, setBulkService] = React.useState<string>("");
+  const [bulkCarrier, setBulkCarrier] = React.useState<string>("");
+  const serviceOptions = logisticsMeta?.services ?? [];
+  const carrierOptions = React.useMemo(() => {
+    if (!bulkService) return logisticsMeta?.carriers ?? [];
+    const mapping = new Set((logisticsMeta?.serviceCarriers || []).filter((m) => m.serviceId === Number(bulkService)).map((m) => m.carrierId));
+    return (logisticsMeta?.carriers || []).filter((c) => mapping.size === 0 || mapping.has(c.id));
+  }, [logisticsMeta, bulkService]);
 
   const openModal = (t: TicketRow) => {
     setSelected(t);
@@ -271,6 +328,50 @@ export default function Tickets() {
       </div>
 
       {/* Tabla */}
+      {/* Barra de acciones masivas */}
+      {selectedIds.size > 0 && (
+        <div className="sticky top-0 z-10 mb-4 border rounded-md p-3 bg-white shadow-sm flex flex-wrap items-center gap-3">
+          <Badge variant="secondary" aria-live="polite">Seleccionados: {selectedIds.size}</Badge>
+          <div className="flex items-center gap-2">
+            <label htmlFor="bulk-service" className="text-sm text-muted-foreground">Servicio logístico</label>
+            <Select value={bulkService} onValueChange={setBulkService}>
+              <SelectTrigger id="bulk-service" aria-label="Servicio logístico" className="w-56">
+                <SelectValue placeholder="Selecciona servicio" />
+              </SelectTrigger>
+              <SelectContent>
+                {(serviceOptions || []).map((s) => (
+                  <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="flex items-center gap-2">
+            <label htmlFor="bulk-carrier" className="text-sm text-muted-foreground">Paquetería</label>
+            <Select value={bulkCarrier} onValueChange={setBulkCarrier}>
+              <SelectTrigger id="bulk-carrier" aria-label="Paquetería" className="w-56">
+                <SelectValue placeholder="(Opcional) Selecciona paquetería" />
+              </SelectTrigger>
+              <SelectContent>
+                {(carrierOptions || []).map((c) => (
+                  <SelectItem key={c.id} value={String(c.id)}>{c.name}</SelectItem>
+                ))}
+                <SelectItem value="">— Sin paquetería —</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="ml-auto flex items-center gap-2">
+            <Button
+              onClick={() => bulkServiceMutation.mutate({ ids: Array.from(selectedIds), serviceId: Number(bulkService), carrierId: bulkCarrier === "" ? null : Number(bulkCarrier) })}
+              disabled={!bulkService || bulkServiceMutation.isPending}
+              aria-label="Aplicar actualización masiva"
+            >
+              {bulkServiceMutation.isPending ? "Aplicando…" : "Aplicar"}
+            </Button>
+            <Button variant="outline" onClick={() => { setSelectedIds(new Set()); }} aria-label="Limpiar selección">Limpiar selección</Button>
+          </div>
+        </div>
+      )}
+
       <Card>
         <CardHeader>
           <CardTitle>Tickets</CardTitle>
@@ -279,6 +380,13 @@ export default function Tickets() {
           <Table>
             <TableHeader>
               <TableRow>
+                <TableHead className="w-10">
+                  <Checkbox
+                    aria-label="Seleccionar todos"
+                    checked={allSelected}
+                    onCheckedChange={toggleAllVisible}
+                  />
+                </TableHead>
                 <TableHead>Ticket</TableHead>
                 {/* Cliente → Pedido (nombre del pedido) */}
                 <TableHead>Pedido</TableHead>
@@ -293,10 +401,19 @@ export default function Tickets() {
             </TableHeader>
             <TableBody>
               {tickets.filter(Boolean).map((t) => {
-                const brandLabel = getBrandLabel(t);
-                const skuLabel = getSkuLabel(t);
+                  const brandLabel = getBrandLabel(t);
+                  const skuLabel = getSkuLabel(t);
+                const idNum = Number(t!.id);
+                const checked = selectedIds.has(idNum);
                 return (
                   <TableRow key={String(t!.id)}>
+                    <TableCell>
+                      <Checkbox
+                        aria-label={`Seleccionar ticket ${t!.ticketNumber}`}
+                        checked={checked}
+                        onCheckedChange={(v) => toggleOne(idNum, v)}
+                      />
+                    </TableCell>
                     <TableCell className="font-medium">{t!.ticketNumber}</TableCell>
 
                     {/* PEDIDO: usa orderName; si no, cae a orderId */}
