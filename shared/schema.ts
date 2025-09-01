@@ -7,6 +7,7 @@
 import {
   pgTable,
   serial,
+  bigserial,
   text,
   boolean,
   timestamp,
@@ -79,20 +80,25 @@ export type InsertCarrier = typeof carriers.$inferInsert;
 // =========================================================
 // LOGISTIC SERVICES (Servicios de logística)
 // =========================================================
+// Nota importante:
+// - En la BD real, la columna es "active" (no "is_active").
+// - Mapeamos a la propiedad TS "active" para evitar confusiones y alinear snake_case -> camelCase.
 export const logisticServices = pgTable(
   "logistic_services",
   {
     id: serial("id").primaryKey(),
     name: text("name").notNull(),
     code: text("code").notNull(),
-    isActive: boolean("is_active").notNull().default(true),
-    createdAt: timestamp("created_at").defaultNow(),
-    updatedAt: timestamp("updated_at"),
+    active: boolean("active").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({
-    uxCode: uniqueIndex("logistic_services_code_unique").on(t.code),
+    // usa el nombre "oficial" de la BD para evitar duplicados
+    uxCode: uniqueIndex("logistic_services_code_key").on(t.code),
   }),
 );
+
 export type LogisticService = typeof logisticServices.$inferSelect;
 export type InsertLogisticService = typeof logisticServices.$inferInsert;
 
@@ -102,11 +108,14 @@ export type InsertLogisticService = typeof logisticServices.$inferInsert;
 export const serviceCarriers = pgTable(
   "service_carriers",
   {
-    serviceId: integer("service_id").notNull().references(() => logisticServices.id),
-    carrierId: integer("carrier_id").notNull().references(() => carriers.id),
+    serviceId: integer("service_id").notNull()
+      .references(() => logisticServices.id, { onDelete: 'cascade' }),
+    carrierId: integer("carrier_id").notNull()
+      .references(() => carriers.id, { onDelete: 'cascade' }),
   },
   (t) => ({
-    pk: uniqueIndex("service_carriers_pk").on(t.serviceId, t.carrierId),
+    // En BD existe como PRIMARY KEY (service_id, carrier_id)
+    pk: { columns: [t.serviceId, t.carrierId], name: "service_carriers_pkey" },
   }),
 );
 export type ServiceCarrier = typeof serviceCarriers.$inferSelect;
@@ -178,7 +187,9 @@ export type InsertNote = typeof notes.$inferInsert;
 export const orders = pgTable(
   "orders",
   {
-    id: serial("id").primaryKey(), // SERIAL (int4) en la BD real
+    // Cambiado a BIGSERIAL para alinear con la migración SQL a BIGINT.
+    // Nota: modo:number para interoperar con el resto del código TS (evitar bigint).
+    id: bigserial("id", { mode: "number" }).primaryKey(),
     orderId: text("order_id").notNull(),
     customerName: text("customer_name"),
     totalAmount: decimal("total_amount"),
@@ -231,6 +242,7 @@ export const orderItems = pgTable(
   "order_items",
   {
     id: serial("id").primaryKey(),
+    // Alineado a BIGINT en BD; mantenemos mode:number para interoperar con el resto del código.
     orderId: bigint("order_id", { mode: "number" }).notNull().references(() => orders.id),
     sku: text("sku"),
     quantity: integer("quantity").notNull(),

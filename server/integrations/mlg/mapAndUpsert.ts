@@ -71,7 +71,7 @@ export async function upsertMlgOrder(v: Venta) {
   const orderRowId = inserted[0]?.id;
 
   // Optional: add one order_items row per sale (avoid duplicates by (order_id, title))
-  if (orderRowId) {
+  if (orderRowId != null) {
     const title = v.titulo || v.producto || "Artículo MLG";
     const sku = v.modelo ? String(v.modelo) : toStr(v.idProductoProveedor) ?? null;
     const quantity = Number(v.cantidad || 1);
@@ -80,12 +80,12 @@ export async function upsertMlgOrder(v: Venta) {
     const existing = await db
       .select({ id: orderItems.id })
       .from(orderItems)
-      .where(and(eq(orderItems.orderId, orderRowId), eq(orderItems.title, title)))
+      .where(and(eq(orderItems.orderId, Number(orderRowId)), eq(orderItems.title, title)))
       .limit(1);
 
     if (existing.length === 0) {
       await db.insert(orderItems).values({
-        orderId: orderRowId,
+        orderId: Number(orderRowId),
         title,
         sku,
         quantity,
@@ -95,4 +95,3 @@ export async function upsertMlgOrder(v: Venta) {
     }
   }
 }
-

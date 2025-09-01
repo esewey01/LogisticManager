@@ -1,5 +1,7 @@
 // server/scheduler.ts
 import { syncShopifyOrdersIncremental } from "./syncShopifyOrders";
+import { validateEnv } from "./config/validateEnv";
+import { setLastSyncResult } from "./syncState";
 import { ProductService } from "./services/ProductService";
 
 // Descubre tiendas de las envs: SHOPIFY_SHOP_NAME_1, _2, ...
@@ -47,6 +49,10 @@ async function runOrderIncremental(store: number) {
         `[CRON][${nowISO()}] Orders store ${store}: processed=${processed} next=${res.hasNextPage ? "yes" : "no"}`
       );
 
+      // Actualizamos el lastResult consumible por el endpoint de la UI
+      const totalUpserted = res.summary?.reduce((acc: number, s: any) => acc + (s.upserted ?? 0), 0) ?? 0;
+      setLastSyncResult({ source: "auto", summary: res.summary as any, totalUpserted, timestamp: nowISO() });
+
       cursor = res.nextPageInfo;
       pages++;
     } while (cursor && pages < maxPages);
@@ -81,6 +87,10 @@ async function runProductSync(store: number) {
 }
 
 export function startSchedulers() {
+  // Validación de entorno al iniciar schedulers
+  try { validateEnv(); } catch (e: any) {
+    console.warn(`[CRON] Entorno inválido para Shopify: ${e?.message || e}`);
+  }
   const stores = listStoreNumbersFromEnv();
   if (stores.length === 0) {
     console.warn("[CRON] No se encontraron tiendas en envs (SHOPIFY_SHOP_NAME_N).");

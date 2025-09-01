@@ -22,6 +22,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
+import { useLastSyncToast } from "@/hooks/useLastSyncToast";
 import { apiRequest } from "@/lib/queryClient";
 import OrderDetailsModalNew from "@/components/modals/OrderDetailsModalNew";
 import CancelOrderModal from "@/components/modals/CancelOrderModal";
@@ -187,6 +188,8 @@ export default function Pedidos() {
 
   const queryClient = useQueryClient();
   const { toast } = useToast();
+  // Poll de último resultado de sync para toasts automáticos
+  useLastSyncToast(60_000);
 
   // reset página y selección al cambiar filtros/búsqueda
   useEffect(() => {
@@ -246,7 +249,7 @@ export default function Pedidos() {
     mutationFn: async ({ orderId, updates }: { orderId: number | string; updates: Partial<OrderRow> }) => {
       await apiRequest("PATCH", `/api/orders/${orderId}`, updates);
     },
-    onSuccess: () => {
+    onSuccess: (data: any) => {
       queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
       queryClient.invalidateQueries({ queryKey: ["/api/dashboard/metrics"] });
     },
@@ -303,10 +306,11 @@ export default function Pedidos() {
       const response = await apiRequest("POST", "/api/integrations/shopify/sync-now");
       return response.json();
     },
-    onSuccess: () => {
+    onSuccess: (data: any) => {
+      const total = data?.totalUpserted ?? data?.resultado?.totalUpserted ?? 0;
       toast({
         title: "Sincronización completada",
-        description: `Se sincronizaron correctamente los pedidos de Shopify`,
+        description: `Pedidos actualizados: ${total}`,
       });
       queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
       queryClient.invalidateQueries({ queryKey: ["/api/dashboard/metrics"] });
@@ -426,47 +430,51 @@ export default function Pedidos() {
   };
 
   // === Totales mini-cards (por orden)
-  const { todayCount, pendingCount, withStockCount, apartarCount, okCount } = React.useMemo(() => {
+  const { todayCount, pendingCount, outCount, apartarCount, okCount } = React.useMemo(() => {
     const today = new Date();
     const isSameDay = (a: Date, b: Date) =>
       a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
 
     let _today = 0;
     let _pending = 0;
-    let _withStock = 0;
+    let _out = 0;
     let _apartar = 0;
     let _ok = 0;
 
     for (const o of orders) {
-      // fecha del pedido
+      // Fecha
       const d = new Date(o.createdAt);
       if (isSameDay(d, today)) _today++;
 
-      // estado (usa tu helper para cascada camel/snake/uiStatus)
-      const f = getFulfillmentFromOrder ? getFulfillmentFromOrder(o as any) : (o as any)?.fulfillmentStatus ?? (o as any)?.fulfillment_status ?? null;
+      // Estado (pendiente si UNFULFILLED o sin valor)
+      const f =
+        getFulfillmentFromOrder?.(o as any) ??
+        (o as any)?.fulfillmentStatus ??
+        (o as any)?.fulfillment_status ??
+        null;
       if (!f || String(f).toUpperCase() === "UNFULFILLED") _pending++;
 
-      // items y stock
-      const items = parseItems ? parseItems((o as any).items) : Array.isArray((o as any).items) ? (o as any).items : [];
-      let hasWithStock = false;
+      // Ítems / stock
+      const items = parseItems?.((o as any).items) ?? (Array.isArray((o as any).items) ? (o as any).items : []);
+      let hasOut = false;
       let hasApartar = false;
       let hasOk = false;
 
       for (const it of items) {
         const n = (it as any)?.stockFromCatalog;
         if (typeof n === "number") {
-          if (n >= 1) hasWithStock = true;
+          if (n === 0) hasOut = true;
           if (n > 0 && n <= 15) hasApartar = true;
           if (n > 15) hasOk = true;
         }
       }
 
-      if (hasWithStock) _withStock++;
+      if (hasOut) _out++;
       if (hasApartar) _apartar++;
       if (hasOk) _ok++;
     }
 
-    return { todayCount: _today, pendingCount: _pending, withStockCount: _withStock, apartarCount: _apartar, okCount: _ok };
+    return { todayCount: _today, pendingCount: _pending, outCount: _out, apartarCount: _apartar, okCount: _ok };
   }, [orders]);
 
   // === Estado: mapeo visual restaurado + "Cancelada"
@@ -534,10 +542,11 @@ export default function Pedidos() {
             </CardContent>
           </Card>
 
+          {/* <-- ESTA ES LA TARJETA AJUSTADA --> */}
           <Card className="border-muted">
             <CardContent className="p-3">
-              <p className="text-xs text-muted-foreground">Con stock (≥1)</p>
-              <p className="text-xl font-bold text-emerald-700">{withStockCount}</p>
+              <p className="text-xs text-muted-foreground">Stock Out (=0)</p>
+              <p className="text-xl font-bold text-red-700">{outCount}</p>
             </CardContent>
           </Card>
 
@@ -555,6 +564,7 @@ export default function Pedidos() {
             </CardContent>
           </Card>
         </div>
+
 
         {/* Filters and Actions */}
         <Card className="mb-6">
@@ -1116,3 +1126,7 @@ export default function Pedidos() {
     </>
   );
 }
+
+
+
+

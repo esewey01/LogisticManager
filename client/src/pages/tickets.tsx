@@ -70,7 +70,7 @@ export default function Tickets() {
   });
 
   // Meta de logística para UI
-  const { data: logisticsMeta } = useQuery<{ services: Array<{ id: number; name: string; code?: string; active?: boolean }>; carriers: Array<{ id: number; name: string; code?: string; active?: boolean }>; serviceCarriers?: Array<{ serviceId: number; carrierId: number }> }>({
+  const { data: logisticsMeta, isSuccess: metaOk } = useQuery<{ services: Array<{ id: number; name: string; code?: string; active?: boolean }>; carriers: Array<{ id: number; name: string; code?: string; active?: boolean }>; serviceCarriers?: Array<{ serviceId: number; carrierId: number }> }>({
     queryKey: ["/api/logistics/meta"],
     queryFn: async () => {
       const r = await apiRequest("GET", "/api/logistics/meta");
@@ -101,6 +101,18 @@ export default function Tickets() {
     },
     staleTime: 60_000,
   });
+
+  // Alias y filtros para servicios/carriers activos en UI
+  const { data: servicesResp, isSuccess: servicesOk } = useQuery<{ services: Array<{ id: number; name: string; code?: string; active?: boolean }>}>({
+    queryKey: ["/api/logistic-services"],
+    queryFn: async () => {
+      const r = await apiRequest("GET", "/api/logistic-services");
+      if (!r.ok) throw new Error(await r.text());
+      return r.json();
+    },
+    staleTime: 60_000,
+  });
+  const singleServiceOptions = (servicesResp?.services ?? []).filter((s) => s.active !== false);
 
   // ====== MUTATIONS ======
   const revertMutation = useMutation({
@@ -188,10 +200,12 @@ export default function Tickets() {
   // ====== UI STATE (Modal) ======
   const [selected, setSelected] = React.useState<TicketRow | null>(null);
   const [isModalOpen, setModalOpen] = React.useState(false);
-  // Selección múltiple
+  // Selección masiva
   const [selectedIds, setSelectedIds] = React.useState<Set<number>>(new Set());
   const allVisibleIds = React.useMemo(() => tickets.map((t) => Number(t.id)), [tickets]);
   const allSelected = selectedIds.size > 0 && allVisibleIds.every((id) => selectedIds.has(id));
+
+
 
   const toggleAllVisible = (checked: boolean | string) => {
     if (checked) setSelectedIds(new Set(allVisibleIds));
@@ -207,13 +221,20 @@ export default function Tickets() {
   };
 
   // Estado de selects en barra masiva
-  const [bulkService, setBulkService] = React.useState<string>("");
-  const [bulkCarrier, setBulkCarrier] = React.useState<string>("");
-  const serviceOptions = logisticsMeta?.services ?? [];
+  // ¡Usa undefined cuando no haya selección!
+  const [bulkService, setBulkService] = React.useState<string | undefined>(undefined);
+  const [bulkCarrier, setBulkCarrier] = React.useState<string | undefined>(undefined);
+  // Si cambia el servicio, borra la paquetería
+  React.useEffect(() => {
+    setBulkCarrier(undefined);
+  }, [bulkService]);
+
+  const serviceOptions = (logisticsMeta?.services ?? []).filter((s) => s.active !== false);
   const carrierOptions = React.useMemo(() => {
-    if (!bulkService) return logisticsMeta?.carriers ?? [];
+    const all = (logisticsMeta?.carriers || []).filter((c) => c.active !== false);
+    if (!bulkService) return all;
     const mapping = new Set((logisticsMeta?.serviceCarriers || []).filter((m) => m.serviceId === Number(bulkService)).map((m) => m.carrierId));
-    return (logisticsMeta?.carriers || []).filter((c) => mapping.size === 0 || mapping.has(c.id));
+    return all.filter((c) => mapping.size === 0 || mapping.has(c.id));
   }, [logisticsMeta, bulkService]);
 
   const openModal = (t: TicketRow) => {
@@ -334,34 +355,54 @@ export default function Tickets() {
           <Badge variant="secondary" aria-live="polite">Seleccionados: {selectedIds.size}</Badge>
           <div className="flex items-center gap-2">
             <label htmlFor="bulk-service" className="text-sm text-muted-foreground">Servicio logístico</label>
-            <Select value={bulkService} onValueChange={setBulkService}>
+            {/* Servicio logístico (masivo) */}
+            <Select value={bulkService ?? undefined} onValueChange={setBulkService}>
               <SelectTrigger id="bulk-service" aria-label="Servicio logístico" className="w-56">
                 <SelectValue placeholder="Selecciona servicio" />
               </SelectTrigger>
               <SelectContent>
-                {(serviceOptions || []).map((s) => (
+                {metaOk && serviceOptions.length > 0 && (serviceOptions || []).map((s) => (
                   <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>
                 ))}
+                {metaOk && serviceOptions.length === 0 && (
+                  <div className="px-3 py-2 text-sm text-muted-foreground">Sin opciones</div>
+                )}
               </SelectContent>
             </Select>
           </div>
           <div className="flex items-center gap-2">
             <label htmlFor="bulk-carrier" className="text-sm text-muted-foreground">Paquetería</label>
-            <Select value={bulkCarrier} onValueChange={setBulkCarrier}>
+            {/* Paquetería (masivo) */}
+            <Select
+              value={bulkCarrier ?? undefined}
+              onValueChange={(v) => setBulkCarrier(v === "none" ? undefined : v)}
+              // (opcional) deshabilita si no hay servicio
+              disabled={!bulkService}
+            >
               <SelectTrigger id="bulk-carrier" aria-label="Paquetería" className="w-56">
                 <SelectValue placeholder="(Opcional) Selecciona paquetería" />
               </SelectTrigger>
               <SelectContent>
-                {(carrierOptions || []).map((c) => (
+                {metaOk && (carrierOptions || []).length > 0 && (carrierOptions || []).map((c) => (
                   <SelectItem key={c.id} value={String(c.id)}>{c.name}</SelectItem>
                 ))}
-                <SelectItem value="">— Sin paquetería —</SelectItem>
+                {metaOk && (carrierOptions || []).length === 0 && (
+                  <div className="px-3 py-2 text-sm text-muted-foreground">Sin opciones</div>
+                )}
+                {/* ✅ sentinel, NO cadena vacía */}
+                <SelectItem value="none">— Sin paquetería —</SelectItem>
               </SelectContent>
             </Select>
           </div>
           <div className="ml-auto flex items-center gap-2">
             <Button
-              onClick={() => bulkServiceMutation.mutate({ ids: Array.from(selectedIds), serviceId: Number(bulkService), carrierId: bulkCarrier === "" ? null : Number(bulkCarrier) })}
+              onClick={() =>
+                bulkServiceMutation.mutate({
+                  ids: Array.from(selectedIds),
+                  serviceId: Number(bulkService),                             // seguro: bulkService definido si está habilitado
+                  carrierId: bulkCarrier === undefined ? null : Number(bulkCarrier),
+                })
+              }
               disabled={!bulkService || bulkServiceMutation.isPending}
               aria-label="Aplicar actualización masiva"
             >
@@ -401,8 +442,8 @@ export default function Tickets() {
             </TableHeader>
             <TableBody>
               {tickets.filter(Boolean).map((t) => {
-                  const brandLabel = getBrandLabel(t);
-                  const skuLabel = getSkuLabel(t);
+                const brandLabel = getBrandLabel(t);
+                const skuLabel = getSkuLabel(t);
                 const idNum = Number(t!.id);
                 const checked = selectedIds.has(idNum);
                 return (
@@ -578,16 +619,22 @@ export default function Tickets() {
               <div>
                 <p className="text-xs text-muted-foreground mb-1">Servicio logístico</p>
                 <Select
-                  value={String(selected?.serviceId ?? "")}
-                  onValueChange={(v) => selected && setServiceMutation.mutate({ ticketId: Number(selected.id), serviceId: Number(v) })}
+                  value={selected?.serviceId ? String(selected.serviceId) : undefined}
+                  onValueChange={(v) => selected && setServiceMutation.mutate({
+                    ticketId: Number(selected.id),
+                    serviceId: Number(v),
+                  })}
                 >
                   <SelectTrigger className="w-full">
                     <SelectValue placeholder="Selecciona servicio" />
                   </SelectTrigger>
                   <SelectContent>
-                    {services.map((s) => (
+                    {servicesOk && singleServiceOptions.length > 0 && singleServiceOptions.map((s) => (
                       <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>
                     ))}
+                    {servicesOk && singleServiceOptions.length === 0 && (
+                      <div className="px-3 py-2 text-sm text-muted-foreground">Sin opciones</div>
+                    )}
                   </SelectContent>
                 </Select>
               </div>
@@ -635,6 +682,7 @@ export default function Tickets() {
 function CarrierSelect({ ticket, onSet }: { ticket: TicketRow | null; onSet: (carrierId: number | null) => void }) {
   const serviceId = ticket?.serviceId ? Number(ticket.serviceId) : undefined;
   const enabled = !!serviceId;
+
   const { data: carriers = [], isFetching } = useQuery<Array<{ id: number; name: string }>>({
     queryKey: ["/api/service-carriers", serviceId],
     queryFn: async () => {
@@ -647,23 +695,34 @@ function CarrierSelect({ ticket, onSet }: { ticket: TicketRow | null; onSet: (ca
     staleTime: 30_000,
   });
 
+  // Si se quita el servicio, forzamos carrier null
+  React.useEffect(() => {
+    if (!enabled && ticket?.carrierId != null) onSet(null);
+  }, [enabled]);
+
   return (
     <Select
-      value={String(ticket?.carrierId ?? "")}
-      onValueChange={(v) => onSet(v ? Number(v) : null)}
+      value={ticket?.carrierId ? String(ticket.carrierId) : undefined}
+      onValueChange={(v) => onSet(v === "none" ? null : Number(v))}
       disabled={!enabled || isFetching}
     >
       <SelectTrigger className="w-full">
         <SelectValue placeholder={enabled ? (isFetching ? "Cargando..." : "Selecciona paquetería") : "Selecciona servicio primero"} />
       </SelectTrigger>
       <SelectContent>
-        {carriers.map((c) => (
+        {Array.isArray(carriers) && carriers.length > 0 && carriers.map((c) => (
           <SelectItem key={c.id} value={String(c.id)}>{c.name}</SelectItem>
         ))}
+        {Array.isArray(carriers) && carriers.length === 0 && (
+          <div className="px-3 py-2 text-sm text-muted-foreground">Sin opciones</div>
+        )}
+        {/* opcionalmente puedes permitir “sin paquetería” también en el modal */}
+        <SelectItem value="none">— Sin paquetería —</SelectItem>
       </SelectContent>
     </Select>
   );
 }
+
 
 function ShippingDataEditor({ ticket, onSave }: { ticket: TicketRow | null; onSave: (payload: any) => void }) {
   const { toast } = useToast();
@@ -674,6 +733,8 @@ function ShippingDataEditor({ ticket, onSave }: { ticket: TicketRow | null; onSa
   const [h, setH] = React.useState<number | string>(ticket?.heightCm ?? "");
   const [lvl, setLvl] = React.useState<string>(ticket?.serviceLevel ?? "");
 
+
+
   React.useEffect(() => {
     setPkg(ticket?.packageCount ?? 1);
     setW(ticket?.weightKg ?? "");
@@ -681,6 +742,7 @@ function ShippingDataEditor({ ticket, onSave }: { ticket: TicketRow | null; onSa
     setWi(ticket?.widthCm ?? "");
     setH(ticket?.heightCm ?? "");
     setLvl(ticket?.serviceLevel ?? "");
+
   }, [ticket?.id]);
 
   const handleSave = () => {

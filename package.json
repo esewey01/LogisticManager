@@ -12,7 +12,9 @@
     "test": "vitest run",
     "check": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint .",
-    "db:push": "drizzle-kit push"
+    "db:push": "drizzle-kit push",
+    "sync:shopify:manual": "tsx scripts/syncShopifyManual.ts",
+    "sync:shopify:bulk": "tsx scripts/syncShopifyBulk.ts"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",

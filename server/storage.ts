@@ -496,7 +496,7 @@ export class DatabaseStorage implements IStorage {
     return await baseDatos
       .select()
       .from(tablaServiciosLogisticos)
-      .where(eq(tablaServiciosLogisticos.isActive, true))
+      .where(eq((tablaServiciosLogisticos as any).active, true as any))
       .orderBy(asc(tablaServiciosLogisticos.name));
   }
 
@@ -982,11 +982,19 @@ async getOrderDetails(idParam: unknown) {
     const { serviceId, carrierId } = params;
 
     // Valida servicio
-    const [serv] = await baseDatos.select().from(tablaServiciosLogisticos).where(eq(tablaServiciosLogisticos.id, serviceId));
+    const [serv] = await baseDatos
+      .select()
+      .from(tablaServiciosLogisticos)
+      .where(and(
+        eq(tablaServiciosLogisticos.id, serviceId),
+        // En la BD real es "active"; en TS mapeamos a .active
+        eq((tablaServiciosLogisticos as any).active, true as any)
+      ));
     if (!serv || (serv as any).isActive === false) throw new Error("Servicio logístico inválido o inactivo");
 
     // Si hay carrier, valida compatibilidad (si existe en bridge)
-    if (carrierId != null) {
+    const compatRequired = (process.env.LOGISTICS_COMPAT_REQUIRED ?? "true").toLowerCase() !== "false";
+    if (compatRequired && carrierId != null) {
       const [compat] = await baseDatos
         .select()
         .from(tablaServicioPaqueterias)
@@ -1015,7 +1023,7 @@ async getOrderDetails(idParam: unknown) {
     const [serv] = await baseDatos
       .select()
       .from(tablaServiciosLogisticos)
-      .where(and(eq(tablaServiciosLogisticos.id, serviceId), eq(tablaServiciosLogisticos.isActive, true)));
+      .where(and(eq(tablaServiciosLogisticos.id, serviceId), eq((tablaServiciosLogisticos as any).active, true as any)));
     if (!serv) throw new Error("Servicio logA-stico invA�lido o inactivo");
 
     // Si viene carrierId, valida activo y compatibilidad
@@ -1026,12 +1034,13 @@ async getOrderDetails(idParam: unknown) {
         .where(and(eq(tablaPaqueterias.id, Number(carrierId)), eq(tablaPaqueterias.isActive, true)));
       if (!car) throw new Error("PaqueterA-a invA�lida o inactiva");
 
-      // Compatibilidad segA?n tabla puente
-      const [compat] = await baseDatos
+      // Compatibilidad segA�n tabla puente
+      const compatRequired = (process.env.LOGISTICS_COMPAT_REQUIRED ?? "true").toLowerCase() !== "false";
+      const [compat] = compatRequired ? await baseDatos
         .select()
         .from(tablaServicioPaqueterias)
-        .where(and(eq(tablaServicioPaqueterias.serviceId, serviceId), eq(tablaServicioPaqueterias.carrierId, Number(carrierId))));
-      if (!compat) throw new Error("La paqueterA-a no es compatible con el servicio seleccionado.");
+        .where(and(eq(tablaServicioPaqueterias.serviceId, serviceId), eq(tablaServicioPaqueterias.carrierId, Number(carrierId)))) : [{ ok: true } as any];
+      if (compatRequired && !compat) throw new Error("La paqueterA-a no es compatible con el servicio seleccionado.");
     }
 
     // Actualizar en bloque
@@ -1977,7 +1986,7 @@ async getOrderDetails(idParam: unknown) {
         ${filters?.channelId ? sql`AND o.shop_id = ${filters.channelId}` : sql``}
         GROUP BY o.id, o.order_id, o.customer_name, o.customer_email, o.total_amount, 
                  o.financial_status, o.fulfillment_status, o.shopify_created_at, o.shop_id
-        ORDER BY o.shopify_created_at DESC
+        ORDER BY o.shopify_created_at DESC NULLS LAST, o.id DESC
         LIMIT 1000
       `);
 
@@ -2108,6 +2117,9 @@ async getOrderDetails(idParam: unknown) {
     };
     const sortCol = sortField && sortMap[sortField] ? sortMap[sortField] : `COALESCE(o.shopify_created_at, o.created_at)`;
     const sortDir = sortOrder === "asc" ? sql`ASC` : sql`DESC`;
+    const orderSql = sortField
+      ? sql`ORDER BY ${sql.raw(sortCol)} ${sortDir}`
+      : sql`ORDER BY o.shopify_created_at DESC NULLS LAST, o.id DESC`;
 
 
     const orderDir = sortOrder?.toLowerCase() === "asc" ? sql`ASC` : sql`DESC`;
@@ -2165,7 +2177,7 @@ async getOrderDetails(idParam: unknown) {
     ${whereClause ? sql`WHERE ${whereClause}` : sql``}
     GROUP BY o.id, o.order_id, o.name, o.customer_name, o.total_amount, 
              o.fulfillment_status, o.shopify_created_at, o.created_at, o.shop_id
-    ORDER BY ${sql.raw(sortCol)} ${sortDir}   -- ✅ orden dinámico seguro
+    ${orderSql}
     LIMIT ${pageSize} OFFSET ${offset}
   `;
 
@@ -2640,3 +2652,5 @@ export async function markOrderCancelledSafe(idNum: number, payload: {
     return { ok: true, warning: "update skipped" } as const;
   }
 }
+
+

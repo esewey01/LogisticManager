@@ -9,7 +9,6 @@ CREATE TABLE brands(
 );
 CREATE UNIQUE INDEX brands_code_unique ON public.brands USING btree (code);
 
-
 CREATE TABLE carriers(
     id SERIAL NOT NULL,
     name text NOT NULL,
@@ -58,6 +57,18 @@ CREATE TABLE channels(
 CREATE UNIQUE INDEX channels_code_unique ON public.channels USING btree (code);
 
 
+CREATE TABLE logistic_services(
+    id SERIAL NOT NULL,
+    code text NOT NULL,
+    name text NOT NULL,
+    active boolean NOT NULL DEFAULT true,
+    created_at timestamp with time zone NOT NULL DEFAULT now(),
+    updated_at timestamp with time zone NOT NULL DEFAULT now(),
+    PRIMARY KEY(id)
+);
+CREATE UNIQUE INDEX logistic_services_code_key ON public.logistic_services USING btree (code);
+
+
 CREATE TABLE notes(
     id SERIAL NOT NULL,
     user_id integer NOT NULL,
@@ -82,10 +93,10 @@ CREATE TABLE order_items(
     PRIMARY KEY(id),
     CONSTRAINT order_items_order_fk FOREIGN key(order_id) REFERENCES orders(id)
 );
-CREATE INDEX idx_order_items_order_id ON public.order_items USING btree (order_id);
 CREATE INDEX ix_order_items_shopify_product ON public.order_items USING btree (shopify_product_id);
 CREATE INDEX ix_order_items_shopify_variant ON public.order_items USING btree (shopify_variant_id);
 CREATE INDEX ix_order_items_sku ON public.order_items USING btree (sku);
+CREATE INDEX idx_order_items_order_id ON public.order_items USING btree (order_id);
 
 
 CREATE TABLE orders(
@@ -134,30 +145,6 @@ CREATE INDEX orders_shopify_created_idx ON public.orders USING btree (shopify_cr
 CREATE UNIQUE INDEX ux_orders_shop_order ON public.orders USING btree (shop_id, order_id);
 
 
-
-CREATE TABLE product_links(
-    id SERIAL NOT NULL,
-    catalogo_sku varchar(100) NOT NULL,
-    shopify_variant_id varchar(100),
-    shopify_product_id varchar(100),
-    variant_id integer,
-    product_id integer,
-    match_status varchar(20) DEFAULT 'pending'::character varying,
-    sync_status varchar(20) DEFAULT 'pending'::character varying,
-    error_message text,
-    last_sync_at timestamp without time zone,
-    created_at timestamp without time zone DEFAULT now(),
-    updated_at timestamp without time zone DEFAULT now(),
-    created_by integer,
-    updated_by integer,
-    PRIMARY KEY(id),
-    CONSTRAINT product_links_created_by_fkey FOREIGN key(created_by) REFERENCES users(id),
-    CONSTRAINT product_links_product_id_fkey FOREIGN key(product_id) REFERENCES products(id),
-    CONSTRAINT product_links_updated_by_fkey FOREIGN key(updated_by) REFERENCES users(id),
-    CONSTRAINT product_links_variant_id_fkey FOREIGN key(variant_id) REFERENCES variants(id)
-);
-
-
 CREATE TABLE products(
     id SERIAL NOT NULL,
     id_shopify text NOT NULL,
@@ -176,8 +163,13 @@ CREATE INDEX ix_products_shop ON public.products USING btree (shop_id);
 CREATE INDEX products_shop_id_idx ON public.products USING btree (shop_id);
 CREATE UNIQUE INDEX ux_products_shop_shopify ON public.products USING btree (shop_id, id_shopify);
 
-
-
+CREATE TABLE service_carriers(
+    service_id integer NOT NULL,
+    carrier_id integer NOT NULL,
+    PRIMARY KEY(service_id,carrier_id),
+    CONSTRAINT service_carriers_service_id_fkey FOREIGN key(service_id) REFERENCES logistic_services(id),
+    CONSTRAINT service_carriers_carrier_id_fkey FOREIGN key(carrier_id) REFERENCES carriers(id)
+);
 
 
 CREATE TABLE tickets(
@@ -188,12 +180,33 @@ CREATE TABLE tickets(
     notes text,
     created_at timestamp without time zone DEFAULT now(),
     updated_at timestamp without time zone,
+    service_id integer,
+    carrier_id integer,
+    tracking_number text,
+    label_url text,
+    service_level text,
+    package_count integer NOT NULL DEFAULT 1,
+    weight_kg numeric(10,2),
+    length_cm numeric(10,2),
+    width_cm numeric(10,2),
+    height_cm numeric(10,2),
+    external_refs jsonb,
+    shipped_at timestamp with time zone,
+    delivered_at timestamp with time zone,
+    canceled_at timestamp with time zone,
+    sla_due_at timestamp with time zone,
     PRIMARY KEY(id),
+    CONSTRAINT tickets_service_id_fkey FOREIGN key(service_id) REFERENCES logistic_services(id),
+    CONSTRAINT tickets_carrier_id_fkey FOREIGN key(carrier_id) REFERENCES carriers(id),
     CONSTRAINT tickets_order_fk FOREIGN key(order_id) REFERENCES orders(id)
 );
 CREATE UNIQUE INDEX tickets_ticket_number_unique ON public.tickets USING btree (ticket_number);
 CREATE INDEX ix_tickets_order ON public.tickets USING btree (order_id);
 CREATE INDEX ix_tickets_status ON public.tickets USING btree (status);
+CREATE INDEX idx_tickets_service_id ON public.tickets USING btree (service_id);
+CREATE INDEX idx_tickets_carrier_id ON public.tickets USING btree (carrier_id);
+CREATE INDEX idx_tickets_tracking_number ON public.tickets USING btree (tracking_number);
+CREATE INDEX idx_tickets_status ON public.tickets USING btree (status);
 
 
 CREATE TABLE users(
@@ -209,8 +222,6 @@ CREATE TABLE users(
     PRIMARY KEY(id)
 );
 CREATE UNIQUE INDEX users_email_unique ON public.users USING btree (email);
-
-
 
 
 CREATE TABLE variants(
@@ -231,7 +242,6 @@ CREATE TABLE variants(
 CREATE INDEX ix_variants_product ON public.variants USING btree (product_id);
 CREATE INDEX ix_variants_shopify ON public.variants USING btree (id_shopify);
 CREATE INDEX ix_variants_sku ON public.variants USING btree (sku);
-
 
 
 

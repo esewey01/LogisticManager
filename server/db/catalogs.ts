@@ -12,13 +12,14 @@ import { sql } from "drizzle-orm";
 export async function upsertLogisticServices(): Promise<void> {
   // Comentario: idempotente por ON CONFLICT (code); actualiza updated_at
   await baseDatos.execute(sql`
-    INSERT INTO public.logistic_services (code, name, is_active, updated_at)
+    -- Nota: en la BD real la columna es "active" (no is_active)
+    INSERT INTO public.logistic_services (code, name, active, updated_at)
     VALUES
       ('EXPRESS_PL', 'Express PL', TRUE, NOW()),
       ('WISHIP',     'Wiship',     TRUE, NOW())
     ON CONFLICT (code) DO UPDATE SET
       name = EXCLUDED.name,
-      is_active = EXCLUDED.is_active,
+      active = EXCLUDED.active,
       updated_at = NOW();
   `);
 }
