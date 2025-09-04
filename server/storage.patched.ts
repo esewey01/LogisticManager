@@ -18,7 +18,7 @@ import {
   products as tablaProductos,
   variants as tablaVariantes,
   orderItems as tablaItemsOrden,
-
+  
   // Tipos (alias en español)
   type User as Usuario,
   type InsertUser as InsertarUsuario,
@@ -50,20 +50,20 @@ import {
 } from "@shared/schema";
 
 import { db as baseDatos } from "./db";
-import {
-  eq,
-  and,
-  or,
-  isNull,
-  isNotNull,
-  desc,
-  asc,
-  sql,
-  count,
-  gte,
-  lte,
-  inArray,
-} from "drizzle-orm";
+  import {
+    eq,
+    and,
+    or,
+    isNull,
+    isNotNull,
+    desc,
+    asc,
+    sql,
+    count,
+    gte,
+    lte,
+    inArray,
+  } from "drizzle-orm";
 //Shopify fulfillment
 import { fulfillOrderInShopify } from "./shopifyFulfillment";
 
@@ -403,9 +403,9 @@ export class DatabaseStorage implements IStorage {
 
   /** Lista productos de catálogo; puede filtrar por ID de marca. */
   async getCatalogProducts(brandId?: number): Promise<ProductoCatalogo[]> {
-    const consulta = baseDatos.select().from(tablaArticulos);
+    const consulta = baseDatos.select().from(tablaProductosCatalogo);
     // Nota: brandId no existe en la tabla real, devolvemos todos los productos
-    return await consulta.orderBy(asc(tablaArticulos.sku));
+    return await consulta.orderBy(asc(tablaProductosCatalogo.sku));
   }
 
   /** Crea un producto de catálogo. */
@@ -413,7 +413,7 @@ export class DatabaseStorage implements IStorage {
     datos: InsertarProductoCatalogo,
   ): Promise<ProductoCatalogo> {
     const [productoNuevo] = await baseDatos
-      .insert(tablaArticulos)
+      .insert(tablaProductosCatalogo)
       .values(datos)
       .returning();
     return productoNuevo;
@@ -425,9 +425,9 @@ export class DatabaseStorage implements IStorage {
     updates: Partial<InsertarProductoCatalogo>,
   ): Promise<ProductoCatalogo> {
     const [producto] = await baseDatos
-      .update(tablaArticulos)
+      .update(tablaProductosCatalogo)
       .set(updates)
-      .where(eq(tablaArticulos.sku_interno, String(id)))
+      .where(eq(tablaProductosCatalogo.sku_interno, String(id)))
       .returning();
     return producto;
   }
@@ -565,171 +565,170 @@ export class DatabaseStorage implements IStorage {
 
   //INFORMACION RELEVANTE DE LA ORDEN
   // server/storage.ts
-  async getOrderDetails(idParam: unknown) {
-    try {
-      const idNum = Number(idParam);
-      if (!Number.isInteger(idNum) || idNum <= 0) return undefined;
+async getOrderDetails(idParam: unknown) {
+  try {
+    const idNum = Number(idParam);
+    if (!Number.isInteger(idNum) || idNum <= 0) return undefined;
 
-      const { rows } = await baseDatos.execute(sql`
-  SELECT
-    -- Datos generales (alias camelCase)
-    o.id                              AS "id",
-    o.shop_id                         AS "shopId",
-    o.order_id                        AS "orderId",
-    o.name                            AS "name",
-    o.order_number                    AS "orderNumber",
-    o.customer_name                   AS "customerName",
-    o.customer_email                  AS "customerEmail",
-    o.subtotal_price                  AS "subtotalPrice",
-    o.total_amount                    AS "totalAmount",
-    o.currency                        AS "currency",
-    o.financial_status                AS "financialStatus",
-    o.fulfillment_status              AS "fulfillmentStatus",
-    o.tags                            AS "tags",
-    o.order_note                      AS "orderNote",
-    o.created_at                      AS "createdAt",
-    o.shopify_created_at              AS "shopifyCreatedAt",
-    o.ship_name                       AS "shipName",
-    o.ship_phone                      AS "shipPhone",
-    o.ship_address1                   AS "shipAddress1",
-    o.ship_city                       AS "shipCity",
-    o.ship_province                   AS "shipProvince",
-    o.ship_country                    AS "shipCountry",
-    o.ship_zip                        AS "shipZip",
+    const { rows } = await baseDatos.execute(sql`
+      SELECT
+        -- Datos generales (alias camelCase)
+        o.id                              AS "id",
+        o.shop_id                         AS "shopId",
+        o.order_id                        AS "orderId",
+        o.name                            AS "name",
+        o.order_number                    AS "orderNumber",
+        o.customer_name                   AS "customerName",
+        o.customer_email                  AS "customerEmail",
+        o.subtotal_price                  AS "subtotalPrice",
+        o.total_amount                    AS "totalAmount",
+        o.currency                        AS "currency",
+        o.financial_status                AS "financialStatus",
+        o.fulfillment_status              AS "fulfillmentStatus",
+        o.tags                            AS "tags",
+        o.order_note                      AS "orderNote",
+        o.created_at                      AS "createdAt",
+        o.shopify_created_at              AS "shopifyCreatedAt",
+        o.ship_name                       AS "shipName",
+        o.ship_phone                      AS "shipPhone",
+        o.ship_address1                   AS "shipAddress1",
+        o.ship_city                       AS "shipCity",
+        o.ship_province                   AS "shipProvince",
+        o.ship_country                    AS "shipCountry",
+        o.ship_zip                        AS "shipZip",
 
-    -- Ítems enriquecidos: subconsulta por orden (garantiza 1-a-1 por order_item)
-    COALESCE((
-      SELECT COALESCE(jsonb_agg(jsonb_build_object(
-        'orderItemId',    x.order_item_id,
-        'skuCanal',       x.sku_canal,
-        'skuMarca',       x.sku_marca,
-        'skuInterno',     x.sku_interno,
-        'quantity',       x.quantity,
-        'priceVenta',     x.price_venta,
-        'unitPrice',      x.unit_price,
-        'mappingStatus',  x.mapping_status,
-        'matchSource',    x.match_source,
+        -- Ítems enriquecidos: subconsulta por orden (garantiza 1-a-1 por order_item)
+        COALESCE((
+          SELECT COALESCE(jsonb_agg(jsonb_build_object(
+            'orderItemId',    x.order_item_id,
+            'skuCanal',       x.sku_canal,
+            'skuMarca',       x.sku_marca,
+            'skuInterno',     x.sku_interno,
+            'quantity',       x.quantity,
+            'priceVenta',     x.price_venta,
+            'unitPrice',      x.unit_price,
+            'mappingStatus',  x.mapping_status,
+            'matchSource',    x.match_source,
 
-        'title',          x.title,
-        'vendor',         x.vendor,
-        'productType',    x.product_type,
+            'title',          x.title,
+            'vendor',         x.vendor,
+            'productType',    x.product_type,
 
-        'barcode',        x.barcode,
-        'compareAtPrice', x.compare_at_price,
-        'stockShopify',   x.inventory_qty,
+            'barcode',        x.barcode,
+            'compareAtPrice', x.compare_at_price,
+            'stockShopify',   x.inventory_qty,
 
-        -- Campos de catálogo (mapeo legacy)
-        'nombreProducto', x.nombre_producto,
-        'categoria',      x.categoria,
-        'condicion',      x.condicion,
-        'marca',          x.marca,
-        'variante',       x.variante,
-        'largo',          x.largo,
-        'ancho',          x.ancho,
-        'alto',           x.alto,
-        'peso',           x.peso,
-        'foto',           x.foto,
-        'costo',          x.costo,
-        'stockMarca',     x.stock_marca
-      )), '[]'::jsonb)
-      FROM (
-        SELECT
-          oi.id          AS order_item_id,
-          oi.sku         AS sku_canal,
-          oi.quantity    AS quantity,
-          oi.price       AS price_venta,
+            'nombreProducto', x.nombre_producto,
+            'categoria',      x.categoria,
+            'condicion',      x.condicion,
+            'marca',          x.marca,
+            'variante',       x.variante,
+            'largo',          x.largo,
+            'ancho',          x.ancho,
+            'alto',           x.alto,
+            'peso',           x.peso,
+            'foto',           x.foto,
+            'costo',          x.costo,
+            'stockMarca',     x.stock_marca
+          )), '[]'::jsonb)
+          FROM (
+            SELECT
+              oi.id          AS order_item_id,
+              oi.sku         AS sku_canal,
+              oi.quantity    AS quantity,
+              oi.price       AS price_venta,
 
-          -- products (1 fila por id_shopify)
-          p.title        AS title,
-          p.vendor       AS vendor,
-          p.product_type AS product_type,
+              -- products (1 fila garantizada por id_shopify)
+              p.title        AS title,
+              p.vendor       AS vendor,
+              p.product_type AS product_type,
 
-          -- variants (1 fila por id_shopify)
-          v.barcode,
-          v.compare_at_price,
-          v.inventory_qty,
+              -- variants (1 fila garantizada por id_shopify)
+              v.barcode,
+              v.compare_at_price,
+              v.inventory_qty,
 
-          -- articulos (antes catalogo_productos): elegimos UNA mejor coincidencia
-          a.sku          AS sku_marca,
-          a.sku_interno  AS sku_interno,
-          a.nombre       AS nombre_producto,
-          a.categoria    AS categoria,
-          a.condicion_producto AS condicion,    -- alias legacy
-          a.proveedor    AS marca,              -- alias legacy
-          a.variante     AS variante,
-          a.largo_cm     AS largo,              -- alias legacy
-          a.ancho_cm     AS ancho,              -- alias legacy
-          a.alto_cm      AS alto,               -- alias legacy
-          a.peso_kg      AS peso,               -- alias legacy
-          a.imagen1      AS foto,               -- alias legacy
-          a.costo        AS costo,
-          a.stock        AS stock_marca,
+              -- catalogo_productos (elegir UNA fila “mejor coincidencia”)
+              a.sku         AS sku_marca,
+              a.sku_interno AS sku_interno,
+              a.nombre       AS nombre_producto,
+              a.categoria,
+              a.condicion_producto,
+              a.proveedor,
+              a.variante,
+              a.largo_cm,
+              a.ancho_cm,
+              a.alto_cm,
+              a.peso_kg,
+              a.imagen1,
+              a.costo,
+              a.stock       AS stock_marca,
 
-          -- Campos derivados de mapeo
-          CASE WHEN a.sku IS NULL AND a.sku_interno IS NULL THEN 'unmapped'
-               ELSE 'matched'
-          END AS mapping_status,
-          CASE
-            WHEN a.sku_interno IS NOT NULL AND oi.sku IS NOT NULL AND lower(a.sku_interno) = lower(oi.sku) THEN 'interno'
-            WHEN a.sku         IS NOT NULL AND oi.sku IS NOT NULL AND lower(a.sku)         = lower(oi.sku) THEN 'externo'
-            ELSE NULL
-          END AS match_source,
-          a.costo AS unit_price
+              -- Campos derivados de mapeo
+              CASE WHEN a.sku IS NULL AND a.sku_interno IS NULL THEN 'unmapped'
+                   ELSE 'matched'
+              END AS mapping_status,
+              CASE
+                WHEN a.sku_interno IS NOT NULL AND oi.sku IS NOT NULL AND lower(a.sku_interno) = lower(oi.sku) THEN 'interno'
+                WHEN a.sku           IS NOT NULL AND oi.sku IS NOT NULL AND lower(a.sku)           = lower(oi.sku) THEN 'externo'
+                ELSE NULL
+              END AS match_source,
+              a.costo AS unit_price
 
-        FROM order_items oi
+            FROM order_items oi
 
-        -- products por Shopify product id
-        LEFT JOIN LATERAL (
-          SELECT p.*
-          FROM products p
-          WHERE p.id_shopify = oi.shopify_product_id
-          LIMIT 1
-        ) p ON TRUE
+            -- products por Shopify product id
+            LEFT JOIN LATERAL (
+              SELECT p.*
+              FROM products p
+              WHERE p.id_shopify = oi.shopify_product_id
+              LIMIT 1
+            ) p ON TRUE
 
-        -- variants por Shopify variant id
-        LEFT JOIN LATERAL (
-          SELECT v.*
-          FROM variants v
-          WHERE v.id_shopify = oi.shopify_variant_id
-          LIMIT 1
-        ) v ON TRUE
+            -- variants por Shopify variant id
+            LEFT JOIN LATERAL (
+              SELECT v.*
+              FROM variants v
+              WHERE v.id_shopify = oi.shopify_variant_id
+              LIMIT 1
+            ) v ON TRUE
 
-        -- articulos: prioriza match por sku_interno, luego por sku
-        LEFT JOIN LATERAL (
-          SELECT a.*
-          FROM articulos a
-          WHERE
-            (a.sku_interno IS NOT NULL OR a.sku IS NOT NULL)
-            AND oi.sku IS NOT NULL
-            AND (
-              lower(a.sku_interno) = lower(oi.sku)
-              OR lower(a.sku) = lower(oi.sku)
-            )
-          ORDER BY
-            (lower(a.sku_interno) = lower(oi.sku)) DESC,
-            (lower(a.sku) = lower(oi.sku)) DESC,
-            a.sku_interno NULLS LAST,
-            a.sku        NULLS LAST
-          LIMIT 1
-        ) a ON TRUE
+            -- catalogo_productos: NO hay updated_at ni id; preferimos coincidencia exacta.
+            -- Regla: si oi.sku coincide con a.sku_interno => prioriza; si no, prueba con a.sku.
+            LEFT JOIN LATERAL (
+              SELECT cp.*
+              FROM articulos a
+              WHERE
+                (a.sku_interno IS NOT NULL OR a.sku IS NOT NULL)
+                AND (
+                  (oi.sku IS NOT NULL AND lower(a.sku_interno) = lower(oi.sku))
+                  OR
+                  (oi.sku IS NOT NULL AND lower(a.sku) = lower(oi.sku))
+                )
+              ORDER BY
+                (lower(a.sku_interno) = lower(oi.sku)) DESC,
+                (lower(a.sku) = lower(oi.sku)) DESC,
+                a.sku_interno NULLS LAST,
+                a.sku        NULLS LAST
+              LIMIT 1
+            ) cp ON TRUE
 
-        WHERE oi.order_id = o.id
-      ) x
-    ), '[]'::jsonb) AS "items"
+            WHERE oi.order_id = o.id
+          ) x
+        ), '[]'::jsonb) AS "items"
 
-  FROM orders o
-  WHERE o.id = ${idNum}
-  LIMIT 1
-`);
+      FROM orders o
+      WHERE o.id = ${idNum}
+      LIMIT 1
+    `);
 
-
-      const row = (rows as any[])[0];
-      return row ?? undefined;
-    } catch (e) {
-      console.error("[Storage] Error getOrderDetails:", (e as any)?.message || e);
-      return undefined;
-    }
+    const row = (rows as any[])[0];
+    return row ?? undefined;
+  } catch (e) {
+    console.error("[Storage] Error getOrderDetails:", (e as any)?.message || e);
+    return undefined;
   }
+}
 
 
 
@@ -1803,8 +1802,8 @@ export class DatabaseStorage implements IStorage {
     try {
       const [producto] = await baseDatos
         .select()
-        .from(tablaArticulos)
-        .where(eq(tablaArticulos.sku_interno, sku))
+        .from(tablaProductosCatalogo)
+        .where(eq(tablaProductosCatalogo.sku_interno, sku))
         .limit(1);
       return producto;
     } catch (error) {
@@ -2144,24 +2143,18 @@ export class DatabaseStorage implements IStorage {
       COALESCE(
         JSON_AGG(
           JSON_BUILD_OBJECT(
-          'sku', oi.sku,
-          'quantity', oi.quantity,
-          'price', oi.price,
-          'vendorFromShop', p.vendor,
-          'catalogBrand', a.proveedor,
-          'stockFromCatalog', a.stock,
-          'stockState', CASE 
-            WHEN a.stock IS NULL THEN 'Desconocido'
-            WHEN a.stock = 0 THEN 'Stock Out'
-            WHEN a.stock <= 15 THEN 'Apartar'
-            ELSE 'OK'
-          END,
-          'enAlmacen', a.en_almacen,   -- ← NUEVO
-          'skuArticulo', a.sku,
-          'skuInterno', a.sku_interno,
-          'nombreProducto', a.nombre,
-          'stockMarca', a.stock,
-          'unitPrice', a.costo
+            'sku', oi.sku,
+            'quantity', oi.quantity,
+            'price', oi.price,
+            'vendorFromShop', p.vendor,
+            'catalogBrand', a.proveedor,
+            'stockFromCatalog', a.stock,
+            'stockState', CASE 
+              WHEN a.stock IS NULL THEN 'Desconocido'
+              WHEN a.stock = 0 THEN 'Stock Out'
+              WHEN a.stock <= 15 THEN 'Apartar'
+              ELSE 'OK'
+            END
           )
         ) FILTER (WHERE oi.id IS NOT NULL),
         '[]'::json
@@ -2241,14 +2234,14 @@ export class DatabaseStorage implements IStorage {
           price: tablaItemsOrden.price,
           shopifyProductId: tablaItemsOrden.shopifyProductId,
           shopifyVariantId: tablaItemsOrden.shopifyVariantId,
-          productName: tablaArticulos.nombre,
-          skuInterno: tablaArticulos.sku_interno,
+          productName: tablaProductosCatalogo.nombre_producto,
+          skuInterno: tablaProductosCatalogo.sku_interno,
           skuExterno: tablaItemsOrden.sku,
         })
         .from(tablaItemsOrden)
         .leftJoin(
-          tablaArticulos,
-          eq(tablaArticulos.sku, tablaItemsOrden.sku)
+          tablaProductosCatalogo,
+          eq(tablaProductosCatalogo.sku, tablaItemsOrden.sku)
         )
         .where(eq(tablaItemsOrden.orderId, idBig))
         .orderBy(asc(tablaItemsOrden.id));
@@ -2276,13 +2269,13 @@ export class DatabaseStorage implements IStorage {
     const offset = (page - 1) * pageSize;
     const rows = await baseDatos
       .select()
-      .from(tablaArticulos)
-      .orderBy(asc(tablaArticulos.nombre))
+      .from(tablaProductosCatalogo)
+      .orderBy(asc(tablaProductosCatalogo.nombre_producto))
       .limit(pageSize)
       .offset(offset);
     const totalRes = await baseDatos
       .select({ count: count() })
-      .from(tablaArticulos);
+      .from(tablaProductosCatalogo);
     return { rows, total: Number(totalRes[0]?.count ?? 0), page, pageSize };
   }
 

@@ -147,6 +147,42 @@ export type CatalogoProducto = typeof catalogoProductos.$inferSelect;
 export type InsertCatalogoProducto = typeof catalogoProductos.$inferInsert;
 
 // =========================================================
+// ARTICULOS (nuevo catálogo; reemplaza catalogo_productos)
+// =========================================================
+export const articulos = pgTable("articulos", {
+  sku: text("sku"),
+  proveedor: text("proveedor"), // antes: marca
+  sku_interno: text("sku_interno"),
+  codigo_barras: text("codigo_barras"),
+  nombre: text("nombre"), // antes: nombre_producto
+  descripcion: text("descripcion"),
+  modelo: text("modelo"),
+  categoria: text("categoria"),
+  condicion_producto: text("condicion_producto"), // antes: condicion
+  marca_producto: text("marca_producto"),
+  tipo_variante: text("tipo_variante"),
+  variante: text("variante"),
+  largo_cm: decimal("largo_cm"), // antes: largo
+  ancho_cm: decimal("ancho_cm"), // antes: ancho
+  alto_cm: decimal("alto_cm"),   // antes: alto
+  peso_kg: decimal("peso_kg"),    // antes: peso
+  peso_volumetrico: decimal("peso_volumetrico"),
+  imagen1: text("imagen1"),      // antes: foto
+  imagen2: text("imagen2"),
+  imagen3: text("imagen3"),
+  imagen4: text("imagen4"),
+  costo: decimal("costo"),
+  stock: integer("stock"),
+  status: text("status"), // 'activo' | 'inactivo'
+  garantia_meses: integer("garantia_meses"),
+  clave_producto_sat: text("clave_producto_sat"),
+  unidad_medida_sat: text("unidad_medida_sat"),
+  clave_unidad_medida_sat: text("clave_unidad_medida_sat"),
+});
+export type Articulo = typeof articulos.$inferSelect;
+export type InsertArticulo = typeof articulos.$inferInsert;
+
+// =========================================================
 // CHANNELS
 // =========================================================
 export const channels = pgTable(

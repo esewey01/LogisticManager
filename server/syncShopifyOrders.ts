@@ -174,51 +174,81 @@ type OrdersResp = {
 };
 
 /* ===================== Upsert de 1 orden dentro de TX ===================== */
-
 async function upsertOneOrderTx(tx: any, storeNumber: number, o: any) {
+  const toStrOrNull = (v: any) => (v == null ? null : String(v));
+  const toDateOrNull = (v: any) => (v ? new Date(v) : null);
+
   const orderIdStr = String(o.id);
 
+  // ====== CUSTOMER ======
+  const first = o.customer?.first_name ?? null;
+  const last  = o.customer?.last_name  ?? null;
+  const customerName =
+    (first || last) ? `${first ?? ""} ${last ?? ""}`.trim()
+                    : (o.email ?? o.name ?? null);
+
+  // ====== TAGS ======
   const tagsArr =
     typeof o.tags === "string"
       ? o.tags.split(",").map((s: string) => s.trim()).filter(Boolean)
       : [];
 
-  const first = o.customer?.first_name ?? null;
-  const last = o.customer?.last_name ?? null;
-  const customerName =
-    (first || last) ? `${first ?? ""} ${last ?? ""}`.trim() : (o.email ?? o.name ?? null);
+  // ====== SHIPPING (NUEVO) ======
+  // Shopify: o.shipping_address puede venir null si aún no hay dirección.
+  const sa = o.shipping_address ?? null;
+  const shipName     = sa?.name     ?? null;
+  const shipPhone    = sa?.phone    ?? null;
+  const shipAddress1 = sa?.address1 ?? null;
+  const shipCity     = sa?.city     ?? null;
+  const shipProvince = sa?.province ?? null;
+  const shipCountry  = sa?.country  ?? null;
+  const shipZip      = sa?.zip      ?? null;
 
-  const toStrOrNull = (v: any) => (v == null ? null : String(v));
-  const toDateOrNull = (v: any) => (v ? new Date(v) : null);
-
+  // ====== INSERT DATA ======
   const insertData = {
+    // claves
     shopId: Number(storeNumber),
     orderId: orderIdStr,
+
+    // básicos
     name: o.name ?? null,
     orderNumber: toStrOrNull(o.order_number),
     customerName,
     customerEmail: o.email ?? o.customer?.email ?? null,
 
+    // montos/moneda/estatus
     subtotalPrice: toStrOrNull(o.subtotal_price),
-    totalAmount: toStrOrNull(o.total_price),
+    totalAmount:   toStrOrNull(o.total_price),
     currency: o.currency ?? null,
     financialStatus: o.financial_status ?? null,
     fulfillmentStatus: o.fulfillment_status ?? null,
 
+    // tags y notas (si en tu schema NO existe noteAttributes, no lo envíes)
     tags: tagsArr.length ? tagsArr : null,
-    noteAttributes: Array.isArray(o.note_attributes) ? o.note_attributes : null,
 
-    createdAt: toDateOrNull(o.created_at),
-    shopifyCreatedAt: toDateOrNull(o.created_at),
-    shopifyUpdatedAt: toDateOrNull(o.updated_at),
-    shopifyProcessedAt: toDateOrNull(o.processed_at),
-    shopifyClosedAt: toDateOrNull(o.closed_at),
-    shopifyCancelledAt: toDateOrNull(o.cancelled_at),
-  };
+    // shipping (NUEVO)
+    shipName,
+    shipPhone,
+    shipAddress1,
+    shipCity,
+    shipProvince,
+    shipCountry,
+    shipZip,
 
+    // fechas
+    createdAt:           toDateOrNull(o.created_at),
+    shopifyCreatedAt:    toDateOrNull(o.created_at),
+    shopifyUpdatedAt:    toDateOrNull(o.updated_at),
+    shopifyProcessedAt:  toDateOrNull(o.processed_at),
+    shopifyClosedAt:     toDateOrNull(o.closed_at),
+    shopifyCancelledAt:  toDateOrNull(o.cancelled_at),
+  } as const;
+
+  // Para UPSERT: no reescribimos createdAt en updates
   const { createdAt, ...rest } = insertData as any;
   const updateData = { ...rest, updatedAt: new Date() };
 
+  // ====== UPSERT ORDER ======
   const upsertedOrder = await tx
     .insert(orders)
     .values(insertData)
@@ -231,23 +261,28 @@ async function upsertOneOrderTx(tx: any, storeNumber: number, o: any) {
   const orderPk = upsertedOrder[0]?.id;
   if (!orderPk) throw new Error("No se obtuvo ID de la orden tras UPSERT.");
 
+  // ====== RE-INSERT ITEMS ======
   await tx.delete(orderItems).where(eq(orderItems.orderId, orderPk));
 
-  const items = (o as any).line_items ?? [];
+  const items = Array.isArray(o.line_items) ? o.line_items : [];
   if (items.length > 0) {
     const values = items.map((li: any) => ({
       orderId: orderPk,
       sku: li.sku ?? null,
       quantity: Number(li.quantity ?? 0),
+      // price puede llegar numérico o string; guardamos como string
       price: toStrOrNull(li.price),
       shopifyProductId: li.product_id != null ? String(li.product_id) : null,
       shopifyVariantId: li.variant_id != null ? String(li.variant_id) : null,
       title: li.title ?? null,
       variantTitle: li.variant_title ?? null,
     }));
-    await tx.insert(orderItems).values(values);
+    if (values.length) {
+      await tx.insert(orderItems).values(values);
+    }
   }
 }
+
 
 /* ===================== Descubrir tiendas ===================== */
 

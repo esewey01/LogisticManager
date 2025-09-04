@@ -39,10 +39,11 @@ type OrderItemEnriched = {
   sku?: string | null;
   price?: number | null;
   quantity?: number | null;
-  vendorFromShop?: string | null;   // products.vendor
-  catalogBrand?: string | null;     // catalogo_productos.marca
-  stockFromCatalog?: number | null; // catalogo_productos.stock
+  vendorFromShop?: string | null;
+  catalogBrand?: string | null;
+  stockFromCatalog?: number | null;
   stockState?: "Stock Out" | "Apartar" | "OK" | "Desconocido";
+  enAlmacen?: boolean | null; // ← NUEVO
 };
 
 type OrderRow = {

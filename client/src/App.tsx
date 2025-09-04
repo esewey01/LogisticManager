@@ -13,6 +13,7 @@ import Dashboard from "@/pages/dashboard";
 import Pedidos from "@/pages/pedidos";
 import Tickets from "@/pages/tickets";
 import Catalogo from "@/pages/catalogo";
+import ArticulosPage from "@/pages/articulos";
 import Paqueteria from "@/pages/paqueteria";
 import AdminUsuarios from "@/pages/admin/usuarios";
 import Config from "@/pages/config";
@@ -20,6 +21,7 @@ import ProductsView from "@/pages/ProductsView";
 import Profile from "@/pages/Profile";
 import ProductosUnificada from "@/pages/productos";
 import AppLayout from "@/components/layout/AppLayout";
+import CombosPage from "@/pages/combosPage";
 
 function Router() {
   const { isAuthenticated, isLoading } = useAuth();
@@ -48,10 +50,12 @@ function Router() {
         <Route path="/pedidos" component={Pedidos} />
         <Route path="/tickets" component={Tickets} />
         <Route path="/catalogo" component={Catalogo} />
+        <Route path="/articulos" component={ArticulosPage} />
         <Route path="/paqueteria" component={Paqueteria} />
         <Route path="/admin/usuarios" component={AdminUsuarios} />
         <Route path="/productos-unificada" component={ProductosUnificada} />
         <Route path="/productos" component={ProductsView} />
+        <Route path="/combos" component={CombosPage} />
         <Route path="/config" component={Config} />
         <Route path="/profile" component={Profile} />
         <Route component={NotFound} />

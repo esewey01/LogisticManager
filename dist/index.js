@@ -12,6 +12,7 @@ var __export = (target, all) => {
 var schema_exports = {};
 __export(schema_exports, {
   TICKET_STATUS: () => TICKET_STATUS,
+  articulos: () => articulos,
   brands: () => brands,
   canales: () => channels,
   carriers: () => carriers,
@@ -57,7 +58,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { index, uniqueIndex } from "drizzle-orm/pg-core";
 import { z } from "zod";
-var users, brands, carriers, logisticServices, serviceCarriers, catalogoProductos, channels, notes, orders, orderItems, products, variants, productLinks, tickets, ticketEvents, insertOrderSchema, insertTicketSchema, createBulkTicketsSchema, insertNoteSchema, TICKET_STATUS;
+var users, brands, carriers, logisticServices, serviceCarriers, catalogoProductos, articulos, channels, notes, orders, orderItems, products, variants, productLinks, tickets, ticketEvents, insertOrderSchema, insertTicketSchema, createBulkTicketsSchema, insertNoteSchema, TICKET_STATUS;
 var init_schema = __esm({
   "shared/schema.ts"() {
     "use strict";
@@ -107,22 +108,24 @@ var init_schema = __esm({
         id: serial("id").primaryKey(),
         name: text("name").notNull(),
         code: text("code").notNull(),
-        isActive: boolean("is_active").notNull().default(true),
-        createdAt: timestamp("created_at").defaultNow(),
-        updatedAt: timestamp("updated_at")
+        active: boolean("active").notNull().default(true),
+        createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+        updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
       },
       (t) => ({
-        uxCode: uniqueIndex("logistic_services_code_unique").on(t.code)
+        // usa el nombre "oficial" de la BD para evitar duplicados
+        uxCode: uniqueIndex("logistic_services_code_key").on(t.code)
       })
     );
     serviceCarriers = pgTable(
       "service_carriers",
       {
-        serviceId: integer("service_id").notNull().references(() => logisticServices.id),
-        carrierId: integer("carrier_id").notNull().references(() => carriers.id)
+        serviceId: integer("service_id").notNull().references(() => logisticServices.id, { onDelete: "cascade" }),
+        carrierId: integer("carrier_id").notNull().references(() => carriers.id, { onDelete: "cascade" })
       },
       (t) => ({
-        pk: uniqueIndex("service_carriers_pk").on(t.serviceId, t.carrierId)
+        // En BD existe como PRIMARY KEY (service_id, carrier_id)
+        pk: { columns: [t.serviceId, t.carrierId], name: "service_carriers_pkey" }
       })
     );
     catalogoProductos = pgTable("catalogo_productos", {
@@ -143,6 +146,45 @@ var init_schema = __esm({
       foto: text("foto"),
       costo: decimal("costo"),
       stock: integer("stock")
+    });
+    articulos = pgTable("articulos", {
+      sku: text("sku"),
+      proveedor: text("proveedor"),
+      // antes: marca
+      sku_interno: text("sku_interno"),
+      codigo_barras: text("codigo_barras"),
+      nombre: text("nombre"),
+      // antes: nombre_producto
+      descripcion: text("descripcion"),
+      modelo: text("modelo"),
+      categoria: text("categoria"),
+      condicion_producto: text("condicion_producto"),
+      // antes: condicion
+      marca_producto: text("marca_producto"),
+      tipo_variante: text("tipo_variante"),
+      variante: text("variante"),
+      largo_cm: decimal("largo_cm"),
+      // antes: largo
+      ancho_cm: decimal("ancho_cm"),
+      // antes: ancho
+      alto_cm: decimal("alto_cm"),
+      // antes: alto
+      peso_kg: decimal("peso_kg"),
+      // antes: peso
+      peso_volumetrico: decimal("peso_volumetrico"),
+      imagen1: text("imagen1"),
+      // antes: foto
+      imagen2: text("imagen2"),
+      imagen3: text("imagen3"),
+      imagen4: text("imagen4"),
+      costo: decimal("costo"),
+      stock: integer("stock"),
+      status: text("status"),
+      // 'activo' | 'inactivo'
+      garantia_meses: integer("garantia_meses"),
+      clave_producto_sat: text("clave_producto_sat"),
+      unidad_medida_sat: text("unidad_medida_sat"),
+      clave_unidad_medida_sat: text("clave_unidad_medida_sat")
     });
     channels = pgTable(
       "channels",
@@ -645,17 +687,17 @@ var init_storage = __esm({
       // ==== CATÁLOGO ====
       /** Lista productos de catálogo; puede filtrar por ID de marca. */
       async getCatalogProducts(brandId) {
-        const consulta = db.select().from(catalogoProductos);
-        return await consulta.orderBy(asc(catalogoProductos.sku));
+        const consulta = db.select().from(articulos);
+        return await consulta.orderBy(asc(articulos.sku));
       }
       /** Crea un producto de catálogo. */
       async createCatalogProduct(datos) {
-        const [productoNuevo] = await db.insert(catalogoProductos).values(datos).returning();
+        const [productoNuevo] = await db.insert(articulos).values(datos).returning();
         return productoNuevo;
       }
       /** Actualiza un producto de catálogo. */
       async updateCatalogProduct(id, updates) {
-        const [producto] = await db.update(catalogoProductos).set(updates).where(eq2(catalogoProductos.sku_interno, String(id))).returning();
+        const [producto] = await db.update(articulos).set(updates).where(eq2(articulos.sku_interno, String(id))).returning();
         return producto;
       }
       // ==== CANALES ====
@@ -691,7 +733,7 @@ var init_storage = __esm({
       // ==== SERVICIOS LOGÍSTICOS ====
       /** Devuelve servicios logísticos activos. */
       async getLogisticServices() {
-        return await db.select().from(logisticServices).where(eq2(logisticServices.isActive, true)).orderBy(asc(logisticServices.name));
+        return await db.select().from(logisticServices).where(eq2(logisticServices.active, true)).orderBy(asc(logisticServices.name));
       }
       /** Devuelve paqueterías compatibles con un servicio. */
       async getServiceCarriers(serviceId) {
@@ -745,156 +787,156 @@ var init_storage = __esm({
           const idNum = Number(idParam);
           if (!Number.isInteger(idNum) || idNum <= 0) return void 0;
           const { rows } = await db.execute(sql`
-      SELECT
-        -- Datos generales (alias camelCase)
-        o.id                              AS "id",
-        o.shop_id                         AS "shopId",
-        o.order_id                        AS "orderId",
-        o.name                            AS "name",
-        o.order_number                    AS "orderNumber",
-        o.customer_name                   AS "customerName",
-        o.customer_email                  AS "customerEmail",
-        o.subtotal_price                  AS "subtotalPrice",
-        o.total_amount                    AS "totalAmount",
-        o.currency                        AS "currency",
-        o.financial_status                AS "financialStatus",
-        o.fulfillment_status              AS "fulfillmentStatus",
-        o.tags                            AS "tags",
-        o.order_note                      AS "orderNote",
-        o.created_at                      AS "createdAt",
-        o.shopify_created_at              AS "shopifyCreatedAt",
-        o.ship_name                       AS "shipName",
-        o.ship_phone                      AS "shipPhone",
-        o.ship_address1                   AS "shipAddress1",
-        o.ship_city                       AS "shipCity",
-        o.ship_province                   AS "shipProvince",
-        o.ship_country                    AS "shipCountry",
-        o.ship_zip                        AS "shipZip",
+  SELECT
+    -- Datos generales (alias camelCase)
+    o.id                              AS "id",
+    o.shop_id                         AS "shopId",
+    o.order_id                        AS "orderId",
+    o.name                            AS "name",
+    o.order_number                    AS "orderNumber",
+    o.customer_name                   AS "customerName",
+    o.customer_email                  AS "customerEmail",
+    o.subtotal_price                  AS "subtotalPrice",
+    o.total_amount                    AS "totalAmount",
+    o.currency                        AS "currency",
+    o.financial_status                AS "financialStatus",
+    o.fulfillment_status              AS "fulfillmentStatus",
+    o.tags                            AS "tags",
+    o.order_note                      AS "orderNote",
+    o.created_at                      AS "createdAt",
+    o.shopify_created_at              AS "shopifyCreatedAt",
+    o.ship_name                       AS "shipName",
+    o.ship_phone                      AS "shipPhone",
+    o.ship_address1                   AS "shipAddress1",
+    o.ship_city                       AS "shipCity",
+    o.ship_province                   AS "shipProvince",
+    o.ship_country                    AS "shipCountry",
+    o.ship_zip                        AS "shipZip",
 
-        -- Ítems enriquecidos: subconsulta por orden (garantiza 1-a-1 por order_item)
-        COALESCE((
-          SELECT COALESCE(jsonb_agg(jsonb_build_object(
-            'orderItemId',    x.order_item_id,
-            'skuCanal',       x.sku_canal,
-            'skuMarca',       x.sku_marca,
-            'skuInterno',     x.sku_interno,
-            'quantity',       x.quantity,
-            'priceVenta',     x.price_venta,
-            'unitPrice',      x.unit_price,
-            'mappingStatus',  x.mapping_status,
-            'matchSource',    x.match_source,
+    -- Ítems enriquecidos: subconsulta por orden (garantiza 1-a-1 por order_item)
+    COALESCE((
+      SELECT COALESCE(jsonb_agg(jsonb_build_object(
+        'orderItemId',    x.order_item_id,
+        'skuCanal',       x.sku_canal,
+        'skuMarca',       x.sku_marca,
+        'skuInterno',     x.sku_interno,
+        'quantity',       x.quantity,
+        'priceVenta',     x.price_venta,
+        'unitPrice',      x.unit_price,
+        'mappingStatus',  x.mapping_status,
+        'matchSource',    x.match_source,
 
-            'title',          x.title,
-            'vendor',         x.vendor,
-            'productType',    x.product_type,
+        'title',          x.title,
+        'vendor',         x.vendor,
+        'productType',    x.product_type,
 
-            'barcode',        x.barcode,
-            'compareAtPrice', x.compare_at_price,
-            'stockShopify',   x.inventory_qty,
+        'barcode',        x.barcode,
+        'compareAtPrice', x.compare_at_price,
+        'stockShopify',   x.inventory_qty,
 
-            'nombreProducto', x.nombre_producto,
-            'categoria',      x.categoria,
-            'condicion',      x.condicion,
-            'marca',          x.marca,
-            'variante',       x.variante,
-            'largo',          x.largo,
-            'ancho',          x.ancho,
-            'alto',           x.alto,
-            'peso',           x.peso,
-            'foto',           x.foto,
-            'costo',          x.costo,
-            'stockMarca',     x.stock_marca
-          )), '[]'::jsonb)
-          FROM (
-            SELECT
-              oi.id          AS order_item_id,
-              oi.sku         AS sku_canal,
-              oi.quantity    AS quantity,
-              oi.price       AS price_venta,
+        -- Campos de catálogo (mapeo legacy)
+        'nombreProducto', x.nombre_producto,
+        'categoria',      x.categoria,
+        'condicion',      x.condicion,
+        'marca',          x.marca,
+        'variante',       x.variante,
+        'largo',          x.largo,
+        'ancho',          x.ancho,
+        'alto',           x.alto,
+        'peso',           x.peso,
+        'foto',           x.foto,
+        'costo',          x.costo,
+        'stockMarca',     x.stock_marca
+      )), '[]'::jsonb)
+      FROM (
+        SELECT
+          oi.id          AS order_item_id,
+          oi.sku         AS sku_canal,
+          oi.quantity    AS quantity,
+          oi.price       AS price_venta,
 
-              -- products (1 fila garantizada por id_shopify)
-              p.title        AS title,
-              p.vendor       AS vendor,
-              p.product_type AS product_type,
+          -- products (1 fila por id_shopify)
+          p.title        AS title,
+          p.vendor       AS vendor,
+          p.product_type AS product_type,
 
-              -- variants (1 fila garantizada por id_shopify)
-              v.barcode,
-              v.compare_at_price,
-              v.inventory_qty,
+          -- variants (1 fila por id_shopify)
+          v.barcode,
+          v.compare_at_price,
+          v.inventory_qty,
 
-              -- catalogo_productos (elegir UNA fila “mejor coincidencia”)
-              cp.sku         AS sku_marca,
-              cp.sku_interno AS sku_interno,
-              cp.nombre_producto,
-              cp.categoria,
-              cp.condicion,
-              cp.marca,
-              cp.variante,
-              cp.largo,
-              cp.ancho,
-              cp.alto,
-              cp.peso,
-              cp.foto,
-              cp.costo,
-              cp.stock       AS stock_marca,
+          -- articulos (antes catalogo_productos): elegimos UNA mejor coincidencia
+          a.sku          AS sku_marca,
+          a.sku_interno  AS sku_interno,
+          a.nombre       AS nombre_producto,
+          a.categoria    AS categoria,
+          a.condicion_producto AS condicion,    -- alias legacy
+          a.proveedor    AS marca,              -- alias legacy
+          a.variante     AS variante,
+          a.largo_cm     AS largo,              -- alias legacy
+          a.ancho_cm     AS ancho,              -- alias legacy
+          a.alto_cm      AS alto,               -- alias legacy
+          a.peso_kg      AS peso,               -- alias legacy
+          a.imagen1      AS foto,               -- alias legacy
+          a.costo        AS costo,
+          a.stock        AS stock_marca,
 
-              -- Campos derivados de mapeo
-              CASE WHEN cp.sku IS NULL AND cp.sku_interno IS NULL THEN 'unmapped'
-                   ELSE 'matched'
-              END AS mapping_status,
-              CASE
-                WHEN cp.sku_interno IS NOT NULL AND oi.sku IS NOT NULL AND lower(cp.sku_interno) = lower(oi.sku) THEN 'interno'
-                WHEN cp.sku           IS NOT NULL AND oi.sku IS NOT NULL AND lower(cp.sku)           = lower(oi.sku) THEN 'externo'
-                ELSE NULL
-              END AS match_source,
-              cp.costo AS unit_price
+          -- Campos derivados de mapeo
+          CASE WHEN a.sku IS NULL AND a.sku_interno IS NULL THEN 'unmapped'
+               ELSE 'matched'
+          END AS mapping_status,
+          CASE
+            WHEN a.sku_interno IS NOT NULL AND oi.sku IS NOT NULL AND lower(a.sku_interno) = lower(oi.sku) THEN 'interno'
+            WHEN a.sku         IS NOT NULL AND oi.sku IS NOT NULL AND lower(a.sku)         = lower(oi.sku) THEN 'externo'
+            ELSE NULL
+          END AS match_source,
+          a.costo AS unit_price
 
-            FROM order_items oi
+        FROM order_items oi
 
-            -- products por Shopify product id
-            LEFT JOIN LATERAL (
-              SELECT p.*
-              FROM products p
-              WHERE p.id_shopify = oi.shopify_product_id
-              LIMIT 1
-            ) p ON TRUE
+        -- products por Shopify product id
+        LEFT JOIN LATERAL (
+          SELECT p.*
+          FROM products p
+          WHERE p.id_shopify = oi.shopify_product_id
+          LIMIT 1
+        ) p ON TRUE
 
-            -- variants por Shopify variant id
-            LEFT JOIN LATERAL (
-              SELECT v.*
-              FROM variants v
-              WHERE v.id_shopify = oi.shopify_variant_id
-              LIMIT 1
-            ) v ON TRUE
+        -- variants por Shopify variant id
+        LEFT JOIN LATERAL (
+          SELECT v.*
+          FROM variants v
+          WHERE v.id_shopify = oi.shopify_variant_id
+          LIMIT 1
+        ) v ON TRUE
 
-            -- catalogo_productos: NO hay updated_at ni id; preferimos coincidencia exacta.
-            -- Regla: si oi.sku coincide con cp.sku_interno => prioriza; si no, prueba con cp.sku.
-            LEFT JOIN LATERAL (
-              SELECT cp.*
-              FROM catalogo_productos cp
-              WHERE
-                (cp.sku_interno IS NOT NULL OR cp.sku IS NOT NULL)
-                AND (
-                  (oi.sku IS NOT NULL AND lower(cp.sku_interno) = lower(oi.sku))
-                  OR
-                  (oi.sku IS NOT NULL AND lower(cp.sku) = lower(oi.sku))
-                )
-              ORDER BY
-                (lower(cp.sku_interno) = lower(oi.sku)) DESC,
-                (lower(cp.sku) = lower(oi.sku)) DESC,
-                cp.sku_interno NULLS LAST,
-                cp.sku        NULLS LAST
-              LIMIT 1
-            ) cp ON TRUE
+        -- articulos: prioriza match por sku_interno, luego por sku
+        LEFT JOIN LATERAL (
+          SELECT a.*
+          FROM articulos a
+          WHERE
+            (a.sku_interno IS NOT NULL OR a.sku IS NOT NULL)
+            AND oi.sku IS NOT NULL
+            AND (
+              lower(a.sku_interno) = lower(oi.sku)
+              OR lower(a.sku) = lower(oi.sku)
+            )
+          ORDER BY
+            (lower(a.sku_interno) = lower(oi.sku)) DESC,
+            (lower(a.sku) = lower(oi.sku)) DESC,
+            a.sku_interno NULLS LAST,
+            a.sku        NULLS LAST
+          LIMIT 1
+        ) a ON TRUE
 
-            WHERE oi.order_id = o.id
-          ) x
-        ), '[]'::jsonb) AS "items"
+        WHERE oi.order_id = o.id
+      ) x
+    ), '[]'::jsonb) AS "items"
 
-      FROM orders o
-      WHERE o.id = ${idNum}
-      LIMIT 1
-    `);
+  FROM orders o
+  WHERE o.id = ${idNum}
+  LIMIT 1
+`);
           const row = rows[0];
           return row ?? void 0;
         } catch (e) {
@@ -999,9 +1041,9 @@ var init_storage = __esm({
           oi.order_id,
           COUNT(oi.id)::int AS items_count,
           COALESCE(ARRAY_AGG(DISTINCT oi.sku) FILTER (WHERE oi.sku IS NOT NULL), ARRAY[]::text[]) AS skus,
-          COALESCE(ARRAY_AGG(DISTINCT cp.marca) FILTER (WHERE cp.marca IS NOT NULL), ARRAY[]::text[]) AS brands
+          COALESCE(ARRAY_AGG(DISTINCT a.proveedor) FILTER (WHERE a.proveedor IS NOT NULL), ARRAY[]::text[]) AS brands
         FROM order_items oi
-        LEFT JOIN catalogo_productos cp ON cp.sku = oi.sku
+        LEFT JOIN articulos a ON a.sku = oi.sku
         GROUP BY oi.order_id
       )
       SELECT 
@@ -1070,9 +1112,14 @@ var init_storage = __esm({
       // === Operaciones logísticas de tickets ===
       async setTicketService(ticketId, params) {
         const { serviceId, carrierId } = params;
-        const [serv] = await db.select().from(logisticServices).where(eq2(logisticServices.id, serviceId));
+        const [serv] = await db.select().from(logisticServices).where(and(
+          eq2(logisticServices.id, serviceId),
+          // En la BD real es "active"; en TS mapeamos a .active
+          eq2(logisticServices.active, true)
+        ));
         if (!serv || serv.isActive === false) throw new Error("Servicio log\xEDstico inv\xE1lido o inactivo");
-        if (carrierId != null) {
+        const compatRequired = (process.env.LOGISTICS_COMPAT_REQUIRED ?? "true").toLowerCase() !== "false";
+        if (compatRequired && carrierId != null) {
           const [compat] = await db.select().from(serviceCarriers).where(and(eq2(serviceCarriers.serviceId, serviceId), eq2(serviceCarriers.carrierId, carrierId)));
           if (!compat) throw new Error("La paqueter\xEDa no es compatible con el servicio seleccionado");
         }
@@ -1088,13 +1135,14 @@ var init_storage = __esm({
         if (!Array.isArray(ids) || ids.length === 0) {
           return { updated: 0, skipped: 0, ids: [] };
         }
-        const [serv] = await db.select().from(logisticServices).where(and(eq2(logisticServices.id, serviceId), eq2(logisticServices.isActive, true)));
+        const [serv] = await db.select().from(logisticServices).where(and(eq2(logisticServices.id, serviceId), eq2(logisticServices.active, true)));
         if (!serv) throw new Error("Servicio logA-stico invA\uFFFDlido o inactivo");
         if (typeof carrierId !== "undefined" && carrierId !== null) {
           const [car] = await db.select().from(carriers).where(and(eq2(carriers.id, Number(carrierId)), eq2(carriers.isActive, true)));
           if (!car) throw new Error("PaqueterA-a invA\uFFFDlida o inactiva");
-          const [compat] = await db.select().from(serviceCarriers).where(and(eq2(serviceCarriers.serviceId, serviceId), eq2(serviceCarriers.carrierId, Number(carrierId))));
-          if (!compat) throw new Error("La paqueterA-a no es compatible con el servicio seleccionado.");
+          const compatRequired = (process.env.LOGISTICS_COMPAT_REQUIRED ?? "true").toLowerCase() !== "false";
+          const [compat] = compatRequired ? await db.select().from(serviceCarriers).where(and(eq2(serviceCarriers.serviceId, serviceId), eq2(serviceCarriers.carrierId, Number(carrierId)))) : [{ ok: true }];
+          if (compatRequired && !compat) throw new Error("La paqueterA-a no es compatible con el servicio seleccionado.");
         }
         const updatedRows = await db.update(tickets).set({ serviceId, carrierId: typeof carrierId === "undefined" ? null : carrierId, updatedAt: /* @__PURE__ */ new Date() }).where(inArray(tickets.id, ids)).returning({ id: tickets.id });
         const updatedIds = (updatedRows || []).map((r) => Number(r.id));
@@ -1573,7 +1621,7 @@ var init_storage = __esm({
       /** Obtiene un producto del catálogo por SKU interno para dimensiones. */
       async getCatalogoBySkuInterno(sku) {
         try {
-          const [producto] = await db.select().from(catalogoProductos).where(eq2(catalogoProductos.sku_interno, sku)).limit(1);
+          const [producto] = await db.select().from(articulos).where(eq2(articulos.sku_interno, sku)).limit(1);
           return producto;
         } catch (error) {
           console.error("Error getting catalog product by SKU:", error);
@@ -1734,16 +1782,16 @@ var init_storage = __esm({
           const b = brand.toLowerCase();
           conds.push(sql`(
         LOWER(COALESCE(p.vendor, '')) = ${b} OR
-        LOWER(COALESCE(cp.marca, '')) = ${b}
+        LOWER(COALESCE(a.proveedor, '')) = ${b}
       )`);
         }
         if (stockState) {
           if (stockState === "out") {
-            conds.push(sql`COALESCE(cp.stock, -1) = 0`);
+            conds.push(sql`COALESCE(a.stock, -1) = 0`);
           } else if (stockState === "apartar") {
-            conds.push(sql`COALESCE(cp.stock, 0) BETWEEN 1 AND 15`);
+            conds.push(sql`COALESCE(a.stock, 0) BETWEEN 1 AND 15`);
           } else if (stockState === "ok") {
-            conds.push(sql`COALESCE(cp.stock, 0) > 15`);
+            conds.push(sql`COALESCE(a.stock, 0) > 15`);
           }
         }
         if (search) {
@@ -1815,18 +1863,24 @@ var init_storage = __esm({
       COALESCE(
         JSON_AGG(
           JSON_BUILD_OBJECT(
-            'sku', oi.sku,
-            'quantity', oi.quantity,
-            'price', oi.price,
-            'vendorFromShop', p.vendor,
-            'catalogBrand', cp.marca,
-            'stockFromCatalog', cp.stock,
-            'stockState', CASE 
-              WHEN cp.stock IS NULL THEN 'Desconocido'
-              WHEN cp.stock = 0 THEN 'Stock Out'
-              WHEN cp.stock <= 15 THEN 'Apartar'
-              ELSE 'OK'
-            END
+          'sku', oi.sku,
+          'quantity', oi.quantity,
+          'price', oi.price,
+          'vendorFromShop', p.vendor,
+          'catalogBrand', a.proveedor,
+          'stockFromCatalog', a.stock,
+          'stockState', CASE 
+            WHEN a.stock IS NULL THEN 'Desconocido'
+            WHEN a.stock = 0 THEN 'Stock Out'
+            WHEN a.stock <= 15 THEN 'Apartar'
+            ELSE 'OK'
+          END,
+          'enAlmacen', a.en_almacen,   -- ← NUEVO
+          'skuArticulo', a.sku,
+          'skuInterno', a.sku_interno,
+          'nombreProducto', a.nombre,
+          'stockMarca', a.stock,
+          'unitPrice', a.costo
           )
         ) FILTER (WHERE oi.id IS NOT NULL),
         '[]'::json
@@ -1845,7 +1899,7 @@ var init_storage = __esm({
     FROM orders o
     LEFT JOIN order_items oi ON oi.order_id = o.id
     LEFT JOIN products p ON p.id_shopify = oi.shopify_product_id AND p.shop_id = o.shop_id
-    LEFT JOIN catalogo_productos cp ON cp.sku_interno = oi.sku
+    LEFT JOIN articulos a ON a.sku_interno = oi.sku
     ${whereClause ? sql`WHERE ${whereClause}` : sql``}
     GROUP BY o.id, o.order_id, o.name, o.customer_name, o.total_amount, 
              o.fulfillment_status, o.shopify_created_at, o.created_at, o.shop_id
@@ -1889,12 +1943,12 @@ var init_storage = __esm({
             price: orderItems.price,
             shopifyProductId: orderItems.shopifyProductId,
             shopifyVariantId: orderItems.shopifyVariantId,
-            productName: catalogoProductos.nombre_producto,
-            skuInterno: catalogoProductos.sku_interno,
+            productName: articulos.nombre,
+            skuInterno: articulos.sku_interno,
             skuExterno: orderItems.sku
           }).from(orderItems).leftJoin(
-            catalogoProductos,
-            eq2(catalogoProductos.sku, orderItems.sku)
+            articulos,
+            eq2(articulos.sku, orderItems.sku)
           ).where(eq2(orderItems.orderId, idBig)).orderBy(asc(orderItems.id));
           console.log(`[DEBUG] Items con join:`, items);
           const normalized = items.map((it) => ({
@@ -1912,8 +1966,8 @@ var init_storage = __esm({
       }
       async getCatalogProductsPaginated(page, pageSize) {
         const offset = (page - 1) * pageSize;
-        const rows = await db.select().from(catalogoProductos).orderBy(asc(catalogoProductos.nombre_producto)).limit(pageSize).offset(offset);
-        const totalRes = await db.select({ count: count() }).from(catalogoProductos);
+        const rows = await db.select().from(articulos).orderBy(asc(articulos.nombre)).limit(pageSize).offset(offset);
+        const totalRes = await db.select({ count: count() }).from(articulos);
         return { rows, total: Number(totalRes[0]?.count ?? 0), page, pageSize };
       }
       async getExternalProductsPaginated(page, pageSize) {
@@ -2216,24 +2270,24 @@ var init_catalogStorage = __esm({
           }
           const whereClause = whereConditions.join(" AND ");
           const productos = await db.execute(sql3`
-        SELECT sku, marca, nombre_producto, categoria, marca_producto, 
+        SELECT sku, proveedor, nombre, categoria, marca_producto,
                stock, costo, sku_interno, codigo_barras
-        FROM catalogo_productos 
-        WHERE nombre_producto IS NOT NULL
-        ORDER BY nombre_producto
+        FROM articulos 
+        WHERE nombre IS NOT NULL
+        ORDER BY nombre
         LIMIT ${pageSize} OFFSET ${offset}
       `);
           const totalResult = await db.execute(sql3`
         SELECT COUNT(*) as total 
-        FROM catalogo_productos 
-        WHERE nombre_producto IS NOT NULL
+        FROM articulos 
+        WHERE nombre IS NOT NULL
       `);
           const total = Number(totalResult.rows[0]?.total ?? 0);
           return {
             rows: productos.rows.map((p) => ({
               id: p.sku,
               // Usar SKU como ID único
-              nombre: p.nombre_producto,
+              nombre: p.nombre,
               sku: p.sku,
               categoria: p.categoria,
               marca: p.marca_producto,
@@ -2258,7 +2312,7 @@ var init_catalogStorage = __esm({
         try {
           const result = await db.execute(sql3`
         SELECT DISTINCT categoria 
-        FROM catalogo_productos 
+        FROM articulos 
         WHERE categoria IS NOT NULL 
         ORDER BY categoria
       `);
@@ -2272,8 +2326,8 @@ var init_catalogStorage = __esm({
       async createProduct(datos) {
         try {
           await db.execute(sql3`
-        INSERT INTO catalogo_productos (
-          sku, nombre_producto, categoria, marca_producto, stock, costo
+        INSERT INTO articulos (
+          sku, nombre, categoria, marca_producto, stock, costo
         ) VALUES (
           ${datos.sku}, 
           ${datos.nombre}, 
@@ -2302,9 +2356,9 @@ var init_catalogStorage = __esm({
       async updateProduct(id, datos) {
         try {
           await db.execute(sql3`
-        UPDATE catalogo_productos 
+        UPDATE articulos 
         SET 
-          nombre_producto = ${datos.nombre || null},
+          nombre = ${datos.nombre || null},
           categoria = ${datos.categoria || null},
           marca_producto = ${datos.marca || null},
           stock = ${datos.inventario || 0},
@@ -2330,7 +2384,7 @@ var init_catalogStorage = __esm({
       async deleteProduct(id) {
         try {
           await db.execute(sql3`
-        DELETE FROM catalogo_productos WHERE sku = ${id}
+        DELETE FROM articulos WHERE sku = ${id}
       `);
         } catch (error) {
           console.error("Error deleting product:", error);
@@ -2382,65 +2436,91 @@ var init_productStorage = __esm({
         }
         const offset = (page - 1) * pageSize;
         const validCols = ["sku", "sku_interno", "codigo_barras", "nombre_producto", "categoria", "marca", "marca_producto"];
-        const orderCol = validCols.includes(orderBy) ? orderBy : "nombre_producto";
+        const mapCol = (ui) => ({
+          sku: "sku",
+          sku_interno: "sku_interno",
+          codigo_barras: "codigo_barras",
+          nombre_producto: "nombre",
+          categoria: "categoria",
+          marca: "proveedor",
+          marca_producto: "marca_producto"
+        })[ui] || ui;
+        const orderCol = validCols.includes(orderBy) ? mapCol(orderBy) : "nombre";
         const orderDirection = orderDir === "desc" ? sql4.raw("DESC") : sql4.raw("ASC");
         const whereParts = [sql4`1=1`];
         if (search) {
           if (searchField && validCols.includes(searchField)) {
-            whereParts.push(
-              sql4`LOWER(COALESCE(${sql4.raw(searchField)}, '')) LIKE LOWER(${`%${search.toLowerCase()}%`})`
-            );
+            const realCol = mapCol(searchField);
+            whereParts.push(sql4`LOWER(COALESCE(${sql4.raw(realCol)}, '')) LIKE LOWER(${`%${search.toLowerCase()}%`})`);
           } else {
             const s = `%${search.toLowerCase()}%`;
             whereParts.push(sql4`(
-        LOWER(COALESCE(sku,'')) LIKE LOWER(${s})
-        OR LOWER(COALESCE(sku_interno,'')) LIKE LOWER(${s})
-        OR LOWER(COALESCE(codigo_barras,'')) LIKE LOWER(${s})
-        OR LOWER(COALESCE(nombre_producto,'')) LIKE LOWER(${s})
-      )`);
+          LOWER(COALESCE(sku,'')) LIKE LOWER(${s})
+          OR LOWER(COALESCE(sku_interno,'')) LIKE LOWER(${s})
+          OR LOWER(COALESCE(codigo_barras,'')) LIKE LOWER(${s})
+          OR LOWER(COALESCE(nombre,'')) LIKE LOWER(${s})
+        )`);
           }
         }
-        if (marca) whereParts.push(sql4`marca = ${marca}`);
+        if (marca) whereParts.push(sql4`proveedor = ${marca}`);
         if (categoria) whereParts.push(sql4`categoria = ${categoria}`);
-        if (condicion) whereParts.push(sql4`condicion = ${condicion}`);
+        if (condicion) whereParts.push(sql4`condicion_producto = ${condicion}`);
         if (marca_producto) whereParts.push(sql4`marca_producto = ${marca_producto}`);
         if (stockEq0) whereParts.push(sql4`COALESCE(stock, 0) = 0`);
         if (typeof stockGte === "number" && !Number.isNaN(stockGte)) whereParts.push(sql4`COALESCE(stock, 0) >= ${stockGte}`);
         const whereSQL = sql4.join(whereParts, sql4` AND `);
         const productos = await db.execute(sql4`
-    SELECT
-      sku, marca, sku_interno, codigo_barras, nombre_producto, modelo, categoria,
-      condicion, marca_producto, variante, largo, ancho, alto, peso, foto, costo, stock
-    FROM ${sql4.raw("catalogo_productos")}
-    WHERE ${whereSQL}
-    ORDER BY ${sql4.raw(orderCol)} ${orderDirection}
-    LIMIT ${pageSize} OFFSET ${offset}
-  `);
+      SELECT
+        sku,
+        proveedor,
+        sku_interno,
+        codigo_barras,
+        nombre,
+        modelo,
+        categoria,
+        condicion_producto,
+        marca_producto,
+        tipo_variante,
+        variante,
+        largo_cm,
+        ancho_cm,
+        alto_cm,
+        peso_kg,
+        imagen1,
+        costo,
+        stock,
+        status
+      FROM ${sql4.raw("articulos")}
+      WHERE ${whereSQL}
+      ORDER BY ${sql4.raw(orderCol)} ${orderDirection}
+      LIMIT ${pageSize} OFFSET ${offset}
+    `);
         const totalRes = await db.execute(sql4`
-    SELECT COUNT(*)::int AS total
-    FROM ${sql4.raw("catalogo_productos")}
-    WHERE ${whereSQL}
-  `);
+      SELECT COUNT(*)::int AS total
+      FROM ${sql4.raw("articulos")}
+      WHERE ${whereSQL}
+    `);
         const total = Number(totalRes.rows[0]?.total ?? 0);
         return {
           rows: productos.rows.map((p) => ({
             sku: p.sku,
-            marca: p.marca,
+            marca: p.proveedor,
             sku_interno: p.sku_interno,
             codigo_barras: p.codigo_barras,
-            nombre_producto: p.nombre_producto,
+            nombre_producto: p.nombre,
             modelo: p.modelo,
             categoria: p.categoria,
-            condicion: p.condicion,
+            condicion: p.condicion_producto,
             marca_producto: p.marca_producto,
             variante: p.variante,
-            largo: p.largo ? Number(p.largo) : null,
-            ancho: p.ancho ? Number(p.ancho) : null,
-            alto: p.alto ? Number(p.alto) : null,
-            peso: p.peso ? Number(p.peso) : null,
-            foto: p.foto,
+            largo: p.largo_cm ? Number(p.largo_cm) : null,
+            ancho: p.ancho_cm ? Number(p.ancho_cm) : null,
+            alto: p.alto_cm ? Number(p.alto_cm) : null,
+            peso: p.peso_kg ? Number(p.peso_kg) : null,
+            foto: p.imagen1,
             costo: p.costo ? Number(p.costo) : null,
-            stock: p.stock ? Number(p.stock) : 0
+            stock: p.stock ? Number(p.stock) : 0,
+            status: p.status ?? null
           })),
           total,
           page,
@@ -2453,16 +2533,16 @@ var init_productStorage = __esm({
         const colNodes = cols.map((c) => sql4.raw(c));
         const valNodes = cols.map((c) => sql4`${product[c]}`);
         const result = await db.execute(sql4`
-    INSERT INTO ${sql4.raw("catalogo_productos")}
-      (${sql4.join(colNodes, sql4`, `)})
-    VALUES
-      (${sql4.join(valNodes, sql4`, `)})
-    RETURNING *
-  `);
+      INSERT INTO ${sql4.raw("articulos")}
+        (${sql4.join(colNodes, sql4`, `)})
+      VALUES
+        (${sql4.join(valNodes, sql4`, `)})
+      RETURNING *
+    `);
         return result.rows[0];
       }
       async deleteCatalogProduct(sku) {
-        await db.execute(sql4`DELETE FROM catalogo_productos WHERE sku = ${sku}`);
+        await db.execute(sql4`DELETE FROM articulos WHERE sku = ${sku}`);
         return { success: true };
       }
       /** Actualiza un producto del catálogo */
@@ -2472,10 +2552,10 @@ var init_productStorage = __esm({
           if (fields.length === 0) return { success: true };
           const setNodes = fields.map((f) => sql4`${sql4.raw(f)} = ${updates[f]}`);
           await db.execute(sql4`
-      UPDATE ${sql4.raw("catalogo_productos")}
-      SET ${sql4.join(setNodes, sql4`, `)}
-      WHERE sku = ${sku}
-    `);
+        UPDATE ${sql4.raw("articulos")}
+        SET ${sql4.join(setNodes, sql4`, `)}
+        WHERE sku = ${sku}
+      `);
           return { success: true };
         } catch (error) {
           console.error("Error updating catalog product:", error);
@@ -2486,10 +2566,10 @@ var init_productStorage = __esm({
       async getCatalogFacets() {
         try {
           const [marcas, categorias, condiciones, marcasProducto] = await Promise.all([
-            db.execute(sql4`SELECT DISTINCT marca FROM catalogo_productos WHERE marca IS NOT NULL ORDER BY marca`),
-            db.execute(sql4`SELECT DISTINCT categoria FROM catalogo_productos WHERE categoria IS NOT NULL ORDER BY categoria`),
-            db.execute(sql4`SELECT DISTINCT condicion FROM catalogo_productos WHERE condicion IS NOT NULL ORDER BY condicion`),
-            db.execute(sql4`SELECT DISTINCT marca_producto FROM catalogo_productos WHERE marca_producto IS NOT NULL ORDER BY marca_producto`)
+            db.execute(sql4`SELECT DISTINCT proveedor AS marca FROM articulos WHERE proveedor IS NOT NULL ORDER BY proveedor`),
+            db.execute(sql4`SELECT DISTINCT categoria FROM articulos WHERE categoria IS NOT NULL ORDER BY categoria`),
+            db.execute(sql4`SELECT DISTINCT condicion_producto AS condicion FROM articulos WHERE condicion_producto IS NOT NULL ORDER BY condicion_producto`),
+            db.execute(sql4`SELECT DISTINCT marca_producto FROM articulos WHERE marca_producto IS NOT NULL ORDER BY marca_producto`)
           ]);
           return {
             marcas: marcas.rows.map((r) => r.marca),
@@ -3657,9 +3737,6 @@ var lastResult = null;
 function setLastSyncResult(result) {
   lastResult = result;
 }
-function getLastSyncResult() {
-  return lastResult;
-}
 
 // server/syncShopifyOrders.ts
 function parseLinkHeader(link) {
@@ -3678,6 +3755,19 @@ function extractPageInfoFromUrl(url) {
   return pi ?? void 0;
 }
 var sleep = (ms) => new Promise((res) => setTimeout(res, ms));
+function buildShopifyHeaders(token, extra) {
+  const base = {
+    "X-Shopify-Access-Token": token,
+    "Accept": "application/json",
+    "User-Agent": "LogisticManager/1.0 (+node)"
+  };
+  if (extra) {
+    for (const [k, v] of Object.entries(extra)) {
+      if (v != null) base[k] = String(v);
+    }
+  }
+  return base;
+}
 async function fetchShopifyWithRetry(storeNumber, path3, opts = {}) {
   const { shop, token, apiVersion } = getShopifyCredentials(String(storeNumber));
   const base = `https://${shop}/admin/api/${apiVersion}`;
@@ -3688,16 +3778,18 @@ async function fetchShopifyWithRetry(storeNumber, path3, opts = {}) {
   while (attempt <= maxRetries) {
     try {
       const url = `${base}${path3}`;
-      const r = await fetch(url, {
-        method,
-        body: opts.body,
-        headers: {
-          "X-Shopify-Access-Token": token,
-          "User-Agent": "LogisticManager/1.0 (+node)",
-          "Accept": "application/json",
+      const headers = buildShopifyHeaders(
+        token,
+        {
+          // Sólo enviamos Content-Type cuando hay body
           "Content-Type": opts.body ? "application/json" : void 0,
           ...opts.headers || {}
         }
+      );
+      const r = await fetch(url, {
+        method,
+        body: opts.body ? typeof opts.body === "string" ? opts.body : JSON.stringify(opts.body) : void 0,
+        headers
       });
       console.log(`[SHOPIFY][try=${attempt}] store=${storeNumber} path=${path3} status=${r.status}`);
       if (r.status === 429) {
@@ -3709,7 +3801,7 @@ async function fetchShopifyWithRetry(storeNumber, path3, opts = {}) {
         continue;
       }
       if (r.status >= 500) {
-        const backoffMs = [500, 1500, 3500][Math.min(attempt, 2)] ?? 3500;
+        const backoffMs = [800, 1600, 3500][Math.min(attempt, 2)];
         console.warn(`[SHOPIFY][5xx] store=${storeNumber} path=${path3} status=${r.status} backoffMs=${backoffMs}`);
         await sleep(backoffMs);
         attempt++;
@@ -3718,7 +3810,7 @@ async function fetchShopifyWithRetry(storeNumber, path3, opts = {}) {
       return r;
     } catch (err) {
       lastError = err;
-      const backoffMs = [500, 1500, 3500][Math.min(attempt, 2)] ?? 3500;
+      const backoffMs = [800, 1600, 3500][Math.min(attempt, 2)];
       console.warn(`[SHOPIFY][fetch-error][try=${attempt}] store=${storeNumber} path=${path3} err=${err?.message || err}. backoff=${backoffMs}ms`);
       await sleep(backoffMs);
       attempt++;
@@ -3730,6 +3822,13 @@ async function shopifyRestGetRaw(storeNumber, path3) {
   const r = await fetchShopifyWithRetry(storeNumber, path3);
   const text2 = await r.text();
   const { shop } = getShopifyCredentials(String(storeNumber));
+  if (r.status === 406) {
+    console.error(`[SHOPIFY][406] store=${storeNumber} path=${path3}`);
+    try {
+      console.error(`[SHOPIFY][406][body-300] ${String(text2).slice(0, 300)}`);
+    } catch {
+    }
+  }
   return { ok: r.ok, status: r.status, statusText: r.statusText, headers: r.headers, text: text2, shop };
 }
 async function shopifyRestGet(storeNumber, path3) {
@@ -3741,28 +3840,47 @@ async function shopifyRestGet(storeNumber, path3) {
   return JSON.parse(text2);
 }
 async function upsertOneOrderTx(tx, storeNumber, o) {
+  const toStrOrNull = (v) => v == null ? null : String(v);
+  const toDateOrNull = (v) => v ? new Date(v) : null;
   const orderIdStr = String(o.id);
-  const tagsArr = typeof o.tags === "string" ? o.tags.split(",").map((s) => s.trim()).filter(Boolean) : [];
   const first = o.customer?.first_name ?? null;
   const last = o.customer?.last_name ?? null;
   const customerName = first || last ? `${first ?? ""} ${last ?? ""}`.trim() : o.email ?? o.name ?? null;
-  const toStrOrNull = (v) => v == null ? null : String(v);
-  const toDateOrNull = (v) => v ? new Date(v) : null;
+  const tagsArr = typeof o.tags === "string" ? o.tags.split(",").map((s) => s.trim()).filter(Boolean) : [];
+  const sa = o.shipping_address ?? null;
+  const shipName = sa?.name ?? null;
+  const shipPhone = sa?.phone ?? null;
+  const shipAddress1 = sa?.address1 ?? null;
+  const shipCity = sa?.city ?? null;
+  const shipProvince = sa?.province ?? null;
+  const shipCountry = sa?.country ?? null;
+  const shipZip = sa?.zip ?? null;
   const insertData = {
+    // claves
     shopId: Number(storeNumber),
     orderId: orderIdStr,
+    // básicos
     name: o.name ?? null,
     orderNumber: toStrOrNull(o.order_number),
     customerName,
     customerEmail: o.email ?? o.customer?.email ?? null,
+    // montos/moneda/estatus
     subtotalPrice: toStrOrNull(o.subtotal_price),
     totalAmount: toStrOrNull(o.total_price),
     currency: o.currency ?? null,
     financialStatus: o.financial_status ?? null,
     fulfillmentStatus: o.fulfillment_status ?? null,
+    // tags y notas (si en tu schema NO existe noteAttributes, no lo envíes)
     tags: tagsArr.length ? tagsArr : null,
-    // Guardamos los atributos de nota tal cual vienen desde Shopify como JSONB.
-    noteAttributes: Array.isArray(o.note_attributes) ? o.note_attributes : null,
+    // shipping (NUEVO)
+    shipName,
+    shipPhone,
+    shipAddress1,
+    shipCity,
+    shipProvince,
+    shipCountry,
+    shipZip,
+    // fechas
     createdAt: toDateOrNull(o.created_at),
     shopifyCreatedAt: toDateOrNull(o.created_at),
     shopifyUpdatedAt: toDateOrNull(o.updated_at),
@@ -3779,20 +3897,22 @@ async function upsertOneOrderTx(tx, storeNumber, o) {
   const orderPk = upsertedOrder[0]?.id;
   if (!orderPk) throw new Error("No se obtuvo ID de la orden tras UPSERT.");
   await tx.delete(orderItems).where(eq(orderItems.orderId, orderPk));
-  const items = o.line_items ?? [];
+  const items = Array.isArray(o.line_items) ? o.line_items : [];
   if (items.length > 0) {
     const values = items.map((li) => ({
       orderId: orderPk,
       sku: li.sku ?? null,
       quantity: Number(li.quantity ?? 0),
+      // price puede llegar numérico o string; guardamos como string
       price: toStrOrNull(li.price),
       shopifyProductId: li.product_id != null ? String(li.product_id) : null,
       shopifyVariantId: li.variant_id != null ? String(li.variant_id) : null,
-      // Campos adicionales para enriquecer los items en UI y búsquedas
       title: li.title ?? null,
       variantTitle: li.variant_title ?? null
     }));
-    await tx.insert(orderItems).values(values);
+    if (values.length) {
+      await tx.insert(orderItems).values(values);
+    }
   }
 }
 function listStoreNumbersFromEnv() {
@@ -3808,7 +3928,7 @@ async function getOrdersCount(storeParam) {
   const { shop } = getShopifyCredentials(String(storeNumber));
   const { ok, status, statusText, text: text2 } = await shopifyRestGetRaw(
     storeNumber,
-    `/orders/count.json?status=any`
+    `/orders/count.json`
   );
   if (!ok) throw new Error(`Shopify count ${status} ${statusText} :: ${text2.slice(0, 200)}`);
   const body = JSON.parse(text2);
@@ -3816,19 +3936,18 @@ async function getOrdersCount(storeParam) {
 }
 async function syncShopifyOrdersBackfill(opts) {
   const storeNumber = parseInt(String(opts.store), 10);
-  const limit = Math.min(opts.limit ?? 50, 250);
-  const params = [`status=any`, `limit=${limit}`];
+  const limit = Math.min(opts.limit ?? 100, 250);
+  const params = [];
   if (opts.pageInfo) {
+    params.push(`limit=${limit}`);
     params.push(`page_info=${encodeURIComponent(String(opts.pageInfo))}`);
   } else {
-    if (opts.since) params.push(`created_at_min=${encodeURIComponent(opts.since)}`);
-    params.push(`order=created_at+asc`);
+    if (opts.updatedSince) params.push(`updated_at_min=${encodeURIComponent(opts.updatedSince)}`);
+    params.push(`limit=${limit}`);
   }
-  const { ok, status, statusText, text: text2, headers } = await shopifyRestGetRaw(
-    storeNumber,
-    `/orders.json?${params.join("&")}`
-  );
-  if (!ok) throw new Error(`Shopify backfill ${status} ${statusText} :: ${text2.slice(0, 200)}`);
+  const path3 = `/orders.json?${params.join("&")}`;
+  const { ok, status, statusText, text: text2, headers } = await shopifyRestGetRaw(storeNumber, path3);
+  if (!ok) throw new Error(`Shopify backfill ${status} ${statusText} :: ${text2.slice(0, 300)}`);
   const body = JSON.parse(text2);
   let upserted = 0, inserted = 0;
   const errors = [];
@@ -3843,7 +3962,6 @@ async function syncShopifyOrdersBackfill(opts) {
       const reason = e?.message || String(e);
       console.error(`[UPSERT-ERR] store=${storeNumber} order=${String(o.id)} reason=${reason}`);
       errors.push({ store: storeNumber, orderId: String(o.id), reason });
-      continue;
     }
   }
   const link = headers.get("link");
@@ -3861,18 +3979,17 @@ async function syncShopifyOrdersBackfill(opts) {
 async function syncShopifyOrdersIncremental(opts) {
   const storeNumber = parseInt(String(opts.store), 10);
   const limit = Math.min(opts.limit ?? 100, 250);
-  const params = [`status=any`, `limit=${limit}`];
+  const params = [];
   if (opts.pageInfo) {
+    params.push(`limit=${limit}`);
     params.push(`page_info=${encodeURIComponent(String(opts.pageInfo))}`);
   } else {
     params.push(`updated_at_min=${encodeURIComponent(opts.updatedSince)}`);
-    params.push(`order=updated_at+asc`);
+    params.push(`limit=${limit}`);
   }
-  const { ok, status, statusText, text: text2, headers } = await shopifyRestGetRaw(
-    storeNumber,
-    `/orders.json?${params.join("&")}`
-  );
-  if (!ok) throw new Error(`Shopify incremental ${status} ${statusText} :: ${text2.slice(0, 200)}`);
+  const path3 = `/orders.json?${params.join("&")}`;
+  const { ok, status, statusText, text: text2, headers } = await shopifyRestGetRaw(storeNumber, path3);
+  if (!ok) throw new Error(`Shopify incremental ${status} ${statusText} :: ${text2.slice(0, 300)}`);
   const body = JSON.parse(text2);
   let upserted = 0, inserted = 0;
   const errors = [];
@@ -3887,7 +4004,6 @@ async function syncShopifyOrdersIncremental(opts) {
       const reason = e?.message || String(e);
       console.error(`[UPSERT-ERR] store=${storeNumber} order=${String(o.id)} reason=${reason}`);
       errors.push({ store: storeNumber, orderId: String(o.id), reason });
-      continue;
     }
   }
   const link = headers.get("link");
@@ -3904,8 +4020,7 @@ async function syncShopifyOrdersIncremental(opts) {
 }
 async function syncShopifyOrders(opts = {}) {
   validateEnv();
-  const perPage = Math.min(opts.limit ?? 250, 250);
-  const maxPages = 3;
+  const perPage = Math.min(opts.limit ?? 100, 250);
   let targets;
   if (opts.store && String(opts.store).toLowerCase() !== "all") {
     targets = [parseInt(String(opts.store), 10)];
@@ -3921,10 +4036,9 @@ async function syncShopifyOrders(opts = {}) {
     let inserted = 0;
     let upserted = 0;
     try {
-      const orderParam = encodeURIComponent("created_at desc");
       const data = await shopifyRestGet(
         storeNumber,
-        `/orders.json?limit=${perPage}&status=any&order=${orderParam}`
+        `/orders.json?limit=${perPage}`
       );
       for (const o of data.orders ?? []) {
         await db.transaction(async (tx) => {
@@ -3940,80 +4054,6 @@ async function syncShopifyOrders(opts = {}) {
   const totalUpserted = summary.reduce((acc, s) => acc + s.upserted, 0);
   setLastSyncResult({ source: "manual", summary, totalUpserted, timestamp: (/* @__PURE__ */ new Date()).toISOString() });
   return { ok: true, summary, totalUpserted };
-}
-async function syncShopifyOrdersBulk(opts = {}) {
-  const { stores } = validateEnv();
-  const daysBack = opts.daysBack ?? 30;
-  const perPage = 250;
-  let targets;
-  if (opts.store && String(opts.store).toLowerCase() !== "all") {
-    targets = [parseInt(String(opts.store), 10)];
-  } else {
-    targets = stores.map((s) => s.store);
-  }
-  const summary = [];
-  const isIsoUtc = (s) => !!s && /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(s);
-  for (const storeNumber of targets) {
-    const { shop } = getShopifyCredentials(String(storeNumber));
-    let updatedSince = new Date(Date.now() - daysBack * 24 * 60 * 60 * 1e3).toISOString();
-    if (!isIsoUtc(updatedSince)) {
-      console.warn(`[SHOPIFY BULK] store=${storeNumber} updated_at_min inv\xE1lido (${updatedSince}). Usando fallback 30d.`);
-      updatedSince = new Date(Date.now() - 30 * 24 * 60 * 60 * 1e3).toISOString();
-    }
-    let nextPageInfo = void 0;
-    let upserted = 0;
-    let inserted = 0;
-    const errors = [];
-    do {
-      const isCursor = !!nextPageInfo;
-      const params = isCursor ? [
-        `limit=${perPage}`,
-        `page_info=${encodeURIComponent(nextPageInfo)}`
-      ] : [
-        `status=any`,
-        `limit=${perPage}`,
-        `updated_at_min=${encodeURIComponent(updatedSince)}`
-      ];
-      const path3 = `/orders.json?${params.join("&")}`;
-      const { ok, status, statusText, text: text2, headers } = await shopifyRestGetRaw(storeNumber, path3);
-      console.log(`[SHOPIFY BULK] store=${storeNumber} path=${path3} status=${status}`);
-      if (status === 406) {
-        try {
-          console.error(`[SHOPIFY BULK][406] body-full: ${text2}`);
-        } catch {
-        }
-        console.error(`[SHOPIFY BULK][406] body-300: ${String(text2).slice(0, 300)}`);
-        errors.push({ store: storeNumber, orderId: void 0, reason: `Shopify 406 Not Acceptable: ${statusText}` });
-        break;
-      }
-      if (!ok) {
-        console.error(`[SHOPIFY BULK][ERR] store=${storeNumber} status=${status} body-300=${String(text2).slice(0, 300)}`);
-        errors.push({ store: storeNumber, orderId: void 0, reason: `HTTP ${status} ${statusText}` });
-        break;
-      }
-      const body = JSON.parse(text2);
-      for (const o of body.orders ?? []) {
-        try {
-          await db.transaction(async (tx) => {
-            await upsertOneOrderTx(tx, storeNumber, o);
-          });
-          upserted++;
-        } catch (e) {
-          const reason = e?.message || String(e);
-          console.error(`[UPSERT-ERR] store=${storeNumber} order=${String(o.id)} reason=${reason}`);
-          errors.push({ store: storeNumber, orderId: String(o.id), reason });
-        }
-      }
-      const link = headers.get("link");
-      const parsed = parseLinkHeader(link);
-      nextPageInfo = extractPageInfoFromUrl(parsed["next"]);
-    } while (nextPageInfo);
-    summary.push({ store: storeNumber, shop, inserted, upserted, errors: errors.length });
-  }
-  const totalUpserted = summary.reduce((acc, s) => acc + s.upserted, 0);
-  const last = { source: "bulk", summary, totalUpserted, timestamp: (/* @__PURE__ */ new Date()).toISOString() };
-  setLastSyncResult(last);
-  return { ok: true, summary, totalUpserted, timestamp: last.timestamp };
 }
 
 // server/services/ShopifyAdminClient.ts
@@ -4552,13 +4592,14 @@ init_db();
 import { sql as sql2 } from "drizzle-orm";
 async function upsertLogisticServices() {
   await db.execute(sql2`
-    INSERT INTO public.logistic_services (code, name, is_active, updated_at)
+    -- Nota: en la BD real la columna es "active" (no is_active)
+    INSERT INTO public.logistic_services (code, name, active, updated_at)
     VALUES
       ('EXPRESS_PL', 'Express PL', TRUE, NOW()),
       ('WISHIP',     'Wiship',     TRUE, NOW())
     ON CONFLICT (code) DO UPDATE SET
       name = EXCLUDED.name,
-      is_active = EXCLUDED.is_active,
+      active = EXCLUDED.active,
       updated_at = NOW();
   `);
 }
@@ -5383,19 +5424,259 @@ async function registerRoutes(app) {
       res.status(500).json({ message: "No se pudo obtener la orden (detalles)" });
     }
   });
-  app.post("/api/integrations/shopify/sync-bulk", requiereAutenticacion, async (req, res) => {
+  app.get("/api/articulos", requiereAutenticacion, async (req, res) => {
     try {
-      const daysBack = req.body?.daysBack != null ? Number(req.body.daysBack) : 30;
-      const store = req.query.store || "all";
-      const r = await syncShopifyOrdersBulk({ daysBack, store });
-      res.json({ ok: true, message: "Sync bulk ejecutado", summary: r.summary, totalUpserted: r.totalUpserted, timestamp: r.timestamp });
+      const limit = Math.min(Math.max(Number(req.query.limit) || 50, 1), 1e3);
+      const offset = Math.max(Number(req.query.offset) || 0, 0);
+      const sku = req.query.sku || "";
+      const sku_interno = req.query.sku_interno || "";
+      const producto = req.query.producto || "";
+      const proveedor = req.query.proveedor || "";
+      const categoria = req.query.categoria || "";
+      const soloSinStock = req.query.solo_sin_stock === "true" || req.query.solo_sin_stock === "1";
+      const enAlmacenQ = req.query.en_almacen || "";
+      const statusQ = req.query.status || "";
+      const orderByParam = req.query.order_by || "nombre";
+      const orderDir = (req.query.order_dir || "asc").toLowerCase() === "desc" ? "DESC" : "ASC";
+      const allowedOrderBy = /* @__PURE__ */ new Set(["nombre", "sku", "created_at", "updated_at", "stock"]);
+      const orderBy = allowedOrderBy.has(orderByParam) ? orderByParam : "nombre";
+      const where = [sql5`1=1`];
+      if (sku) where.push(sql5`LOWER(COALESCE(sku,'')) LIKE LOWER(${`%${sku}%`})`);
+      if (sku_interno) where.push(sql5`LOWER(COALESCE(sku_interno,'')) LIKE LOWER(${`%${sku_interno}%`})`);
+      if (producto) where.push(sql5`LOWER(COALESCE(nombre,'')) LIKE LOWER(${`%${producto}%`})`);
+      if (proveedor) where.push(sql5`proveedor = ${proveedor}`);
+      if (categoria) where.push(sql5`categoria = ${categoria}`);
+      if (soloSinStock) where.push(sql5`COALESCE(stock,0) = 0`);
+      if (["1", "true"].includes(enAlmacenQ)) where.push(sql5`en_almacen = true`);
+      else if (["0", "false"].includes(enAlmacenQ)) where.push(sql5`en_almacen = false`);
+      if (statusQ) where.push(sql5`status = ${statusQ}`);
+      const whereSQL = sql5.join(where, sql5` AND `);
+      const rowsRes = await db.execute(sql5`
+      SELECT
+        sku, nombre, sku_interno, proveedor, stock, status,
+        en_almacen,               -- NUEVO
+        created_at, updated_at    -- NUEVO
+      FROM ${sql5.raw("articulos")}
+      WHERE ${whereSQL}
+      ORDER BY ${sql5.raw(orderBy)} ${sql5.raw(orderDir)}, sku ASC
+      LIMIT ${limit} OFFSET ${offset}
+    `);
+      const totalRes = await db.execute(sql5`
+      SELECT COUNT(*)::int AS total
+      FROM ${sql5.raw("articulos")}
+      WHERE ${whereSQL}
+    `);
+      const total = Number(totalRes.rows?.[0]?.total ?? 0);
+      res.json({ data: rowsRes.rows, limit, offset, total });
     } catch (e) {
-      res.status(500).json({ ok: false, error: e?.message || String(e) });
+      console.error("GET /api/articulos error:", e);
+      res.status(500).json({ message: "No se pudieron obtener art\xEDculos" });
     }
   });
-  app.get("/api/integrations/shopify/sync-last-result", requiereAutenticacion, async (_req, res) => {
-    const last = getLastSyncResult();
-    res.json({ ok: true, last });
+  app.get("/api/marcas", requiereAutenticacion, async (_req, res) => {
+    try {
+      const r = await db.execute(sql5`SELECT codigo, nombre FROM marcas ORDER BY nombre`);
+      res.json(r.rows || []);
+    } catch (e) {
+      res.status(500).json({ message: "No se pudieron obtener marcas" });
+    }
+  });
+  app.get("/api/articulos/categorias", requiereAutenticacion, async (_req, res) => {
+    try {
+      const r = await db.execute(sql5`
+        SELECT DISTINCT categoria FROM articulos WHERE categoria IS NOT NULL ORDER BY 1`);
+      res.json((r.rows || []).map((x) => x.categoria).filter(Boolean));
+    } catch (e) {
+      res.status(500).json({ message: "No se pudieron obtener categor\xEDas" });
+    }
+  });
+  app.get("/api/articulos/:sku", requiereAutenticacion, async (req, res) => {
+    try {
+      const sku = req.params.sku;
+      const r = await db.execute(sql5`SELECT * FROM articulos WHERE sku = ${sku} LIMIT 1`);
+      const row = r.rows?.[0];
+      if (!row) return res.status(404).json({ message: "Art\xEDculo no encontrado" });
+      res.json(row);
+    } catch (e) {
+      res.status(500).json({ message: "No se pudo cargar el art\xEDculo" });
+    }
+  });
+  app.put("/api/articulos/:sku", requiereAutenticacion, async (req, res) => {
+    try {
+      const sku = req.params.sku;
+      const payload = req.body || {};
+      if (payload.status && !["activo", "inactivo"].includes(String(payload.status))) {
+        return res.status(400).json({ message: "status debe ser 'activo' o 'inactivo'" });
+      }
+      const allowed = /* @__PURE__ */ new Set([
+        "sku_interno",
+        "nombre",
+        "descripcion",
+        "proveedor",
+        "status",
+        "categoria",
+        "marca_producto",
+        "codigo_barras",
+        "garantia_meses",
+        "tipo_variante",
+        "variante",
+        "stock",
+        "costo",
+        "alto_cm",
+        "largo_cm",
+        "ancho_cm",
+        "peso_kg",
+        "peso_volumetrico",
+        "clave_producto_sat",
+        "unidad_medida_sat",
+        "clave_unidad_medida_sat"
+      ]);
+      const updates = {};
+      for (const [k, v] of Object.entries(payload)) {
+        if (allowed.has(k)) updates[k] = v;
+      }
+      if (Object.keys(updates).length === 0) return res.json({ ok: true });
+      const setNodes = Object.keys(updates).map((k) => sql5`${sql5.raw(k)} = ${updates[k]}`);
+      await db.execute(sql5`
+        UPDATE ${sql5.raw("articulos")}
+        SET ${sql5.join(setNodes, sql5`, `)}
+        WHERE sku = ${sku}
+      `);
+      const r = await db.execute(sql5`SELECT * FROM articulos WHERE sku = ${sku} LIMIT 1`);
+      res.json(r.rows?.[0] || null);
+    } catch (e) {
+      res.status(500).json({ message: e?.message || "No se pudo actualizar el art\xEDculo" });
+    }
+  });
+  const uploadImages = multer({ storage: multer.memoryStorage() });
+  app.post("/api/articulos/:sku/images", requiereAutenticacion, uploadImages.array("images", 10), async (req, res) => {
+    const fs3 = await import("fs");
+    const fsp = fs3.promises;
+    const path3 = await import("path");
+    try {
+      const sku = req.params.sku;
+      const files = req.files || [];
+      const bodyOrderRaw = req.body?.order || void 0;
+      let newOrder;
+      if (bodyOrderRaw) {
+        try {
+          newOrder = JSON.parse(bodyOrderRaw);
+        } catch {
+        }
+      }
+      const currentRes = await db.execute(sql5`SELECT imagen1, imagen2, imagen3, imagen4 FROM articulos WHERE sku = ${sku} LIMIT 1`);
+      const cur = currentRes.rows?.[0] || {};
+      const current = [cur.imagen1, cur.imagen2, cur.imagen3, cur.imagen4].filter(Boolean);
+      const baseDir = path3.join(process.cwd(), "client", "src", "images", sku, "imagenes");
+      await fsp.mkdir(baseDir, { recursive: true });
+      const saved = [];
+      for (const file of files) {
+        let name = file.originalname || `img-${Date.now()}`;
+        name = name.replace(/[^A-Za-z0-9._-]+/g, "_");
+        let final = path3.join(baseDir, name);
+        let base = name, i = 1;
+        while (fs3.existsSync(final)) {
+          const ext = path3.extname(base);
+          const stem = path3.basename(base, ext);
+          final = path3.join(baseDir, `${stem}-${i}${ext}`);
+          i++;
+        }
+        await fsp.writeFile(final, file.buffer);
+        const rel = path3.join("src", "images", sku, "imagenes", path3.basename(final)).replace(/\\/g, "/");
+        saved.push(rel);
+      }
+      let finalList = [...saved, ...current.filter((c) => !saved.includes(c))];
+      if (newOrder && Array.isArray(newOrder) && newOrder.length > 0) {
+        const byBase = (p) => p.split("/").pop() || p;
+        const map = {};
+        for (const p of finalList) map[byBase(p)] = p;
+        finalList = newOrder.map((b) => map[b]).filter(Boolean);
+        for (const p of Object.values(map)) if (!finalList.includes(p)) finalList.push(p);
+      }
+      finalList = finalList.slice(0, 4);
+      const [i1, i2, i3, i4] = [finalList[0] || null, finalList[1] || null, finalList[2] || null, finalList[3] || null];
+      await db.execute(sql5`
+        UPDATE ${sql5.raw("articulos")}
+        SET imagen1 = ${i1}, imagen2 = ${i2}, imagen3 = ${i3}, imagen4 = ${i4}
+        WHERE sku = ${sku}
+      `);
+      res.json({ imagenes: finalList });
+    } catch (e) {
+      console.error("POST /api/articulos/:sku/images error:", e);
+      res.status(500).json({ message: e?.message || "No se pudieron procesar im\xE1genes" });
+    }
+  });
+  app.get("/api/shopify/product", requiereAutenticacion, async (req, res) => {
+    try {
+      const skuInterno = String(req.query.sku_interno || "").trim();
+      if (!skuInterno) return res.status(400).json({ message: "sku_interno requerido" });
+      const q = sql5`
+        SELECT p.id as product_id, p.id_shopify, p.title, p.vendor, p.status, p.product_type,
+               array_agg(v.sku) as variant_skus
+        FROM product_links pl
+        LEFT JOIN variants v ON v.id = pl.variant_id
+        LEFT JOIN products p ON p.id = COALESCE(pl.product_id, v.product_id)
+        WHERE lower(pl.catalogo_sku) = lower(${skuInterno})
+        GROUP BY p.id, p.id_shopify, p.title, p.vendor, p.status, p.product_type
+        LIMIT 1`;
+      let r = await db.execute(q);
+      let row = r.rows?.[0];
+      if (!row) {
+        const q2 = sql5`
+          SELECT p.id as product_id, p.id_shopify, p.title, p.vendor, p.status, p.product_type,
+                 array_agg(v.sku) as variant_skus
+          FROM variants v
+          JOIN products p ON p.id = v.product_id
+          WHERE lower(v.sku) = lower(${skuInterno})
+          GROUP BY p.id, p.id_shopify, p.title, p.vendor, p.status, p.product_type
+          LIMIT 1`;
+        r = await db.execute(q2);
+        row = r.rows?.[0];
+      }
+      if (!row) return res.status(404).json({ message: "No vinculado en Shopify" });
+      res.json(row);
+    } catch (e) {
+      res.status(500).json({ message: e?.message || "Error consultando Shopify" });
+    }
+  });
+  app.put("/api/shopify/product", requiereAutenticacion, async (req, res) => {
+    try {
+      const skuInterno = String(req.body?.sku_interno || "").trim();
+      const updates = req.body?.updates || {};
+      const store = String(req.body?.store || "1");
+      if (!skuInterno) return res.status(400).json({ message: "sku_interno requerido" });
+      const q = sql5`
+        SELECT p.id as product_id
+        FROM product_links pl
+        LEFT JOIN variants v ON v.id = pl.variant_id
+        LEFT JOIN products p ON p.id = COALESCE(pl.product_id, v.product_id)
+        WHERE lower(pl.catalogo_sku) = lower(${skuInterno})
+        LIMIT 1`;
+      let r = await db.execute(q);
+      let productId = r.rows?.[0]?.product_id;
+      if (!productId) {
+        const q2 = sql5`
+          SELECT p.id as product_id
+          FROM variants v
+          JOIN products p ON p.id = v.product_id
+          WHERE lower(v.sku) = lower(${skuInterno})
+          LIMIT 1`;
+        r = await db.execute(q2);
+        productId = r.rows?.[0]?.product_id;
+      }
+      if (!productId) return res.status(404).json({ message: "Producto no localizado" });
+      const svc = new ProductService(store);
+      const out = await svc.updateProductInShopify(productId, {
+        title: updates.title,
+        vendor: updates.vendor,
+        status: updates.status,
+        tags: updates.tags
+      });
+      if (!out.success) return res.status(500).json({ message: out.error || "Error al actualizar" });
+      res.json({ ok: true, product: out.product, shopifyUpdated: out.shopifyUpdated });
+    } catch (e) {
+      res.status(500).json({ message: e?.message || "Error actualizando Shopify" });
+    }
   });
   app.get("/api/catalogo", requiereAutenticacion, async (req, res) => {
     try {
@@ -5609,34 +5890,34 @@ async function registerRoutes(app) {
                 if (costoNum != null && (Number.isNaN(costoNum) || Number(costoNum) < 0)) throw new Error("costo inv\xE1lido");
                 if (Number.isNaN(stockNum) || stockNum < 0) throw new Error("stock inv\xE1lido");
                 if (estado && !["ACTIVO", "INACTIVO"].includes(estado)) throw new Error("estado inv\xE1lido");
-                const existsByInternal = await tx.execute(sql5`SELECT 1 FROM catalogo_productos WHERE sku_interno = ${sku_interno} LIMIT 1`);
+                const existsByInternal = await tx.execute(sql5`SELECT 1 FROM articulos WHERE sku_interno = ${sku_interno} LIMIT 1`);
                 if (existsByInternal.rowCount > 0) {
                   await tx.execute(sql5`
-                    UPDATE catalogo_productos
-                    SET nombre_producto = ${nombre}, costo = ${costoNum}, stock = ${stockNum}, marca = ${marca}, categoria = ${categoria}
+                    UPDATE articulos
+                    SET nombre = ${nombre}, costo = ${costoNum}, stock = ${stockNum}, proveedor = ${marca}, categoria = ${categoria}, status = ${estado ? estado === "ACTIVO" ? "activo" : "inactivo" : null}
                     WHERE sku_interno = ${sku_interno}
                   `);
                   updated++;
                 } else if (sku) {
-                  const existsBySku = await tx.execute(sql5`SELECT 1 FROM catalogo_productos WHERE sku = ${sku} LIMIT 1`);
+                  const existsBySku = await tx.execute(sql5`SELECT 1 FROM articulos WHERE sku = ${sku} LIMIT 1`);
                   if (existsBySku.rowCount > 0) {
                     await tx.execute(sql5`
-                      UPDATE catalogo_productos
-                      SET nombre_producto = ${nombre}, costo = ${costoNum}, stock = ${stockNum}, sku_interno = ${sku_interno || null}, marca = ${marca}, categoria = ${categoria}
+                      UPDATE articulos
+                      SET nombre = ${nombre}, costo = ${costoNum}, stock = ${stockNum}, sku_interno = ${sku_interno || null}, proveedor = ${marca}, categoria = ${categoria}, status = ${estado ? estado === "ACTIVO" ? "activo" : "inactivo" : null}
                       WHERE sku = ${sku}
                     `);
                     updated++;
                   } else {
                     await tx.execute(sql5`
-                      INSERT INTO catalogo_productos (sku, sku_interno, nombre_producto, costo, stock, marca, categoria)
-                      VALUES (${sku || null}, ${sku_interno || null}, ${nombre}, ${costoNum}, ${stockNum}, ${marca}, ${categoria})
+                      INSERT INTO articulos (sku, sku_interno, nombre, costo, stock, proveedor, categoria, status)
+                      VALUES (${sku || null}, ${sku_interno || null}, ${nombre}, ${costoNum}, ${stockNum}, ${marca}, ${categoria}, ${estado ? estado === "ACTIVO" ? "activo" : "inactivo" : null})
                     `);
                     inserted++;
                   }
                 } else {
                   await tx.execute(sql5`
-                    INSERT INTO catalogo_productos (sku, sku_interno, nombre_producto, costo, stock, marca, categoria)
-                    VALUES (${null}, ${sku_interno || null}, ${nombre}, ${costoNum}, ${stockNum}, ${marca}, ${categoria})
+                    INSERT INTO articulos (sku, sku_interno, nombre, costo, stock, proveedor, categoria, status)
+                    VALUES (${null}, ${sku_interno || null}, ${nombre}, ${costoNum}, ${stockNum}, ${marca}, ${categoria}, ${estado ? estado === "ACTIVO" ? "activo" : "inactivo" : null})
                   `);
                   inserted++;
                 }
@@ -5668,9 +5949,9 @@ async function registerRoutes(app) {
       const skuInterno = String(req.params.sku_interno || "").trim();
       if (!skuInterno) return res.status(400).json({ message: "sku_interno requerido" });
       const r = await db.execute(sql5`
-        SELECT sku, marca, sku_interno, codigo_barras, nombre_producto, modelo, categoria,
-               condicion, marca_producto, variante, largo, ancho, alto, peso, foto, costo, stock
-        FROM catalogo_productos
+        SELECT sku, proveedor, sku_interno, codigo_barras, nombre, modelo, categoria,
+               condicion_producto, marca_producto, tipo_variante, variante, largo_cm, ancho_cm, alto_cm, peso_kg, imagen1, costo, stock
+        FROM articulos
         WHERE lower(sku_interno) = lower(${skuInterno})
         LIMIT 1
       `);
@@ -5679,20 +5960,20 @@ async function registerRoutes(app) {
       const parseNum = (v) => v == null ? null : Number(v);
       const out = jsonSafe({
         sku: row.sku ?? null,
-        marca: row.marca ?? null,
+        marca: row.proveedor ?? null,
         sku_interno: row.sku_interno ?? null,
         codigo_barras: row.codigo_barras ?? null,
-        nombre_producto: row.nombre_producto ?? null,
+        nombre_producto: row.nombre ?? null,
         modelo: row.modelo ?? null,
         categoria: row.categoria ?? null,
-        condicion: row.condicion ?? null,
+        condicion: row.condicion_producto ?? null,
         marca_producto: row.marca_producto ?? null,
         variante: row.variante ?? null,
-        largo: parseNum(row.largo),
-        ancho: parseNum(row.ancho),
-        alto: parseNum(row.alto),
-        peso: parseNum(row.peso),
-        foto: row.foto ?? null,
+        largo: parseNum(row.largo_cm),
+        ancho: parseNum(row.ancho_cm),
+        alto: parseNum(row.alto_cm),
+        peso: parseNum(row.peso_kg),
+        foto: row.imagen1 ?? null,
         costo: parseNum(row.costo),
         stock: row.stock == null ? 0 : Number(row.stock)
       });
@@ -5739,7 +6020,14 @@ async function registerRoutes(app) {
         "foto"
       ];
       for (const f of textualFields) {
-        if (f in b) updates[f] = str(b[f]);
+        if (f in b) {
+          const val = str(b[f]);
+          if (f === "nombre_producto") updates["nombre"] = val;
+          else if (f === "marca") updates["proveedor"] = val;
+          else if (f === "condicion") updates["condicion_producto"] = val;
+          else if (f === "foto") updates["imagen1"] = val;
+          else updates[f] = val;
+        }
       }
       const numericNonNeg = ["largo", "ancho", "alto", "peso", "costo"];
       for (const f of numericNonNeg) {
@@ -5747,7 +6035,8 @@ async function registerRoutes(app) {
           const n = num(b[f]);
           if (n != null && !Number.isFinite(n)) return res.status(400).json({ message: `${f} inv\xE1lido` });
           if (n != null && n < 0) return res.status(400).json({ message: `${f} no puede ser negativo` });
-          updates[f] = n;
+          const key = f === "largo" ? "largo_cm" : f === "ancho" ? "ancho_cm" : f === "alto" ? "alto_cm" : f === "peso" ? "peso_kg" : f;
+          updates[key] = n;
         }
       }
       if ("stock" in b) {
@@ -5763,7 +6052,7 @@ async function registerRoutes(app) {
         setFragments.push(sql5`${sql5.raw(k)} = ${v}`);
       }
       const updateSQL = sql5`
-        UPDATE catalogo_productos
+        UPDATE articulos
         SET ${sql5.join(setFragments, sql5`, `)}
         WHERE lower(sku_interno) = lower(${skuInterno})
       `;
@@ -5772,9 +6061,9 @@ async function registerRoutes(app) {
       if (rowCount === 0) return res.status(404).json({ message: "Producto no encontrado" });
       const nuevoSkuInterno = updates.sku_interno ?? skuInterno;
       const r2 = await db.execute(sql5`
-        SELECT sku, marca, sku_interno, codigo_barras, nombre_producto, modelo, categoria,
-               condicion, marca_producto, variante, largo, ancho, alto, peso, foto, costo, stock
-        FROM catalogo_productos
+        SELECT sku, proveedor, sku_interno, codigo_barras, nombre, modelo, categoria,
+               condicion_producto, marca_producto, tipo_variante, variante, largo_cm, ancho_cm, alto_cm, peso_kg, imagen1, costo, stock
+        FROM articulos
         WHERE lower(sku_interno) = lower(${nuevoSkuInterno})
         LIMIT 1
       `);
@@ -5783,20 +6072,20 @@ async function registerRoutes(app) {
       const parseNum = (v) => v == null ? null : Number(v);
       return res.json(jsonSafe({
         sku: row.sku ?? null,
-        marca: row.marca ?? null,
+        marca: row.proveedor ?? null,
         sku_interno: row.sku_interno ?? null,
         codigo_barras: row.codigo_barras ?? null,
-        nombre_producto: row.nombre_producto ?? null,
+        nombre_producto: row.nombre ?? null,
         modelo: row.modelo ?? null,
         categoria: row.categoria ?? null,
-        condicion: row.condicion ?? null,
+        condicion: row.condicion_producto ?? null,
         marca_producto: row.marca_producto ?? null,
         variante: row.variante ?? null,
-        largo: parseNum(row.largo),
-        ancho: parseNum(row.ancho),
-        alto: parseNum(row.alto),
-        peso: parseNum(row.peso),
-        foto: row.foto ?? null,
+        largo: parseNum(row.largo_cm),
+        ancho: parseNum(row.ancho_cm),
+        alto: parseNum(row.alto_cm),
+        peso: parseNum(row.peso_kg),
+        foto: row.imagen1 ?? null,
         costo: parseNum(row.costo),
         stock: row.stock == null ? 0 : Number(row.stock)
       }));
@@ -5842,9 +6131,9 @@ async function registerRoutes(app) {
         )
         UNION
         (
-          SELECT DISTINCT TRIM(COALESCE(cp.marca, '')) AS marca
-          FROM catalogo_productos cp
-          WHERE cp.marca IS NOT NULL AND cp.marca <> ''
+          SELECT DISTINCT TRIM(COALESCE(cp.proveedor, '')) AS marca
+          FROM articulos cp
+          WHERE cp.proveedor IS NOT NULL AND cp.proveedor <> ''
         )
         ORDER BY marca ASC
       `);
@@ -5868,7 +6157,7 @@ async function registerRoutes(app) {
             FROM order_items oi
             LEFT JOIN LATERAL (
               SELECT cp.*
-              FROM catalogo_productos cp
+              FROM articulos cp
               WHERE oi.sku IS NOT NULL AND (
                 lower(cp.sku_interno) = lower(oi.sku) OR lower(cp.sku) = lower(oi.sku)
               )
@@ -5886,7 +6175,7 @@ async function registerRoutes(app) {
             FROM order_items oi
             LEFT JOIN LATERAL (
               SELECT cp.*
-              FROM catalogo_productos cp
+              FROM articulos cp
               WHERE oi.sku IS NOT NULL AND (
                 lower(cp.sku_interno) = lower(oi.sku) OR lower(cp.sku) = lower(oi.sku)
               )
@@ -5949,7 +6238,7 @@ async function registerRoutes(app) {
       const bodySchema = z5.object({ sku: z5.string().min(1) });
       const { sku } = bodySchema.parse(req.body);
       const existsQ = sql5`
-        SELECT 1 FROM catalogo_productos cp
+        SELECT 1 FROM articulos cp
         WHERE lower(cp.sku_interno) = lower(${sku}) OR lower(cp.sku) = lower(${sku})
         LIMIT 1
       `;
@@ -6508,7 +6797,7 @@ async function registerRoutes(app) {
     try {
       const id = Number(req.params.id);
       const { status } = req.body || {};
-      const allowed = /* @__PURE__ */ new Set([...Object.values(TICKET_STATUS).map(String), "open", "closed"]);
+      const allowed = new Set(Object.values(TICKET_STATUS).concat(["open", "closed"]));
       if (!status || !allowed.has(String(status))) return res.status(400).json({ message: "Estado inv\xE1lido" });
       await storage.updateTicketStatus(id, String(status));
       res.status(204).send();
@@ -6536,11 +6825,11 @@ async function registerRoutes(app) {
       if (!q) return res.json([]);
       const pattern = `%${q.toLowerCase()}%`;
       const r = await db.execute(sql5`
-        SELECT sku, sku_interno, nombre_producto, costo, stock
-        FROM catalogo_productos
+        SELECT sku, sku_interno, nombre, costo, stock
+        FROM articulos
         WHERE lower(sku) LIKE ${pattern}
            OR lower(sku_interno) LIKE ${pattern}
-           OR lower(nombre_producto) LIKE ${pattern}
+           OR lower(nombre) LIKE ${pattern}
         LIMIT 20
       `);
       res.json(r.rows);

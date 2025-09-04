@@ -942,6 +942,287 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // ---------- Catálogo (catalogo_productos) ----------
+  // ---------- Artículos (nuevo catálogo) ----------
+  // GET /api/articulos (añadir nuevos filtros y campos devueltos)
+  app.get("/api/articulos", requiereAutenticacion, async (req, res) => {
+    try {
+      const limit = Math.min(Math.max(Number(req.query.limit) || 50, 1), 1000);
+      const offset = Math.max(Number(req.query.offset) || 0, 0);
+      const sku = (req.query.sku as string) || '';
+      const sku_interno = (req.query.sku_interno as string) || '';
+      const producto = (req.query.producto as string) || '';
+      const proveedor = (req.query.proveedor as string) || '';
+      const categoria = (req.query.categoria as string) || '';
+      const soloSinStock = (req.query.solo_sin_stock as string) === 'true' || (req.query.solo_sin_stock as string) === '1';
+
+      // NUEVO: filtros en_almacen y status
+      const enAlmacenQ = (req.query.en_almacen as string) || ''; // '1'/'true' | '0'/'false' | '' (todos)
+      const statusQ = (req.query.status as string) || '';        // 'activo' | 'inactivo' | '' (todos)
+
+      // NUEVO: ordenamientos permitidos
+      const orderByParam = (req.query.order_by as string) || 'nombre';
+      const orderDir = ((req.query.order_dir as string) || 'asc').toLowerCase() === 'desc' ? 'DESC' : 'ASC';
+
+      // Sanitizar columnas para ORDER BY
+      const allowedOrderBy = new Set(['nombre', 'sku', 'created_at', 'updated_at', 'stock']);
+      const orderBy = allowedOrderBy.has(orderByParam) ? orderByParam : 'nombre';
+
+      const where: SQL[] = [sql`1=1`];
+      if (sku) where.push(sql`LOWER(COALESCE(sku,'')) LIKE LOWER(${`%${sku}%`})`);
+      if (sku_interno) where.push(sql`LOWER(COALESCE(sku_interno,'')) LIKE LOWER(${`%${sku_interno}%`})`);
+      if (producto) where.push(sql`LOWER(COALESCE(nombre,'')) LIKE LOWER(${`%${producto}%`})`);
+      if (proveedor) where.push(sql`proveedor = ${proveedor}`);
+      if (categoria) where.push(sql`categoria = ${categoria}`);
+      if (soloSinStock) where.push(sql`COALESCE(stock,0) = 0`);
+
+      // NUEVO: en_almacen (true/false)
+      if (['1', 'true'].includes(enAlmacenQ)) where.push(sql`en_almacen = true`);
+      else if (['0', 'false'].includes(enAlmacenQ)) where.push(sql`en_almacen = false`);
+
+      // NUEVO: status (activo/inactivo)
+      if (statusQ) where.push(sql`status = ${statusQ}`);
+
+      const whereSQL = sql.join(where, sql` AND `);
+
+      const rowsRes = await baseDatos.execute(sql`
+      SELECT
+        sku, nombre, sku_interno, proveedor, stock, status,
+        en_almacen,               -- NUEVO
+        created_at, updated_at    -- NUEVO
+      FROM ${sql.raw('articulos')}
+      WHERE ${whereSQL}
+      ORDER BY ${sql.raw(orderBy)} ${sql.raw(orderDir)}, sku ASC
+      LIMIT ${limit} OFFSET ${offset}
+    `);
+
+      const totalRes = await baseDatos.execute(sql`
+      SELECT COUNT(*)::int AS total
+      FROM ${sql.raw('articulos')}
+      WHERE ${whereSQL}
+    `);
+      const total = Number(totalRes.rows?.[0]?.total ?? 0);
+
+      res.json({ data: rowsRes.rows, limit, offset, total });
+    } catch (e: any) {
+      console.error('GET /api/articulos error:', e);
+      res.status(500).json({ message: 'No se pudieron obtener artículos' });
+    }
+  });
+
+
+  app.get("/api/marcas", requiereAutenticacion, async (_req, res) => {
+    try {
+      const r = await baseDatos.execute(sql`SELECT codigo, nombre FROM marcas ORDER BY nombre`);
+      res.json(r.rows || []);
+    } catch (e) {
+      res.status(500).json({ message: 'No se pudieron obtener marcas' });
+    }
+  });
+
+  app.get("/api/articulos/categorias", requiereAutenticacion, async (_req, res) => {
+    try {
+      const r = await baseDatos.execute(sql`
+        SELECT DISTINCT categoria FROM articulos WHERE categoria IS NOT NULL ORDER BY 1`);
+      res.json((r.rows || []).map((x: any) => x.categoria).filter(Boolean));
+    } catch (e) {
+      res.status(500).json({ message: 'No se pudieron obtener categorías' });
+    }
+  });
+
+  app.get("/api/articulos/:sku", requiereAutenticacion, async (req, res) => {
+    try {
+      const sku = req.params.sku;
+      const r = await baseDatos.execute(sql`SELECT * FROM articulos WHERE sku = ${sku} LIMIT 1`);
+      const row = r.rows?.[0];
+      if (!row) return res.status(404).json({ message: 'Artículo no encontrado' });
+      res.json(row);
+    } catch (e) {
+      res.status(500).json({ message: 'No se pudo cargar el artículo' });
+    }
+  });
+
+  app.put("/api/articulos/:sku", requiereAutenticacion, async (req, res) => {
+    try {
+      const sku = req.params.sku;
+      const payload = req.body || {};
+      if (payload.status && !['activo', 'inactivo'].includes(String(payload.status))) {
+        return res.status(400).json({ message: "status debe ser 'activo' o 'inactivo'" });
+      }
+      const allowed = new Set([
+        'sku_interno', 'nombre', 'descripcion', 'proveedor', 'status', 'categoria', 'marca_producto', 'codigo_barras',
+        'garantia_meses', 'tipo_variante', 'variante', 'stock', 'costo', 'alto_cm', 'largo_cm', 'ancho_cm', 'peso_kg', 'peso_volumetrico',
+        'clave_producto_sat', 'unidad_medida_sat', 'clave_unidad_medida_sat'
+      ]);
+      const updates: Record<string, any> = {};
+      for (const [k, v] of Object.entries(payload)) {
+        if (allowed.has(k)) updates[k] = v;
+      }
+      if (Object.keys(updates).length === 0) return res.json({ ok: true });
+      const setNodes = Object.keys(updates).map((k) => sql`${sql.raw(k)} = ${updates[k]}`);
+      await baseDatos.execute(sql`
+        UPDATE ${sql.raw('articulos')}
+        SET ${sql.join(setNodes, sql`, `)}
+        WHERE sku = ${sku}
+      `);
+      const r = await baseDatos.execute(sql`SELECT * FROM articulos WHERE sku = ${sku} LIMIT 1`);
+      res.json(r.rows?.[0] || null);
+    } catch (e: any) {
+      res.status(500).json({ message: e?.message || 'No se pudo actualizar el artículo' });
+    }
+  });
+
+  // Imágenes: subida y reordenamiento
+  const uploadImages = multer({ storage: multer.memoryStorage() });
+  app.post("/api/articulos/:sku/images", requiereAutenticacion, uploadImages.array('images', 10), async (req: Request, res: Response) => {
+    const fs = await import('fs');
+    const fsp = fs.promises;
+    const path = await import('path');
+    try {
+      const sku = req.params.sku;
+      const files = (req.files || []) as Express.Multer.File[];
+      const bodyOrderRaw = (req.body?.order as string | undefined) || undefined;
+      let newOrder: string[] | undefined;
+      if (bodyOrderRaw) {
+        try { newOrder = JSON.parse(bodyOrderRaw) as string[]; } catch { /* ignore */ }
+      }
+
+      // Leer imágenes actuales
+      const currentRes = await baseDatos.execute(sql`SELECT imagen1, imagen2, imagen3, imagen4 FROM articulos WHERE sku = ${sku} LIMIT 1`);
+      const cur = currentRes.rows?.[0] || {};
+      const current: string[] = [cur.imagen1, cur.imagen2, cur.imagen3, cur.imagen4].filter(Boolean);
+
+      // Directorio destino
+      const baseDir = path.join(process.cwd(), 'client', 'src', 'images', sku, 'imagenes');
+      await fsp.mkdir(baseDir, { recursive: true });
+
+      const saved: string[] = [];
+      // Guardar archivos nuevos
+      for (const file of files) {
+        let name = file.originalname || `img-${Date.now()}`;
+        name = name.replace(/[^A-Za-z0-9._-]+/g, '_');
+        let final = path.join(baseDir, name);
+        let base = name, i = 1;
+        while (fs.existsSync(final)) {
+          const ext = path.extname(base);
+          const stem = path.basename(base, ext);
+          final = path.join(baseDir, `${stem}-${i}${ext}`);
+          i++;
+        }
+        await fsp.writeFile(final, file.buffer);
+        const rel = path.join('src', 'images', sku, 'imagenes', path.basename(final)).replace(/\\/g, '/');
+        saved.push(rel);
+      }
+
+      // Construir lista final
+      let finalList = [...saved, ...current.filter((c) => !saved.includes(c))];
+      if (newOrder && Array.isArray(newOrder) && newOrder.length > 0) {
+        // Orden provisto por el cliente (coincide por basename)
+        const byBase = (p: string) => p.split('/').pop() || p;
+        const map: Record<string, string> = {};
+        for (const p of finalList) map[byBase(p)] = p;
+        finalList = newOrder.map((b) => map[b]).filter(Boolean);
+        // Completar con restantes
+        for (const p of Object.values(map)) if (!finalList.includes(p)) finalList.push(p);
+      }
+      finalList = finalList.slice(0, 4);
+
+      const [i1, i2, i3, i4] = [finalList[0] || null, finalList[1] || null, finalList[2] || null, finalList[3] || null];
+      await baseDatos.execute(sql`
+        UPDATE ${sql.raw('articulos')}
+        SET imagen1 = ${i1}, imagen2 = ${i2}, imagen3 = ${i3}, imagen4 = ${i4}
+        WHERE sku = ${sku}
+      `);
+
+      res.json({ imagenes: finalList });
+    } catch (e: any) {
+      console.error('POST /api/articulos/:sku/images error:', e);
+      res.status(500).json({ message: e?.message || 'No se pudieron procesar imágenes' });
+    }
+  });
+
+  // Shopify helpers por sku_interno
+  app.get('/api/shopify/product', requiereAutenticacion, async (req, res) => {
+    try {
+      const skuInterno = String(req.query.sku_interno || '').trim();
+      if (!skuInterno) return res.status(400).json({ message: 'sku_interno requerido' });
+
+      // Intentar por product_links
+      const q = sql`
+        SELECT p.id as product_id, p.id_shopify, p.title, p.vendor, p.status, p.product_type,
+               array_agg(v.sku) as variant_skus
+        FROM product_links pl
+        LEFT JOIN variants v ON v.id = pl.variant_id
+        LEFT JOIN products p ON p.id = COALESCE(pl.product_id, v.product_id)
+        WHERE lower(pl.catalogo_sku) = lower(${skuInterno})
+        GROUP BY p.id, p.id_shopify, p.title, p.vendor, p.status, p.product_type
+        LIMIT 1`;
+      let r = await baseDatos.execute(q);
+      let row = r.rows?.[0];
+
+      if (!row) {
+        // Fallback: buscar por variants.sku
+        const q2 = sql`
+          SELECT p.id as product_id, p.id_shopify, p.title, p.vendor, p.status, p.product_type,
+                 array_agg(v.sku) as variant_skus
+          FROM variants v
+          JOIN products p ON p.id = v.product_id
+          WHERE lower(v.sku) = lower(${skuInterno})
+          GROUP BY p.id, p.id_shopify, p.title, p.vendor, p.status, p.product_type
+          LIMIT 1`;
+        r = await baseDatos.execute(q2);
+        row = r.rows?.[0];
+      }
+
+      if (!row) return res.status(404).json({ message: 'No vinculado en Shopify' });
+      res.json(row);
+    } catch (e: any) {
+      res.status(500).json({ message: e?.message || 'Error consultando Shopify' });
+    }
+  });
+
+  app.put('/api/shopify/product', requiereAutenticacion, async (req, res) => {
+    try {
+      const skuInterno = String(req.body?.sku_interno || '').trim();
+      const updates = req.body?.updates || {};
+      const store = String(req.body?.store || '1');
+      if (!skuInterno) return res.status(400).json({ message: 'sku_interno requerido' });
+
+      // Resolver product_id local
+      const q = sql`
+        SELECT p.id as product_id
+        FROM product_links pl
+        LEFT JOIN variants v ON v.id = pl.variant_id
+        LEFT JOIN products p ON p.id = COALESCE(pl.product_id, v.product_id)
+        WHERE lower(pl.catalogo_sku) = lower(${skuInterno})
+        LIMIT 1`;
+      let r = await baseDatos.execute(q);
+      let productId = r.rows?.[0]?.product_id as number | undefined;
+      if (!productId) {
+        const q2 = sql`
+          SELECT p.id as product_id
+          FROM variants v
+          JOIN products p ON p.id = v.product_id
+          WHERE lower(v.sku) = lower(${skuInterno})
+          LIMIT 1`;
+        r = await baseDatos.execute(q2);
+        productId = r.rows?.[0]?.product_id as number | undefined;
+      }
+      if (!productId) return res.status(404).json({ message: 'Producto no localizado' });
+
+      const svc = new ProductService(store);
+      const out = await svc.updateProductInShopify(productId, {
+        title: updates.title,
+        vendor: updates.vendor,
+        status: updates.status,
+        tags: updates.tags,
+      });
+      if (!out.success) return res.status(500).json({ message: out.error || 'Error al actualizar' });
+      res.json({ ok: true, product: out.product, shopifyUpdated: out.shopifyUpdated });
+    } catch (e: any) {
+      res.status(500).json({ message: e?.message || 'Error actualizando Shopify' });
+    }
+  });
+
   // GET /api/catalogo
   // Mapea columnas visibles a BD: sku->sku, sku_interno->sku_interno, nombre_producto->nombre_producto,
   // costo->costo (decimal), stock->stock (int). Campo opcional estado: si no existe en BD se deriva de stock.
@@ -1093,12 +1374,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         xlsx.utils.book_append_sheet(wb, ws, 'catalogo');
         const buf = xlsx.write(wb, { bookType: 'xlsx', type: 'buffer' });
         res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-        res.setHeader('Content-Disposition', `attachment; filename="catalogo_${new Date().toISOString().slice(0,10)}.xlsx"`);
+        res.setHeader('Content-Disposition', `attachment; filename="catalogo_${new Date().toISOString().slice(0, 10)}.xlsx"`);
         return res.send(buf);
       }
 
       // CSV
-      const headers = ['Sku Externo','Sku Interno','Producto','Costo','Inventario','Estado','Marca','Categoria'];
+      const headers = ['Sku Externo', 'Sku Interno', 'Producto', 'Costo', 'Inventario', 'Estado', 'Marca', 'Categoria'];
       const lines = [headers.join(',')];
       for (const r of mapped) {
         const row = headers.map((h) => {
@@ -1111,7 +1392,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       const csv = lines.join('\n');
       res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-      res.setHeader('Content-Disposition', `attachment; filename="catalogo_${new Date().toISOString().slice(0,10)}.csv"`);
+      res.setHeader('Content-Disposition', `attachment; filename="catalogo_${new Date().toISOString().slice(0, 10)}.csv"`);
       return res.send(csv);
     } catch (error) {
       console.error('Error en GET /api/catalogo/export:', error);
@@ -1148,7 +1429,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const rows = xlsx.utils.sheet_to_json<Record<string, any>>(ws, { defval: null, raw: true });
       if (!rows.length) return res.status(400).json({ message: 'El archivo está vacío' });
 
-      const required = ['sku','sku_interno','nombre_producto','costo','stock','estado','marca','categoria'];
+      const required = ['sku', 'sku_interno', 'nombre_producto', 'costo', 'stock', 'estado', 'marca', 'categoria'];
       const first = rows[0] || {};
       const missing = required.filter((h) => !(h in first));
       if (missing.length) {
@@ -1188,38 +1469,38 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 if (!nombre) throw new Error('nombre_producto requerido');
                 if (costoNum != null && (Number.isNaN(costoNum) || Number(costoNum) < 0)) throw new Error('costo inválido');
                 if (Number.isNaN(stockNum) || stockNum < 0) throw new Error('stock inválido');
-                if (estado && !['ACTIVO','INACTIVO'].includes(estado)) throw new Error('estado inválido');
+                if (estado && !['ACTIVO', 'INACTIVO'].includes(estado)) throw new Error('estado inválido');
 
                 // Upsert por sku_interno, fallback por sku
-                const existsByInternal = await tx.execute(sql`SELECT 1 FROM catalogo_productos WHERE sku_interno = ${sku_interno} LIMIT 1`);
+                const existsByInternal = await tx.execute(sql`SELECT 1 FROM articulos WHERE sku_interno = ${sku_interno} LIMIT 1`);
                 if ((existsByInternal as any).rowCount > 0) {
                   await tx.execute(sql`
-                    UPDATE catalogo_productos
-                    SET nombre_producto = ${nombre}, costo = ${costoNum}, stock = ${stockNum}, marca = ${marca}, categoria = ${categoria}
+                    UPDATE articulos
+                    SET nombre = ${nombre}, costo = ${costoNum}, stock = ${stockNum}, proveedor = ${marca}, categoria = ${categoria}, status = ${estado ? (estado === 'ACTIVO' ? 'activo' : 'inactivo') : null}
                     WHERE sku_interno = ${sku_interno}
                   `);
                   updated++;
                 } else if (sku) {
-                  const existsBySku = await tx.execute(sql`SELECT 1 FROM catalogo_productos WHERE sku = ${sku} LIMIT 1`);
+                  const existsBySku = await tx.execute(sql`SELECT 1 FROM articulos WHERE sku = ${sku} LIMIT 1`);
                   if ((existsBySku as any).rowCount > 0) {
                     await tx.execute(sql`
-                      UPDATE catalogo_productos
-                      SET nombre_producto = ${nombre}, costo = ${costoNum}, stock = ${stockNum}, sku_interno = ${sku_interno || null}, marca = ${marca}, categoria = ${categoria}
+                      UPDATE articulos
+                      SET nombre = ${nombre}, costo = ${costoNum}, stock = ${stockNum}, sku_interno = ${sku_interno || null}, proveedor = ${marca}, categoria = ${categoria}, status = ${estado ? (estado === 'ACTIVO' ? 'activo' : 'inactivo') : null}
                       WHERE sku = ${sku}
                     `);
                     updated++;
                   } else {
                     await tx.execute(sql`
-                      INSERT INTO catalogo_productos (sku, sku_interno, nombre_producto, costo, stock, marca, categoria)
-                      VALUES (${sku || null}, ${sku_interno || null}, ${nombre}, ${costoNum}, ${stockNum}, ${marca}, ${categoria})
+                      INSERT INTO articulos (sku, sku_interno, nombre, costo, stock, proveedor, categoria, status)
+                      VALUES (${sku || null}, ${sku_interno || null}, ${nombre}, ${costoNum}, ${stockNum}, ${marca}, ${categoria}, ${estado ? (estado === 'ACTIVO' ? 'activo' : 'inactivo') : null})
                     `);
                     inserted++;
                   }
                 } else {
                   // No sku externo, insert con sku_interno al menos
                   await tx.execute(sql`
-                    INSERT INTO catalogo_productos (sku, sku_interno, nombre_producto, costo, stock, marca, categoria)
-                    VALUES (${null}, ${sku_interno || null}, ${nombre}, ${costoNum}, ${stockNum}, ${marca}, ${categoria})
+                    INSERT INTO articulos (sku, sku_interno, nombre, costo, stock, proveedor, categoria, status)
+                    VALUES (${null}, ${sku_interno || null}, ${nombre}, ${costoNum}, ${stockNum}, ${marca}, ${categoria}, ${estado ? (estado === 'ACTIVO' ? 'activo' : 'inactivo') : null})
                   `);
                   inserted++;
                 }
@@ -1240,7 +1521,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       let reportBase64: string | undefined;
       if (errors.length) {
         const h = 'rowIndex,message';
-        const lines = [h, ...errors.map((e) => `${e.rowIndex},"${String(e.message).replace(/"/g,'""')}"`)];
+        const lines = [h, ...errors.map((e) => `${e.rowIndex},"${String(e.message).replace(/"/g, '""')}"`)];
         const csv = lines.join('\n');
         reportBase64 = Buffer.from(csv, 'utf8').toString('base64');
       }
@@ -1253,16 +1534,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // GET /api/catalogo/:sku_interno
-  // Devuelve TODOS los campos de catalogo_productos para un sku_interno dado (identificador natural para este flujo).
+  // Devuelve TODOS los campos (mapeados) desde articulos para un sku_interno dado (identificador natural para este flujo).
   app.get("/api/catalogo/:sku_interno", requiereAutenticacion, async (req, res) => {
     try {
       const skuInterno = String(req.params.sku_interno || "").trim();
       if (!skuInterno) return res.status(400).json({ message: "sku_interno requerido" });
 
       const r = await baseDatos.execute(sql`
-        SELECT sku, marca, sku_interno, codigo_barras, nombre_producto, modelo, categoria,
-               condicion, marca_producto, variante, largo, ancho, alto, peso, foto, costo, stock
-        FROM catalogo_productos
+        SELECT sku, proveedor, sku_interno, codigo_barras, nombre, modelo, categoria,
+               condicion_producto, marca_producto, tipo_variante, variante, largo_cm, ancho_cm, alto_cm, peso_kg, imagen1, costo, stock
+        FROM articulos
         WHERE lower(sku_interno) = lower(${skuInterno})
         LIMIT 1
       `);
@@ -1273,20 +1554,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const parseNum = (v: any) => (v == null ? null : Number(v));
       const out = jsonSafe({
         sku: row.sku ?? null,
-        marca: row.marca ?? null,
+        marca: row.proveedor ?? null,
         sku_interno: row.sku_interno ?? null,
         codigo_barras: row.codigo_barras ?? null,
-        nombre_producto: row.nombre_producto ?? null,
+        nombre_producto: row.nombre ?? null,
         modelo: row.modelo ?? null,
         categoria: row.categoria ?? null,
-        condicion: row.condicion ?? null,
+        condicion: row.condicion_producto ?? null,
         marca_producto: row.marca_producto ?? null,
         variante: row.variante ?? null,
-        largo: parseNum(row.largo),
-        ancho: parseNum(row.ancho),
-        alto: parseNum(row.alto),
-        peso: parseNum(row.peso),
-        foto: row.foto ?? null,
+        largo: parseNum(row.largo_cm),
+        ancho: parseNum(row.ancho_cm),
+        alto: parseNum(row.alto_cm),
+        peso: parseNum(row.peso_kg),
+        foto: row.imagen1 ?? null,
         costo: parseNum(row.costo),
         stock: row.stock == null ? 0 : Number(row.stock),
       });
@@ -1331,7 +1612,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         "condicion", "variante", "marca", "marca_producto", "categoria", "foto",
       ] as const;
       for (const f of textualFields) {
-        if (f in b) updates[f] = str(b[f]);
+        if (f in b) {
+          const val = str(b[f]);
+          if (f === 'nombre_producto') updates['nombre'] = val;
+          else if (f === 'marca') updates['proveedor'] = val;
+          else if (f === 'condicion') updates['condicion_producto'] = val;
+          else if (f === 'foto') updates['imagen1'] = val;
+          else updates[f] = val;
+        }
       }
 
       // Numéricos (>=0 donde aplica)
@@ -1341,7 +1629,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const n = num(b[f]);
           if (n != null && !Number.isFinite(n)) return res.status(400).json({ message: `${f} inválido` });
           if (n != null && n < 0) return res.status(400).json({ message: `${f} no puede ser negativo` });
-          updates[f] = n;
+          const key = f === 'largo' ? 'largo_cm' : f === 'ancho' ? 'ancho_cm' : f === 'alto' ? 'alto_cm' : f === 'peso' ? 'peso_kg' : f;
+          updates[key] = n;
         }
       }
       if ("stock" in b) {
@@ -1360,7 +1649,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         setFragments.push(sql`${sql.raw(k)} = ${v}`);
       }
       const updateSQL = sql`
-        UPDATE catalogo_productos
+        UPDATE articulos
         SET ${sql.join(setFragments, sql`, `)}
         WHERE lower(sku_interno) = lower(${skuInterno})
       `;
@@ -1373,9 +1662,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Devuelve el recurso actualizado
       const nuevoSkuInterno = updates.sku_interno ?? skuInterno;
       const r2 = await baseDatos.execute(sql`
-        SELECT sku, marca, sku_interno, codigo_barras, nombre_producto, modelo, categoria,
-               condicion, marca_producto, variante, largo, ancho, alto, peso, foto, costo, stock
-        FROM catalogo_productos
+        SELECT sku, proveedor, sku_interno, codigo_barras, nombre, modelo, categoria,
+               condicion_producto, marca_producto, tipo_variante, variante, largo_cm, ancho_cm, alto_cm, peso_kg, imagen1, costo, stock
+        FROM articulos
         WHERE lower(sku_interno) = lower(${nuevoSkuInterno})
         LIMIT 1
       `);
@@ -1384,20 +1673,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const parseNum = (v: any) => (v == null ? null : Number(v));
       return res.json(jsonSafe({
         sku: row.sku ?? null,
-        marca: row.marca ?? null,
+        marca: row.proveedor ?? null,
         sku_interno: row.sku_interno ?? null,
         codigo_barras: row.codigo_barras ?? null,
-        nombre_producto: row.nombre_producto ?? null,
+        nombre_producto: row.nombre ?? null,
         modelo: row.modelo ?? null,
         categoria: row.categoria ?? null,
-        condicion: row.condicion ?? null,
+        condicion: row.condicion_producto ?? null,
         marca_producto: row.marca_producto ?? null,
         variante: row.variante ?? null,
-        largo: parseNum(row.largo),
-        ancho: parseNum(row.ancho),
-        alto: parseNum(row.alto),
-        peso: parseNum(row.peso),
-        foto: row.foto ?? null,
+        largo: parseNum(row.largo_cm),
+        ancho: parseNum(row.ancho_cm),
+        alto: parseNum(row.alto_cm),
+        peso: parseNum(row.peso_kg),
+        foto: row.imagen1 ?? null,
         costo: parseNum(row.costo),
         stock: row.stock == null ? 0 : Number(row.stock),
       }));
@@ -1452,9 +1741,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         )
         UNION
         (
-          SELECT DISTINCT TRIM(COALESCE(cp.marca, '')) AS marca
-          FROM catalogo_productos cp
-          WHERE cp.marca IS NOT NULL AND cp.marca <> ''
+          SELECT DISTINCT TRIM(COALESCE(cp.proveedor, '')) AS marca
+          FROM articulos cp
+          WHERE cp.proveedor IS NOT NULL AND cp.proveedor <> ''
         )
         ORDER BY marca ASC
       `);
@@ -1483,7 +1772,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             FROM order_items oi
             LEFT JOIN LATERAL (
               SELECT cp.*
-              FROM catalogo_productos cp
+              FROM articulos cp
               WHERE oi.sku IS NOT NULL AND (
                 lower(cp.sku_interno) = lower(oi.sku) OR lower(cp.sku) = lower(oi.sku)
               )
@@ -1501,7 +1790,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             FROM order_items oi
             LEFT JOIN LATERAL (
               SELECT cp.*
-              FROM catalogo_productos cp
+              FROM articulos cp
               WHERE oi.sku IS NOT NULL AND (
                 lower(cp.sku_interno) = lower(oi.sku) OR lower(cp.sku) = lower(oi.sku)
               )
@@ -1577,7 +1866,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { sku } = bodySchema.parse(req.body);
 
       const existsQ = sql`
-        SELECT 1 FROM catalogo_productos cp
+        SELECT 1 FROM articulos cp
         WHERE lower(cp.sku_interno) = lower(${sku}) OR lower(cp.sku) = lower(${sku})
         LIMIT 1
       `;
@@ -2254,7 +2543,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const id = Number(req.params.id);
       const { status } = req.body || {};
-      const allowed = new Set(Object.values(TICKET_STATUS).concat(['open','closed']));
+      const allowed = new Set(Object.values(TICKET_STATUS).concat(['open', 'closed']));
       if (!status || !allowed.has(String(status))) return res.status(400).json({ message: "Estado inválido" });
       await almacenamiento.updateTicketStatus(id, String(status));
       res.status(204).send();
@@ -2286,11 +2575,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!q) return res.json([]);
       const pattern = `%${q.toLowerCase()}%`;
       const r = await baseDatos.execute(sql`
-        SELECT sku, sku_interno, nombre_producto, costo, stock
-        FROM catalogo_productos
+        SELECT sku, sku_interno, nombre, costo, stock
+        FROM articulos
         WHERE lower(sku) LIKE ${pattern}
            OR lower(sku_interno) LIKE ${pattern}
-           OR lower(nombre_producto) LIKE ${pattern}
+           OR lower(nombre) LIKE ${pattern}
         LIMIT 20
       `);
       res.json(r.rows);

@@ -1,3 +1,45 @@
+CREATE TABLE articulos(
+    sku text,
+    proveedor text,
+    sku_interno text,
+    codigo_barras text,
+    nombre text,
+    modelo text,
+    categoria text,
+    condicion_producto text,
+    marca_producto text,
+    variante text,
+    largo_cm numeric,
+    ancho_cm numeric,
+    alto_cm numeric,
+    peso_kg numeric,
+    imagen1 text,
+    costo numeric,
+    stock integer,
+    descripcion text,
+    status text NOT NULL DEFAULT 'activo'::text,
+    garantia_meses integer,
+    tipo_variante text,
+    peso_volumetrico numeric(10,3),
+    imagen2 text,
+    imagen3 text,
+    imagen4 text,
+    clave_producto_sat text,
+    unidad_medida_sat text,
+    clave_unidad_medida_sat text,
+    en_almacen boolean NOT NULL DEFAULT false,
+    created_at timestamp without time zone DEFAULT now(),
+    updated_at timestamp without time zone DEFAULT now(),
+    CONSTRAINT articulos_status_check CHECK (status = ANY (ARRAY['activo'::text, 'inactivo'::text]))
+);
+CREATE UNIQUE INDEX articulos_sku_uniq ON public.articulos USING btree (sku);
+CREATE INDEX ix_articulos_proveedor ON public.articulos USING btree (proveedor);
+CREATE INDEX ix_articulos_categoria ON public.articulos USING btree (categoria);
+CREATE INDEX ix_articulos_sku_interno ON public.articulos USING btree (sku_interno);
+CREATE INDEX ix_articulos_nombre ON public.articulos USING btree (nombre);
+CREATE INDEX ix_articulos_status ON public.articulos USING btree (status);
+CREATE INDEX ix_articulos_stock ON public.articulos USING btree (stock);
+
 CREATE TABLE brands(
     id SERIAL NOT NULL,
     name text NOT NULL,
@@ -22,27 +64,6 @@ CREATE TABLE carriers(
 CREATE UNIQUE INDEX carriers_code_unique ON public.carriers USING btree (code);
 
 
-CREATE TABLE catalogo_productos(
-    sku text,
-    marca text,
-    sku_interno text,
-    codigo_barras text,
-    nombre_producto text,
-    modelo text,
-    categoria text,
-    condicion text,
-    marca_producto text,
-    variante text,
-    largo numeric,
-    ancho numeric,
-    alto numeric,
-    peso numeric,
-    foto text,
-    costo numeric,
-    stock integer
-);
-
-
 CREATE TABLE channels(
     id SERIAL NOT NULL,
     code text NOT NULL,
@@ -56,6 +77,37 @@ CREATE TABLE channels(
 );
 CREATE UNIQUE INDEX channels_code_unique ON public.channels USING btree (code);
 
+CREATE TABLE combos(
+    sku_combo text NOT NULL,
+    codigo_marca text NOT NULL,
+    titulo text,
+    descripcion text,
+    activo boolean NOT NULL DEFAULT true,
+    categoria text NOT NULL,
+    PRIMARY KEY(sku_combo),
+    CONSTRAINT combos_codigo_marca_fkey FOREIGN key(codigo_marca) REFERENCES marcas(codigo),
+    CONSTRAINT combos_categoria_check CHECK (categoria = ANY (ARRAY['compuesto'::text, 'permisivo'::text]))
+);
+CREATE INDEX ix_combos_codigo_marca ON public.combos USING btree (codigo_marca);
+
+CREATE TABLE combo_items(
+    id SERIAL NOT NULL,
+    sku_combo text NOT NULL,
+    sku_marca text NOT NULL,
+    cantidad integer NOT NULL,
+    PRIMARY KEY(id),
+    CONSTRAINT combo_items_sku_combo_fkey FOREIGN key(sku_combo) REFERENCES combos(sku_combo),
+    CONSTRAINT combo_items_sku_marca_fkey FOREIGN key(sku_marca) REFERENCES catalogo_productos(sku),
+    CONSTRAINT combo_items_cantidad_check CHECK (cantidad >= 1)
+);
+CREATE INDEX ix_combo_items_sku_combo ON public.combo_items USING btree (sku_combo);
+CREATE INDEX ix_combo_items_sku_marca ON public.combo_items USING btree (sku_marca);
+
+CREATE TABLE marcas(
+    codigo text NOT NULL,
+    nombre text NOT NULL,
+    PRIMARY KEY(codigo)
+);
 
 CREATE TABLE logistic_services(
     id SERIAL NOT NULL,

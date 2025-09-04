@@ -49,19 +49,19 @@ export class CatalogStorage {
 
       // Obtener productos usando SQL directo
       const productos = await baseDatos.execute(sql`
-        SELECT sku, marca, nombre_producto, categoria, marca_producto, 
+        SELECT sku, proveedor, nombre, categoria, marca_producto,
                stock, costo, sku_interno, codigo_barras
-        FROM catalogo_productos 
-        WHERE nombre_producto IS NOT NULL
-        ORDER BY nombre_producto
+        FROM articulos 
+        WHERE nombre IS NOT NULL
+        ORDER BY nombre
         LIMIT ${pageSize} OFFSET ${offset}
       `);
 
       // Contar total
       const totalResult = await baseDatos.execute(sql`
         SELECT COUNT(*) as total 
-        FROM catalogo_productos 
-        WHERE nombre_producto IS NOT NULL
+        FROM articulos 
+        WHERE nombre IS NOT NULL
       `);
 
       const total = Number(totalResult.rows[0]?.total ?? 0);
@@ -69,7 +69,7 @@ export class CatalogStorage {
       return {
         rows: productos.rows.map((p: any) => ({
           id: p.sku, // Usar SKU como ID único
-          nombre: p.nombre_producto,
+          nombre: p.nombre,
           sku: p.sku,
           categoria: p.categoria,
           marca: p.marca_producto,
@@ -94,7 +94,7 @@ export class CatalogStorage {
     try {
       const result = await baseDatos.execute(sql`
         SELECT DISTINCT categoria 
-        FROM catalogo_productos 
+        FROM articulos 
         WHERE categoria IS NOT NULL 
         ORDER BY categoria
       `);
@@ -112,8 +112,8 @@ export class CatalogStorage {
   async createProduct(datos: any): Promise<any> {
     try {
       await baseDatos.execute(sql`
-        INSERT INTO catalogo_productos (
-          sku, nombre_producto, categoria, marca_producto, stock, costo
+        INSERT INTO articulos (
+          sku, nombre, categoria, marca_producto, stock, costo
         ) VALUES (
           ${datos.sku}, 
           ${datos.nombre}, 
@@ -144,9 +144,9 @@ export class CatalogStorage {
   async updateProduct(id: string, datos: any): Promise<any> {
     try {
       await baseDatos.execute(sql`
-        UPDATE catalogo_productos 
+        UPDATE articulos 
         SET 
-          nombre_producto = ${datos.nombre || null},
+          nombre = ${datos.nombre || null},
           categoria = ${datos.categoria || null},
           marca_producto = ${datos.marca || null},
           stock = ${datos.inventario || 0},
@@ -174,7 +174,7 @@ export class CatalogStorage {
   async deleteProduct(id: string): Promise<void> {
     try {
       await baseDatos.execute(sql`
-        DELETE FROM catalogo_productos WHERE sku = ${id}
+        DELETE FROM articulos WHERE sku = ${id}
       `);
     } catch (error) {
       console.error("Error deleting product:", error);

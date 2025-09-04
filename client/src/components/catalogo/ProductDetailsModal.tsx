@@ -110,7 +110,7 @@ export default function ProductDetailsModal({ open, onOpenChange, skuInterno }: 
         </DialogHeader>
 
         {isLoading ? (
-          <div className="py-12 flex items-center justify-center text-muted-foreground"><Loader2 className="h-5 w-5 mr-2 animate-spin" /> Cargando...</div>
+          <div className="py-12 flex items-center justify-center"><Loader2 className="h-5 w-5 mr-2 animate-spin" /> Cargando...</div>
         ) : isError || !data ? (
           <Alert>
             <AlertDescription>
@@ -121,7 +121,7 @@ export default function ProductDetailsModal({ open, onOpenChange, skuInterno }: 
         ) : (
           <div className="space-y-4">
             <div className="flex items-center justify-between">
-              <div className="text-sm text-muted-foreground">SKU Interno: <span className="font-mono">{data.sku_interno || skuInterno}</span></div>
+              <div className="text-sm">SKU Interno: <span className="font-mono">{data.sku_interno || skuInterno}</span></div>
               <div className="flex items-center gap-2">
                 <Button variant="outline" size="sm" onClick={resetForm} disabled={disabled}>
                   Reset
@@ -216,11 +216,11 @@ export default function ProductDetailsModal({ open, onOpenChange, skuInterno }: 
                   </div>
                   <div>
                     <Label>Peso volumétrico (kg)</Label>
-                    <div className="h-9 flex items-center px-3 rounded-md border bg-muted/50">{formatKg(volumetric)}</div>
+                    <div className="h-9 flex items-center px-3 rounded-md border">{formatKg(volumetric)}</div>
                   </div>
                   <div>
                     <Label>Peso facturable (kg)</Label>
-                    <div className="h-9 flex items-center px-3 rounded-md border bg-muted/50">{formatKg(chargeable)}</div>
+                    <div className="h-9 flex items-center px-3 rounded-md border">{formatKg(chargeable)}</div>
                   </div>
                   <div className="flex items-center">
                     <Button variant="outline" onClick={() => onChange("peso", Number(chargeable.toFixed(2)))}>
@@ -237,7 +237,7 @@ export default function ProductDetailsModal({ open, onOpenChange, skuInterno }: 
                     <Input value={form.foto ?? ""} onChange={(e) => onChange("foto", e.target.value)} placeholder="https://..." />
                   </div>
                 </div>
-                <div className="border rounded-md p-3 h-64 flex items-center justify-center bg-muted/20">
+                <div className="border rounded-md p-3 h-64 flex items-center justify-center">
                   {form.foto && isLikelyUrl(form.foto) ? (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img src={form.foto!} alt="Preview" className="max-h-60 object-contain" />
@@ -257,7 +257,7 @@ export default function ProductDetailsModal({ open, onOpenChange, skuInterno }: 
                     <Label>Costo</Label>
                     <Input type="number" min={0} step="0.01" value={form.costo ?? 0} onChange={(e) => onChange("costo", e.target.value === '' ? null : Math.max(0, Number(e.target.value) || 0))} />
                   </div>
-                  <div className="col-span-2 flex items-end text-sm text-muted-foreground">
+                  <div className="col-span-2 flex items-end text-sm">
                     Sugerencia: {formatCurrencyMX(form.costo ?? 0)}
                   </div>
                 </div>
@@ -265,9 +265,9 @@ export default function ProductDetailsModal({ open, onOpenChange, skuInterno }: 
 
               <TabsContent value="shopify" className="space-y-3 pt-4">
                 {shopifyLoading ? (
-                  <div className="py-4 text-muted-foreground flex items-center"><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Consultando vínculo...</div>
+                  <div className="py-4 flex items-center"><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Consultando vínculo...</div>
                 ) : shopifyError ? (
-                  <div className="text-sm text-muted-foreground">No conectado</div>
+                  <div className="text-sm">No conectado</div>
                 ) : (
                   <div className="flex items-center gap-2">
                     <Link2 className="h-4 w-4" />
@@ -283,7 +283,7 @@ export default function ProductDetailsModal({ open, onOpenChange, skuInterno }: 
 
               {showComposition && (
                 <TabsContent value="composicion" className="space-y-3 pt-4">
-                  <div className="p-3 rounded-md border bg-muted/10 text-sm text-muted-foreground">
+                  <div className="p-3 rounded-md border text-sm">
                     Composición: Sin composición definida todavía.
                   </div>
                 </TabsContent>

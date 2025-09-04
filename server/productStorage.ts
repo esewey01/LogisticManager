@@ -47,9 +47,18 @@ export class ProductStorage {
     }
     const offset = (page - 1) * pageSize;
 
-    // columnas permitidas para ORDER BY / searchField
+    // columnas permitidas para ORDER BY / searchField (UI)
     const validCols = ['sku', 'sku_interno', 'codigo_barras', 'nombre_producto', 'categoria', 'marca', 'marca_producto'] as const;
-    const orderCol = validCols.includes(orderBy as any) ? orderBy : 'nombre_producto';
+    const mapCol = (ui: string) => ({
+      sku: 'sku',
+      sku_interno: 'sku_interno',
+      codigo_barras: 'codigo_barras',
+      nombre_producto: 'nombre',
+      categoria: 'categoria',
+      marca: 'proveedor',
+      marca_producto: 'marca_producto',
+    } as Record<string, string>)[ui] || ui;
+    const orderCol = validCols.includes(orderBy as any) ? mapCol(orderBy as any) : 'nombre';
     const orderDirection = orderDir === 'desc' ? sql.raw('DESC') : sql.raw('ASC');
 
     // WHERE dinámico
@@ -57,68 +66,84 @@ export class ProductStorage {
 
     if (search) {
       if (searchField && (validCols as readonly string[]).includes(searchField)) {
-        // LOWER(COALESCE(col,'')) LIKE LOWER(%term%)
-        whereParts.push(
-          sql`LOWER(COALESCE(${sql.raw(searchField)}, '')) LIKE LOWER(${`%${search.toLowerCase()}%`})`
-        );
+        const realCol = mapCol(searchField);
+        whereParts.push(sql`LOWER(COALESCE(${sql.raw(realCol)}, '')) LIKE LOWER(${`%${search.toLowerCase()}%`})`);
       } else {
         const s = `%${search.toLowerCase()}%`;
         whereParts.push(sql`(
-        LOWER(COALESCE(sku,'')) LIKE LOWER(${s})
-        OR LOWER(COALESCE(sku_interno,'')) LIKE LOWER(${s})
-        OR LOWER(COALESCE(codigo_barras,'')) LIKE LOWER(${s})
-        OR LOWER(COALESCE(nombre_producto,'')) LIKE LOWER(${s})
-      )`);
+          LOWER(COALESCE(sku,'')) LIKE LOWER(${s})
+          OR LOWER(COALESCE(sku_interno,'')) LIKE LOWER(${s})
+          OR LOWER(COALESCE(codigo_barras,'')) LIKE LOWER(${s})
+          OR LOWER(COALESCE(nombre,'')) LIKE LOWER(${s})
+        )`);
       }
     }
-    if (marca) whereParts.push(sql`marca = ${marca}`);
+    if (marca) whereParts.push(sql`proveedor = ${marca}`);
     if (categoria) whereParts.push(sql`categoria = ${categoria}`);
-    if (condicion) whereParts.push(sql`condicion = ${condicion}`);
+    if (condicion) whereParts.push(sql`condicion_producto = ${condicion}`);
     if (marca_producto) whereParts.push(sql`marca_producto = ${marca_producto}`);
     if (stockEq0) whereParts.push(sql`COALESCE(stock, 0) = 0`);
     if (typeof stockGte === 'number' && !Number.isNaN(stockGte)) whereParts.push(sql`COALESCE(stock, 0) >= ${stockGte}`);
 
     const whereSQL = sql.join(whereParts, sql` AND `);
 
-    // Consulta principal
+    // Consulta principal sobre articulos
     const productos = await baseDatos.execute(sql`
-    SELECT
-      sku, marca, sku_interno, codigo_barras, nombre_producto, modelo, categoria,
-      condicion, marca_producto, variante, largo, ancho, alto, peso, foto, costo, stock
-    FROM ${sql.raw('catalogo_productos')}
-    WHERE ${whereSQL}
-    ORDER BY ${sql.raw(orderCol)} ${orderDirection}
-    LIMIT ${pageSize} OFFSET ${offset}
-  `);
+      SELECT
+        sku,
+        proveedor,
+        sku_interno,
+        codigo_barras,
+        nombre,
+        modelo,
+        categoria,
+        condicion_producto,
+        marca_producto,
+        tipo_variante,
+        variante,
+        largo_cm,
+        ancho_cm,
+        alto_cm,
+        peso_kg,
+        imagen1,
+        costo,
+        stock,
+        status
+      FROM ${sql.raw('articulos')}
+      WHERE ${whereSQL}
+      ORDER BY ${sql.raw(orderCol)} ${orderDirection}
+      LIMIT ${pageSize} OFFSET ${offset}
+    `);
 
     // Conteo
     const totalRes = await baseDatos.execute(sql`
-    SELECT COUNT(*)::int AS total
-    FROM ${sql.raw('catalogo_productos')}
-    WHERE ${whereSQL}
-  `);
+      SELECT COUNT(*)::int AS total
+      FROM ${sql.raw('articulos')}
+      WHERE ${whereSQL}
+    `);
 
     const total = Number(totalRes.rows[0]?.total ?? 0);
 
     return {
       rows: productos.rows.map((p: any) => ({
         sku: p.sku,
-        marca: p.marca,
+        marca: p.proveedor,
         sku_interno: p.sku_interno,
         codigo_barras: p.codigo_barras,
-        nombre_producto: p.nombre_producto,
+        nombre_producto: p.nombre,
         modelo: p.modelo,
         categoria: p.categoria,
-        condicion: p.condicion,
+        condicion: p.condicion_producto,
         marca_producto: p.marca_producto,
         variante: p.variante,
-        largo: p.largo ? Number(p.largo) : null,
-        ancho: p.ancho ? Number(p.ancho) : null,
-        alto: p.alto ? Number(p.alto) : null,
-        peso: p.peso ? Number(p.peso) : null,
-        foto: p.foto,
+        largo: p.largo_cm ? Number(p.largo_cm) : null,
+        ancho: p.ancho_cm ? Number(p.ancho_cm) : null,
+        alto: p.alto_cm ? Number(p.alto_cm) : null,
+        peso: p.peso_kg ? Number(p.peso_kg) : null,
+        foto: p.imagen1,
         costo: p.costo ? Number(p.costo) : null,
         stock: p.stock ? Number(p.stock) : 0,
+        status: p.status ?? null,
       })),
       total, page, pageSize
     };
@@ -132,18 +157,18 @@ export class ProductStorage {
     const valNodes = cols.map((c) => sql`${product[c]}`);
 
     const result = await baseDatos.execute(sql`
-    INSERT INTO ${sql.raw('catalogo_productos')}
-      (${sql.join(colNodes, sql`, `)})
-    VALUES
-      (${sql.join(valNodes, sql`, `)})
-    RETURNING *
-  `);
+      INSERT INTO ${sql.raw('articulos')}
+        (${sql.join(colNodes, sql`, `)})
+      VALUES
+        (${sql.join(valNodes, sql`, `)})
+      RETURNING *
+    `);
 
     return result.rows[0];
   }
 
   async deleteCatalogProduct(sku: string) {
-    await baseDatos.execute(sql`DELETE FROM catalogo_productos WHERE sku = ${sku}`);
+    await baseDatos.execute(sql`DELETE FROM articulos WHERE sku = ${sku}`);
     return { success: true };
   }
 
@@ -157,10 +182,10 @@ export class ProductStorage {
       const setNodes = fields.map((f) => sql`${sql.raw(f)} = ${updates[f]}`);
 
       await baseDatos.execute(sql`
-      UPDATE ${sql.raw('catalogo_productos')}
-      SET ${sql.join(setNodes, sql`, `)}
-      WHERE sku = ${sku}
-    `);
+        UPDATE ${sql.raw('articulos')}
+        SET ${sql.join(setNodes, sql`, `)}
+        WHERE sku = ${sku}
+      `);
 
       return { success: true };
     } catch (error) {
@@ -174,10 +199,10 @@ export class ProductStorage {
   async getCatalogFacets() {
     try {
       const [marcas, categorias, condiciones, marcasProducto] = await Promise.all([
-        baseDatos.execute(sql`SELECT DISTINCT marca FROM catalogo_productos WHERE marca IS NOT NULL ORDER BY marca`),
-        baseDatos.execute(sql`SELECT DISTINCT categoria FROM catalogo_productos WHERE categoria IS NOT NULL ORDER BY categoria`),
-        baseDatos.execute(sql`SELECT DISTINCT condicion FROM catalogo_productos WHERE condicion IS NOT NULL ORDER BY condicion`),
-        baseDatos.execute(sql`SELECT DISTINCT marca_producto FROM catalogo_productos WHERE marca_producto IS NOT NULL ORDER BY marca_producto`)
+        baseDatos.execute(sql`SELECT DISTINCT proveedor AS marca FROM articulos WHERE proveedor IS NOT NULL ORDER BY proveedor`),
+        baseDatos.execute(sql`SELECT DISTINCT categoria FROM articulos WHERE categoria IS NOT NULL ORDER BY categoria`),
+        baseDatos.execute(sql`SELECT DISTINCT condicion_producto AS condicion FROM articulos WHERE condicion_producto IS NOT NULL ORDER BY condicion_producto`),
+        baseDatos.execute(sql`SELECT DISTINCT marca_producto FROM articulos WHERE marca_producto IS NOT NULL ORDER BY marca_producto`)
       ]);
 
       return {

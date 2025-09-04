@@ -38,7 +38,7 @@ export default function Sidebar({ collapsed }: SidebarProps) {
       label: "Tickets",
       badge: null,
     },
-    {
+   /* {
       path: "/catalogo",
       icon: "fas fa-cube",
       label: "Catálogo",
@@ -60,6 +60,18 @@ export default function Sidebar({ collapsed }: SidebarProps) {
       path: "/productos-unificada",
       icon: "fas fa-layer-group",
       label: "Productos Pro",
+      badge: null,
+    },*/
+    {
+      path: "/articulos",
+      icon: "fas fa-cube",
+      label: "Artículos",
+      badge: null,
+    },
+    {
+      path: "/combos",
+      icon: "fas fa-layer-group",
+      label: "Combos",
       badge: null,
     },
   ];
@@ -95,10 +107,11 @@ export default function Sidebar({ collapsed }: SidebarProps) {
             {item.path === '/' && <PieChart className="h-5 w-5" />}
             {item.path === '/pedidos' && <ShoppingBag className="h-5 w-5" />}
             {item.path === '/tickets' && <Ticket className="h-5 w-5" />}
-            {item.path === '/catalogo' && <Package className="h-5 w-5" />}
+            {(item.path === '/catalogo' || item.path === '/articulos') && <Package className="h-5 w-5" />}
             {item.path === '/paqueteria' && <Truck className="h-5 w-5" />}
             {item.path === '/productos' && <Boxes className="h-5 w-5" />}
             {item.path === '/productos-unificada' && <Layers className="h-5 w-5" />}
+            {item.path === '/combos' && <Layers className="h-5 w-5" />}
             {item.path === '/admin/usuarios' && <Users className="h-5 w-5" />}
             {item.path === '/config' && <Settings className="h-5 w-5" />}
           </span>

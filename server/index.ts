@@ -31,6 +31,8 @@ import { setupVite, serveStatic, log } from "./vite";
 import { createServer } from "http";
 import { attachSockets } from "./socketio";
 
+//combos
+import combosRouter from "./route/combos";
 // Crea la aplicación Express
 const aplicacion = express();
 
@@ -53,6 +55,9 @@ aplicacion.use(express.json());
 
 // Middleware para parsear datos de formularios (application/x-www-form-urlencoded)
 aplicacion.use(express.urlencoded({ extended: true }));
+
+// Rutas de combos
+aplicacion.use("/api/combos", combosRouter);
 
 // Middleware para subida de archivos
 aplicacion.use(fileUpload({
