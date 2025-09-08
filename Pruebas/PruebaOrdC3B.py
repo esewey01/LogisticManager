@@ -1,16 +1,24 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
 """
-Modulo para integración con Shopify.
+Módulo para integración con Shopify.
 Gestiona creación de órdenes y estados BIW: Recibida, Enviada, Entregada, Cancelada.
-+ Soporte de Metafields (definición, escritura y lectura): "logistics.delivery_date"
++ Soporte de Metafields (definición, escritura y lectura):
+    - Logistica.FechaEntrega (date)
+    - Logistica.EnTransito   (date)
+
 Autor: David Velasquez / ULUM
 Fecha: 2025
 """
+
 import requests
 import json
 import os
-from typing import Optional, Tuple, Any, Dict
+from typing import Optional, Any, Dict
+from datetime import datetime
 
-# --- CONFIGURACIÓN DE TIENDA ---
+# -------------------- CONFIGURACIÓN DE TIENDA --------------------
 SHOP_NAME = 'c3b13f-2'
 ACCESS_TOKEN = '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'
 API_VERSION = '2025-07'
@@ -21,17 +29,22 @@ HEADERS = {
     "Content-Type": "application/json"
 }
 
-# --- CONFIG METAFIELD POR DEFECTO ---
+# -------------------- CONFIG METAFIELDS --------------------
 MF_NAMESPACE = "Logistica"
-MF_KEY = "FechaEntrega"      # cambia si quieres otro key
-MF_TYPE = "date"              # usa "date_time" si necesitas hora
+
+# Fecha de Entrega
+MF_ENTREGA_KEY = "FechaEntrega"   # type: date (YYYY-MM-DD)
+MF_ENTREGA_TYPE = "date"
+
+# EnTransito
+MF_TRANSITO_KEY = "EnTransito"    # type: date (YYYY-MM-DD)
+MF_TRANSITO_TYPE = "date"
 
 # Archivo para almacenar el último número de orden
 ORDER_COUNTER_FILE = "order_counter.txt"
 
 
 # -------------------- HELPERS GENERALES --------------------
-
 def get_next_order_number():
     """Obtiene y actualiza el siguiente número de orden WWP"""
     if os.path.exists(ORDER_COUNTER_FILE):
@@ -65,7 +78,6 @@ def graphql_request(query: str, variables: Optional[Dict[str, Any]] = None) -> D
     try:
         r.raise_for_status()
     except requests.HTTPError as e:
-        # Intenta imprimir detalles útiles del cuerpo
         try:
             print("GraphQL error response:", r.json())
         except Exception:
@@ -74,116 +86,83 @@ def graphql_request(query: str, variables: Optional[Dict[str, Any]] = None) -> D
 
     data = r.json()
     if "errors" in data and data["errors"]:
-        # Errores a nivel de operación
         raise RuntimeError(f"GraphQL Operation Errors: {data['errors']}")
     return data
 
 
-# -------------------- METAFIELDS: DEFINICIÓN / SET / GET --------------------
+def _validate_date_yyyy_mm_dd(value: str) -> str:
+    """Valida formato YYYY-MM-DD y devuelve el mismo valor si es correcto."""
+    try:
+        datetime.strptime(value, "%Y-%m-%d")
+    except ValueError:
+        raise ValueError("Formato inválido. Usa YYYY-MM-DD (ej. 2025-09-04).")
+    return value
 
-def ensure_order_metafield_definition(namespace: str = MF_NAMESPACE, key: str = MF_KEY, mf_type: str = MF_TYPE):
-    """
-    Crea la definición para ORDER si no existe.
-    """
-    mutation = """
-    mutation CreateDef($definition: MetafieldDefinitionInput!) {
-      metafieldDefinitionCreate(definition: $definition) {
-        createdDefinition {
-          id
-          name
-          namespace
-          key
-          ownerType
-        }
-        userErrors { field message code }
-      }
-    }
-    """
-    variables = {
-      "definition": {
-        "name": "Fecha de Entrega",
-        "namespace": namespace,
-        "key": key,
-        "description": "Fecha de entrega real y confirmada por logística",
-        "type": mf_type,
-        "ownerType": "ORDER"
-      }
-    }
-    data = graphql_request(mutation, variables)["data"]["metafieldDefinitionCreate"]
-    if data.get("createdDefinition"):
-        cd = data["createdDefinition"]
-        print(f"✅ Definición lista: {cd['namespace']}.{cd['key']} (owner={cd['ownerType']})")
-        return cd.get("id")
 
-    errs = data.get("userErrors") or []
-    if errs:
-        # --- LÓGICA CORREGIDA AQUÍ ---
-        # Ahora verifica si el error es 'TAKEN' (ya existe) o si el mensaje lo menciona
-        is_taken_error = any(e.get("code") == "TAKEN" for e in errs)
-        msg_contains_already = any("already exists" in e.get("message", "").lower() for e in errs)
-        
-        if is_taken_error or msg_contains_already:
-            print(f"ℹ️ La definición {namespace}.{key} ya existe y no necesita ser creada.")
-            return None
-        # --- FIN DE LA LÓGICA CORREGIDA ---
-        
-        raise RuntimeError(f"metafieldDefinitionCreate userErrors: {errs}")
-
-    return None
+# -------------------- METAFIELDS (GENÉRICOS) --------------------
+def ensure_order_metafield_definition(
+    namespace: str,
+    key: str,
+    mf_type: str,
+    name: Optional[str] = None,
+    description: Optional[str] = None
+):
     """
-    Crea la definición para ORDER si no existe.
-    - type: "date" o "date_time"
+    Crea la definición de metafield para ORDER si no existe.
+    - mf_type: "date" | "date_time" | "single_line_text_field" | etc.
     - ownerType: "ORDER"
     """
+    if not name:
+        name = f"{namespace}.{key}"
+    if not description:
+        description = f"Metafield {namespace}.{key} para órdenes"
+
     mutation = """
     mutation CreateDef($definition: MetafieldDefinitionInput!) {
       metafieldDefinitionCreate(definition: $definition) {
-        createdDefinition {
-          id
-          name
-          namespace
-          key
-          ownerType
-        }
+        createdDefinition { id name namespace key ownerType }
         userErrors { field message code }
       }
     }
     """
     variables = {
-      "definition": {
-        "name": "Fecha de Entrega",
-        "namespace": namespace,
-        "key": key,
-        "description": "Fecha de entrega real y confirmada por logística",
-        "type": mf_type,          # "date" | "date_time"
-        "ownerType": "ORDER"
-        # Si quieres controlar visibilidad/acceso: usa "access", no visibleToStorefrontApi
-        # "access": { "admin": "MERCHANT_READ" }
-      }
+        "definition": {
+            "name": name,
+            "namespace": namespace,
+            "key": key,
+            "description": description,
+            "type": mf_type,
+            "ownerType": "ORDER"
+        }
     }
-    data = graphql_request(mutation, variables)["data"]["metafieldDefinitionCreate"]
-    if data.get("createdDefinition"):
-        cd = data["createdDefinition"]
-        print(f"✅ Definición lista: {cd['namespace']}.{cd['key']} (owner={cd['ownerType']})")
-        return cd.get("id")
+    result = graphql_request(mutation, variables)["data"]["metafieldDefinitionCreate"]
+    created = result.get("createdDefinition")
+    if created:
+        print(f"✅ Definición lista: {created['namespace']}.{created['key']} (owner={created['ownerType']})")
+        return created.get("id")
 
-    errs = data.get("userErrors") or []
-    # Si ya existía, Shopify suele devolver un error de conflicto (lo ignoramos con mensaje)
+    errs = result.get("userErrors") or []
     if errs:
-        msg = " ".join(e.get("message","").lower() for e in errs)
-        if "already exists" in msg or "already" in msg:
+        is_taken_error = any(e.get("code") == "TAKEN" for e in errs)
+        msg_contains_already = any("already exists" in (e.get("message") or "").lower() for e in errs)
+        if is_taken_error or msg_contains_already:
             print(f"ℹ️ La definición {namespace}.{key} ya existe.")
             return None
         raise RuntimeError(f"metafieldDefinitionCreate userErrors: {errs}")
-
     return None
 
 
-def set_order_metafield(order_id: int, value: str, namespace: str = MF_NAMESPACE, key: str = MF_KEY, mf_type: str = MF_TYPE):
+def set_order_metafield(
+    order_id: int,
+    namespace: str,
+    key: str,
+    value: str,
+    mf_type: str
+):
     """
-    Establece el metafield en la orden.
-    - mf_type: "date" -> value "YYYY-MM-DD"
-               "date_time" -> ISO 8601 (e.g., "2025-08-29T00:00:00Z")
+    Establece/actualiza un metafield de orden (GraphQL).
+    - Para tipo "date": value debe ser "YYYY-MM-DD"
+    - Para tipo "date_time": value ISO 8601 (ej. "2025-08-29T00:00:00Z")
     """
     ensure_order_metafield_definition(namespace, key, mf_type)
     gid = _order_numeric_id_to_gid(order_id)
@@ -191,19 +170,19 @@ def set_order_metafield(order_id: int, value: str, namespace: str = MF_NAMESPACE
     mutation = """
     mutation MetafieldsSet($metafields: [MetafieldsSetInput!]!) {
       metafieldsSet(metafields: $metafields) {
-        metafields { key namespace value updatedAt }
+        metafields { key namespace value type updatedAt }
         userErrors { field message code }
       }
     }
     """
     variables = {
-      "metafields": [{
-        "ownerId": gid,
-        "namespace": namespace,
-        "key": key,
-        "type": mf_type,   # string enum: "date" | "date_time" | "single_line_text_field" etc.
-        "value": value
-      }]
+        "metafields": [{
+            "ownerId": gid,
+            "namespace": namespace,
+            "key": key,
+            "type": mf_type,
+            "value": value
+        }]
     }
     resp = graphql_request(mutation, variables)["data"]["metafieldsSet"]
     errs = resp.get("userErrors") or []
@@ -212,13 +191,14 @@ def set_order_metafield(order_id: int, value: str, namespace: str = MF_NAMESPACE
 
     mf = (resp.get("metafields") or [None])[0]
     if mf:
-        print(f"✅ Metafield {namespace}.{key} = {mf['value']}")
+        print(f"✅ Metafield {namespace}.{key} = {mf['value']} (type={mf['type']})")
         return mf.get("value")
     print("⚠️ No se devolvió el metafield tras set.")
     return None
 
 
-def get_order_metafield(order_id: int, namespace: str = MF_NAMESPACE, key: str = MF_KEY):
+def get_order_metafield(order_id: int, namespace: str, key: str):
+    """Lee un metafield (value y type) de la orden."""
     gid = _order_numeric_id_to_gid(order_id)
     query = """
     query GetOrderMF($id: ID!, $ns: String!, $key: String!) {
@@ -236,8 +216,30 @@ def get_order_metafield(order_id: int, namespace: str = MF_NAMESPACE, key: str =
     return None
 
 
-# -------------------- LÓGICA EXISTENTE: ÓRDENES/ESTATUS --------------------
+# -------------------- ATALLOS ESPECÍFICOS (ENTREGA / EN TRANSITO) --------------------
+def set_fecha_entrega(order_id: int, fecha_yyyy_mm_dd: str):
+    """Setea Logistica.FechaEntrega (date)."""
+    value = _validate_date_yyyy_mm_dd(fecha_yyyy_mm_dd)
+    return set_order_metafield(order_id, MF_NAMESPACE, MF_ENTREGA_KEY, value, MF_ENTREGA_TYPE)
 
+
+def get_fecha_entrega(order_id: int):
+    """Obtiene Logistica.FechaEntrega."""
+    return get_order_metafield(order_id, MF_NAMESPACE, MF_ENTREGA_KEY)
+
+
+def set_en_transito(order_id: int, fecha_yyyy_mm_dd: str):
+    """Setea Logistica.EnTransito (date)."""
+    value = _validate_date_yyyy_mm_dd(fecha_yyyy_mm_dd)
+    return set_order_metafield(order_id, MF_NAMESPACE, MF_TRANSITO_KEY, value, MF_TRANSITO_TYPE)
+
+
+def get_en_transito(order_id: int):
+    """Obtiene Logistica.EnTransito."""
+    return get_order_metafield(order_id, MF_NAMESPACE, MF_TRANSITO_KEY)
+
+
+# -------------------- LÓGICA EXISTENTE: ÓRDENES/ESTATUS --------------------
 def crear_orden(line_items):
     """
     Crea una orden en Shopify con estado Recibida (PAID + UNFULFILLED)
@@ -248,7 +250,6 @@ def crear_orden(line_items):
     total_items = sum(item['quantity'] for item in line_items)
     costo_envio_total = total_items * 140
 
-    # Generar nombre automático con prefijo WWP
     order_name = get_next_order_number()
     print(f"📝 Generando nombre de orden: {order_name}")
 
@@ -259,13 +260,13 @@ def crear_orden(line_items):
             "line_items": line_items,
             "financial_status": "paid",
             "customer": {
-                "first_name": "Cliente",
-                "last_name": "David",
+                "first_name": "david",
+                "last_name": "ulum",
                 "email": "dmau639@gmail.com"
             },
             "shipping_address": {
-                "first_name": "David",
-                "last_name": "ULUM",
+                "first_name": "david",
+                "last_name": "ulum",
                 "address1": "Calle Falsa 123",
                 "phone": "5512345678",
                 "city": "Ciudad de México",
@@ -274,8 +275,8 @@ def crear_orden(line_items):
                 "zip": "03100"
             },
             "billing_address": {
-                "first_name": "David",
-                "last_name": "BIW",
+                "first_name": "david",
+                "last_name": "ulum",
                 "address1": "Calle Falsa 123",
                 "phone": "5512345678",
                 "city": "Ciudad de México",
@@ -289,7 +290,7 @@ def crear_orden(line_items):
                 "code": "STANDARD",
                 "source": "ww"
             }],
-            "fulfillment_status": "unfulfilled",
+            "fulfillment_status": "fulfilled",
             "tags": "test "
         }
     }
@@ -316,9 +317,7 @@ def crear_orden(line_items):
 
 
 def marcar_como_enviada(order_id, tracking_number, carrier="Estafeta"):
-    """
-    Marca una orden como enviada (FULFILLED + IN_TRANSIT)
-    """
+    """Marca una orden como enviada (FULFILLED + IN_TRANSIT - simulado por fulfillment)."""
     url = f"{BASE_URL}/orders/{order_id}/fulfillments.json"
     data = {
         "fulfillment": {
@@ -338,26 +337,23 @@ def marcar_como_enviada(order_id, tracking_number, carrier="Estafeta"):
         return fulfillment
     except Exception as e:
         print(f"\n❌ Error al marcar como enviada: {e}")
-        if hasattr(e, 'response') and e.response.text:
+        if hasattr(e, 'response') and e.response is not None and e.response.text:
             print(f"   Detalles: {e.response.text}")
         return None
 
 
 def marcar_como_entregada(order_id):
     """
-    Simula que la orden fue entregada.
-    Nota: Shopify no permite marcar como entregado directamente vía REST.
-    Pero puedes verificar deliveredAt en GraphQL o en el admin.
+    Simulación de entregada.
+    En producción, deliveredAt cambia cuando el fulfillment pasa a DELIVERED.
     """
     print(f"\n📦 Simulación: La orden {order_id} fue entregada.")
-    print("   En producción, el campo 'deliveredAt' se actualiza cuando el fulfillment cambia a DELIVERED.")
+    print("   En producción, 'deliveredAt' se actualiza cuando el fulfillment cambia a DELIVERED.")
     return True
 
 
 def cancelar_orden(order_id, reason="CUSTOMER"):
-    """
-    Cancela y reembolsa una orden (REFUNDED + UNFULFILLED)
-    """
+    """Cancela y reembolsa una orden (REFUNDED + UNFULFILLED)."""
     order_url = f"{BASE_URL}/orders/{order_id}.json"
     try:
         order_response = requests.get(order_url, headers=HEADERS)
@@ -398,8 +394,7 @@ def cancelar_orden(order_id, reason="CUSTOMER"):
         return False
 
 
-# === FUNCIONES DE CONSULTA ===
-
+# -------------------- CONSULTAS AUXILIARES --------------------
 def consultar_producto_y_precios():
     url = f"{BASE_URL}/products.json?limit=10"
     try:
@@ -491,11 +486,11 @@ def listar_pedidos_con_envio():
         return None
 
 
-# === ESTADO BIW ===
-
+# -------------------- ESTADO BIW --------------------
 def obtener_estatus_biw(order_id):
     """
     Determina el estatus BIW según los campos esperados.
+    (Nota: esto usa REST de orden + helpers; puedes extender para usar GraphQL si lo prefieres.)
     """
     url = f"{BASE_URL}/orders/{order_id}.json?fields=name,financial_status,fulfillment_status,cancelled_at,fulfillments,shipping_address,line_items"
     try:
@@ -513,10 +508,11 @@ def obtener_estatus_biw(order_id):
         if cancelled_at and fin_status == "refunded":
             return "Cancelada"
 
-        # Enviada o Entregada
+        # Enviada o Entregada (heurística simple)
         if ful_status == "fulfilled":
             for f in fulfillments:
                 if f.get("status") == "success":
+                    # Campos de eventos pueden variar; ajusta según tus datos reales
                     if f.get("delivered_at"):
                         return "Entregada"
                     elif f.get("in_transit_at"):
@@ -545,22 +541,23 @@ def obtener_estatus_biw(order_id):
 
 
 # -------------------- MENÚ --------------------
-
 def mostrar_menu():
     print("\n" + " " * 10 + "🔧 INTEGRACIÓN WW - SHOPIFY")
     print("=" * 50)
-    print("1. Consultar productos y precios")
-    print("2. Crear orden (Recibida) - Genera nombre WWP automáticamente")
-    print("3. Consultar inventario")
-    print("4. Consultar costo de envío")
-    print("5. Listar pedidos recientes")
-    print("6. Ver estatus BIW de una orden")
-    print("7. Marcar orden como ENVIADA")
-    print("8. Marcar orden como ENTREGADA (simulación)")
-    print("9. Cancelar orden (Cancelada)")
+    print("1.  Consultar productos y precios")
+    print("2.  Crear orden (Recibida) - Genera nombre WWP automáticamente")
+    print("3.  Consultar inventario")
+    print("4.  Consultar costo de envío")
+    print("5.  Listar pedidos recientes")
+    print("6.  Ver estatus BIW de una orden")
+    print("7.  Marcar orden como ENVIADA")
+    print("8.  Marcar orden como ENTREGADA (simulación)")
+    print("9.  Cancelar orden (Cancelada)")
     print("10. Escribir Fecha de Entrega (metafield)")
     print("11. Leer Fecha de Entrega (metafield)")
-    print("0. Salir")
+    print("12. Escribir EnTransito (metafield)")
+    print("13. Leer EnTransito (metafield)")
+    print("0.  Salir")
 
 
 def main():
@@ -606,7 +603,7 @@ def main():
 
             elif opcion == "4":
                 costo = consultar_costo_envio()
-                if costo:
+                if costo is not None:
                     print(f"🚚 Costo de envío: ${costo}")
 
             elif opcion == "5":
@@ -649,20 +646,17 @@ def main():
             elif opcion == "10":
                 try:
                     oid = int(input("Order ID: "))
-                    if MF_TYPE == "date":
-                        val = input("Fecha de entrega (YYYY-MM-DD): ").strip()
-                    else:
-                        val = input("Fecha/hora entrega ISO 8601 (p.ej. 2025-08-27T18:30:00Z): ").strip()
-                    set_order_metafield(oid, val)
-                except ValueError:
-                    print("❌ ID inválido.")
+                    val = _validate_date_yyyy_mm_dd(input("Fecha de entrega (YYYY-MM-DD): ").strip())
+                    set_fecha_entrega(oid, val)
+                except ValueError as ve:
+                    print(f"❌ {ve}")
                 except Exception as e:
                     print(f"❌ Error al escribir metafield: {e}")
 
             elif opcion == "11":
                 try:
                     oid = int(input("Order ID: "))
-                    mf = get_order_metafield(oid)
+                    mf = get_fecha_entrega(oid)
                     if mf:
                         print(f"📅 Fecha de entrega: {mf['value']} (type={mf['type']})")
                     else:
@@ -671,6 +665,29 @@ def main():
                     print("❌ ID inválido.")
                 except Exception as e:
                     print(f"❌ Error al leer metafield: {e}")
+
+            elif opcion == "12":
+                try:
+                    oid = int(input("Order ID: "))
+                    val = _validate_date_yyyy_mm_dd(input("Fecha EnTransito (YYYY-MM-DD): ").strip())
+                    set_en_transito(oid, val)
+                except ValueError as ve:
+                    print(f"❌ {ve}")
+                except Exception as e:
+                    print(f"❌ Error al escribir EnTransito: {e}")
+
+            elif opcion == "13":
+                try:
+                    oid = int(input("Order ID: "))
+                    mf = get_en_transito(oid)
+                    if mf:
+                        print(f"🚚 EnTransito: {mf['value']} (type={mf['type']})")
+                    else:
+                        print("📭 Sin fecha EnTransito.")
+                except ValueError:
+                    print("❌ ID inválido.")
+                except Exception as e:
+                    print(f"❌ Error al leer EnTransito: {e}")
 
             else:
                 print("❌ Opción no válida.")

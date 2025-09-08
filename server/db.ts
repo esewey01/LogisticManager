@@ -2,6 +2,7 @@
 
 import { Pool } from "pg";
 import { drizzle } from "drizzle-orm/node-postgres";
+export { sql } from "drizzle-orm";
 import * as schema from "@shared/schema";
 import "dotenv/config";
 
@@ -21,3 +22,5 @@ console.log("[DB] Conectando a:", u.hostname); // Debe mostrar ...neon.tech (poo
 
 // Drizzle ORM con soporte para Node.js + PostgreSQL
 export const db = drizzle(pool, { schema });
+// Alias para compatibilidad con módulos que importan baseDatos
+export const baseDatos = db;

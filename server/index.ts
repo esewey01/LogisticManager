@@ -32,7 +32,9 @@ import { createServer } from "http";
 import { attachSockets } from "./socketio";
 
 //combos
-import combosRouter from "./route/combos";
+import combosRouter from "./routes/combos";
+import ordersLocalRouter from "./routes/ordersLocal";
+import articulosSearchRouter from "./routes/articulosSearch";
 // Crea la aplicación Express
 const aplicacion = express();
 
@@ -58,6 +60,9 @@ aplicacion.use(express.urlencoded({ extended: true }));
 
 // Rutas de combos
 aplicacion.use("/api/combos", combosRouter);
+// Rutas de órdenes locales y artículos (búsqueda)
+aplicacion.use("/api/orders", ordersLocalRouter);
+aplicacion.use("/api/articulos", articulosSearchRouter);
 
 // Middleware para subida de archivos
 aplicacion.use(fileUpload({

@@ -78,7 +78,7 @@ export type ExportFilters = {
   statusFilter?: "unmanaged" | "managed" | "all";
   channelId?: number;
   search?: string;
-  searchType?: "all" | "sku" | "customer" | "product";
+  searchType?: "all" | "order" | "sku";
   page?: number;
   pageSize?: number;
   sortField?: string;
@@ -564,172 +564,211 @@ export class DatabaseStorage implements IStorage {
   }
 
   //INFORMACION RELEVANTE DE LA ORDEN
-  // server/storage.ts
-  async getOrderDetails(idParam: unknown) {
-    try {
-      const idNum = Number(idParam);
-      if (!Number.isInteger(idNum) || idNum <= 0) return undefined;
+ async getOrderDetails(idParam: unknown) {
+  try {
+    const idNum = Number(idParam);
+    if (!Number.isInteger(idNum) || idNum <= 0) return undefined;
 
-      const { rows } = await baseDatos.execute(sql`
-  SELECT
-    -- Datos generales (alias camelCase)
-    o.id                              AS "id",
-    o.shop_id                         AS "shopId",
-    o.order_id                        AS "orderId",
-    o.name                            AS "name",
-    o.order_number                    AS "orderNumber",
-    o.customer_name                   AS "customerName",
-    o.customer_email                  AS "customerEmail",
-    o.subtotal_price                  AS "subtotalPrice",
-    o.total_amount                    AS "totalAmount",
-    o.currency                        AS "currency",
-    o.financial_status                AS "financialStatus",
-    o.fulfillment_status              AS "fulfillmentStatus",
-    o.tags                            AS "tags",
-    o.order_note                      AS "orderNote",
-    o.created_at                      AS "createdAt",
-    o.shopify_created_at              AS "shopifyCreatedAt",
-    o.ship_name                       AS "shipName",
-    o.ship_phone                      AS "shipPhone",
-    o.ship_address1                   AS "shipAddress1",
-    o.ship_city                       AS "shipCity",
-    o.ship_province                   AS "shipProvince",
-    o.ship_country                    AS "shipCountry",
-    o.ship_zip                        AS "shipZip",
+    const { rows } = await baseDatos.execute(sql`
+      SELECT
+        -- ===== Campos de la orden (el front los usa en el header) =====
+        o.id                              AS "id",
+        o.shop_id                         AS "shopId",
+        o.order_id                        AS "orderId",
+        o.name                            AS "name",
+        o.order_number                    AS "orderNumber",
+        o.customer_name                   AS "customerName",
+        o.customer_email                  AS "customerEmail",
+        o.subtotal_price                  AS "subtotalPrice",
+        o.total_amount                    AS "totalAmount",
+        o.currency                        AS "currency",
+        o.financial_status                AS "financialStatus",
+        o.fulfillment_status              AS "fulfillmentStatus",
+        o.tags                            AS "tags",
+        o.order_note                      AS "orderNote",
+        o.created_at                      AS "createdAt",
+        o.shopify_created_at              AS "shopifyCreatedAt",
+        o.ship_name                       AS "shipName",
+        o.ship_phone                      AS "shipPhone",
+        o.ship_address1                   AS "shipAddress1",
+        o.ship_city                       AS "shipCity",
+        o.ship_province                   AS "shipProvince",
+        o.ship_country                    AS "shipCountry",
+        o.ship_zip                        AS "shipZip",
 
-    -- Ítems enriquecidos: subconsulta por orden (garantiza 1-a-1 por order_item)
-    COALESCE((
-      SELECT COALESCE(jsonb_agg(jsonb_build_object(
-        'orderItemId',    x.order_item_id,
-        'skuCanal',       x.sku_canal,
-        'skuMarca',       x.sku_marca,
-        'skuInterno',     x.sku_interno,
-        'quantity',       x.quantity,
-        'priceVenta',     x.price_venta,
-        'unitPrice',      x.unit_price,
-        'mappingStatus',  x.mapping_status,
-        'matchSource',    x.match_source,
+        -- ===== Items enriquecidos (incluye combos si el SKU es un combo) =====
+        COALESCE((
+          SELECT jsonb_agg(
+                   jsonb_build_object(
+                     'orderItemId',    x.order_item_id,
+                     'skuCanal',       x.sku_canal,
+                     'skuMarca',       x.sku_marca,
+                     'skuInterno',     x.sku_interno,
+                     'quantity',       x.quantity,
+                     'priceVenta',     x.price_venta,
+                     'unitPrice',      x.unit_price,
+                     'mappingStatus',  x.mapping_status,
+                     'matchSource',    x.match_source,
 
-        'title',          x.title,
-        'vendor',         x.vendor,
-        'productType',    x.product_type,
+                     'title',          x.title,
+                     'vendor',         x.vendor,
+                     'productType',    x.product_type,
 
-        'barcode',        x.barcode,
-        'compareAtPrice', x.compare_at_price,
-        'stockShopify',   x.inventory_qty,
+                     'barcode',        x.barcode,
+                     'compareAtPrice', x.compare_at_price,
+                     'stockShopify',   x.inventory_qty,
 
-        -- Campos de catálogo (mapeo legacy)
-        'nombreProducto', x.nombre_producto,
-        'categoria',      x.categoria,
-        'condicion',      x.condicion,
-        'marca',          x.marca,
-        'variante',       x.variante,
-        'largo',          x.largo,
-        'ancho',          x.ancho,
-        'alto',           x.alto,
-        'peso',           x.peso,
-        'foto',           x.foto,
-        'costo',          x.costo,
-        'stockMarca',     x.stock_marca
-      )), '[]'::jsonb)
-      FROM (
-        SELECT
-          oi.id          AS order_item_id,
-          oi.sku         AS sku_canal,
-          oi.quantity    AS quantity,
-          oi.price       AS price_venta,
+                     'nombreProducto', x.nombre_producto,
+                     'categoria',      x.categoria,
+                     'condicion',      x.condicion,
+                     'marca',          x.marca,
+                     'variante',       x.variante,
+                     'largo',          x.largo,
+                     'ancho',          x.ancho,
+                     'alto',           x.alto,
+                     'peso',           x.peso,
+                     'foto',           x.foto,
+                     'costo',          x.costo,
+                     'stockMarca',     x.stock_marca,
 
-          -- products (1 fila por id_shopify)
-          p.title        AS title,
-          p.vendor       AS vendor,
-          p.product_type AS product_type,
+                     -- bandera/estructura de combo
+                     'isCombo',         (x.sku_combo IS NOT NULL),
+                     'comboTotalCosto', x.combo_total_costo,
+                     'comboComponents', COALESCE(x.componentes, '[]'::jsonb)
+                   )
+                   ORDER BY x.order_item_id
+                 )
+          FROM (
+            SELECT
+              oi.id          AS order_item_id,
+              oi.sku         AS sku_canal,
+              oi.quantity    AS quantity,
+              oi.price       AS price_venta,
 
-          -- variants (1 fila por id_shopify)
-          v.barcode,
-          v.compare_at_price,
-          v.inventory_qty,
+              -- products (Shopify)
+              p.title        AS title,
+              p.vendor       AS vendor,
+              p.product_type AS product_type,
 
-          -- articulos (antes catalogo_productos): elegimos UNA mejor coincidencia
-          a.sku          AS sku_marca,
-          a.sku_interno  AS sku_interno,
-          a.nombre       AS nombre_producto,
-          a.categoria    AS categoria,
-          a.condicion_producto AS condicion,    -- alias legacy
-          a.proveedor    AS marca,              -- alias legacy
-          a.variante     AS variante,
-          a.largo_cm     AS largo,              -- alias legacy
-          a.ancho_cm     AS ancho,              -- alias legacy
-          a.alto_cm      AS alto,               -- alias legacy
-          a.peso_kg      AS peso,               -- alias legacy
-          a.imagen1      AS foto,               -- alias legacy
-          a.costo        AS costo,
-          a.stock        AS stock_marca,
+              -- variants (Shopify)
+              v.barcode,
+              v.compare_at_price,
+              v.inventory_qty,
 
-          -- Campos derivados de mapeo
-          CASE WHEN a.sku IS NULL AND a.sku_interno IS NULL THEN 'unmapped'
-               ELSE 'matched'
-          END AS mapping_status,
-          CASE
-            WHEN a.sku_interno IS NOT NULL AND oi.sku IS NOT NULL AND lower(a.sku_interno) = lower(oi.sku) THEN 'interno'
-            WHEN a.sku         IS NOT NULL AND oi.sku IS NOT NULL AND lower(a.sku)         = lower(oi.sku) THEN 'externo'
-            ELSE NULL
-          END AS match_source,
-          a.costo AS unit_price
+              -- ¿es combo? por coincidencia exacta con combos.sku_combo
+              c.sku_combo    AS sku_combo,
 
-        FROM order_items oi
+              -- artículo atómico (si no es combo): prioriza interno, luego sku externo
+              a.sku          AS sku_marca,
+              a.sku_interno  AS sku_interno,
+              a.nombre       AS nombre_producto,
+              a.categoria    AS categoria,
+              a.condicion_producto AS condicion,
+              a.proveedor    AS marca,
+              a.variante     AS variante,
+              a.largo_cm     AS largo,
+              a.ancho_cm     AS ancho,
+              a.alto_cm      AS alto,
+              a.peso_kg      AS peso,
+              a.imagen1      AS foto,
+              a.costo        AS costo,
+              a.stock        AS stock_marca,
 
-        -- products por Shopify product id
-        LEFT JOIN LATERAL (
-          SELECT p.*
-          FROM products p
-          WHERE p.id_shopify = oi.shopify_product_id
-          LIMIT 1
-        ) p ON TRUE
+              -- derivado de mapeo
+              CASE WHEN a.sku IS NULL AND a.sku_interno IS NULL THEN 'unmapped'
+                   ELSE 'matched'
+              END AS mapping_status,
+              CASE
+                WHEN a.sku_interno IS NOT NULL AND oi.sku IS NOT NULL AND lower(a.sku_interno) = lower(oi.sku) THEN 'interno'
+                WHEN a.sku         IS NOT NULL AND oi.sku IS NOT NULL AND lower(a.sku)         = lower(oi.sku) THEN 'externo'
+                ELSE NULL
+              END AS match_source,
+              a.costo AS unit_price,
 
-        -- variants por Shopify variant id
-        LEFT JOIN LATERAL (
-          SELECT v.*
-          FROM variants v
-          WHERE v.id_shopify = oi.shopify_variant_id
-          LIMIT 1
-        ) v ON TRUE
+              -- componentes del combo (si aplica)
+              comp.combo_total_costo,
+              comp.componentes
 
-        -- articulos: prioriza match por sku_interno, luego por sku
-        LEFT JOIN LATERAL (
-          SELECT a.*
-          FROM articulos a
-          WHERE
-            (a.sku_interno IS NOT NULL OR a.sku IS NOT NULL)
-            AND oi.sku IS NOT NULL
-            AND (
-              lower(a.sku_interno) = lower(oi.sku)
-              OR lower(a.sku) = lower(oi.sku)
-            )
-          ORDER BY
-            (lower(a.sku_interno) = lower(oi.sku)) DESC,
-            (lower(a.sku) = lower(oi.sku)) DESC,
-            a.sku_interno NULLS LAST,
-            a.sku        NULLS LAST
-          LIMIT 1
-        ) a ON TRUE
+            FROM order_items oi
 
-        WHERE oi.order_id = o.id
-      ) x
-    ), '[]'::jsonb) AS "items"
+            -- products (Shopify)
+            LEFT JOIN LATERAL (
+              SELECT p.*
+              FROM products p
+              WHERE p.id_shopify = oi.shopify_product_id
+              LIMIT 1
+            ) p ON TRUE
 
-  FROM orders o
-  WHERE o.id = ${idNum}
-  LIMIT 1
-`);
+            -- variants (Shopify)
+            LEFT JOIN LATERAL (
+              SELECT v.*
+              FROM variants v
+              WHERE v.id_shopify = oi.shopify_variant_id
+              LIMIT 1
+            ) v ON TRUE
 
+            -- ¿match de combo?
+            LEFT JOIN LATERAL (
+              SELECT c.sku_combo
+              FROM combos c
+              WHERE oi.sku IS NOT NULL AND lower(c.sku_combo) = lower(oi.sku)
+              LIMIT 1
+            ) c ON TRUE
 
-      const row = (rows as any[])[0];
-      return row ?? undefined;
-    } catch (e) {
-      console.error("[Storage] Error getOrderDetails:", (e as any)?.message || e);
-      return undefined;
-    }
+            -- artículo (cuando es atómico)
+            LEFT JOIN LATERAL (
+              SELECT a.*
+              FROM articulos a
+              WHERE
+                (a.sku_interno IS NOT NULL OR a.sku IS NOT NULL)
+                AND oi.sku IS NOT NULL
+                AND (
+                  lower(a.sku_interno) = lower(oi.sku)
+                  OR lower(a.sku)      = lower(oi.sku)
+                )
+              ORDER BY
+                (lower(a.sku_interno) = lower(oi.sku)) DESC,
+                (lower(a.sku)        = lower(oi.sku)) DESC,
+                a.sku_interno NULLS LAST,
+                a.sku        NULLS LAST
+              LIMIT 1
+            ) a ON TRUE
+
+            -- componentes del combo (si c.sku_combo existe)
+            LEFT JOIN LATERAL (
+              SELECT
+                COALESCE(SUM(ci.cantidad * COALESCE(ar.costo,0)),0) AS combo_total_costo,
+                jsonb_agg(
+                  jsonb_build_object(
+                    'sku',      ci.sku_marca,
+                    'nombre',   ar.nombre,
+                    'costo',    ar.costo,
+                    'stock',    COALESCE(ar.stock, ar.stock_cp, 0),
+                    'cantidad', ci.cantidad,
+                    'subtotal', (ci.cantidad * COALESCE(ar.costo,0))
+                  )
+                  ORDER BY ci.id
+                ) AS componentes
+              FROM combo_items ci
+              LEFT JOIN articulos ar ON ar.sku = ci.sku_marca
+              WHERE c.sku_combo IS NOT NULL AND ci.sku_combo = c.sku_combo
+            ) comp ON TRUE
+
+            WHERE oi.order_id = o.id
+          ) x
+        ), '[]'::jsonb) AS "items"
+      FROM orders o
+      WHERE o.id = ${idNum}
+      LIMIT 1
+    `);
+
+    const row = (rows as any[])[0];
+    return row ?? undefined;
+  } catch (e) {
+    console.error("[Storage] Error getOrderDetails:", (e as any)?.message || e);
+    return undefined;
   }
+}
 
 
 
@@ -2008,7 +2047,7 @@ export class DatabaseStorage implements IStorage {
     page: number;
     pageSize: number;
     search?: string;
-    searchType?: "all" | "sku" | "customer" | "product";
+    searchType?: "all" | "order" | "sku"; // ← actualizado
     sortField?: string;
     sortOrder?: "asc" | "desc";
     brand?: string;
@@ -2028,32 +2067,33 @@ export class DatabaseStorage implements IStorage {
     } = params;
 
     const conds: any[] = [];
+    // Excluir marketplace_pending de la vista principal
+    conds.push(sql`COALESCE(o.status,'') <> 'marketplace_pending'`);
 
-    // Estado
+    // ===== Estado
     if (statusFilter === "unmanaged") {
       conds.push(sql`LOWER(COALESCE(o.fulfillment_status, '')) IN ('', 'unfulfilled')`);
     } else if (statusFilter === "managed") {
       conds.push(sql`LOWER(COALESCE(o.fulfillment_status, '')) = 'fulfilled'`);
-    } else if (statusFilter === ("cancelled" as any) || statusFilter === ("canceladas" as any)) {
+    } else if ((statusFilter as any) === "cancelled" || (statusFilter as any) === "canceladas") {
       conds.push(sql`LOWER(COALESCE(o.fulfillment_status, '')) = 'restocked'`);
     }
 
-    // Canal
+    // ===== Canal
     if (channelId !== undefined && channelId !== null) {
-      // usa shop_id como ya lo hacías
       conds.push(sql`o.shop_id = ${channelId}`);
     }
 
-    // Filtro por marca (union de vendor y marca catálogo)
+    // ===== Marca (usa vendor de products o proveedor de articulos)
     if (brand && brand.trim() !== "") {
       const b = brand.toLowerCase();
       conds.push(sql`(
-        LOWER(COALESCE(p.vendor, '')) = ${b} OR
-        LOWER(COALESCE(a.proveedor, '')) = ${b}
-      )`);
+      LOWER(COALESCE(p.vendor, '')) = ${b} OR
+      LOWER(COALESCE(a.proveedor, '')) = ${b}
+    )`);
     }
 
-    // Filtro por estado de stock
+    // ===== Stock
     if (stockState) {
       if (stockState === "out") {
         conds.push(sql`COALESCE(a.stock, -1) = 0`);
@@ -2064,42 +2104,38 @@ export class DatabaseStorage implements IStorage {
       }
     }
 
-    // Búsqueda
-    if (search) {
-      const searchPattern = `%${search.toLowerCase()}%`;
-      if (searchType === "sku") {
-        conds.push(sql`EXISTS (
-        SELECT 1 FROM order_items oi2 
-        WHERE oi2.order_id = o.id 
-        AND LOWER(COALESCE(oi2.sku, '')) LIKE ${searchPattern}
-      )`);
-      } else if (searchType === "customer") {
+    // ===== Búsqueda
+    if (search && search.trim() !== "") {
+      const raw = search.trim();
+      const searchPattern = `%${raw.toLowerCase()}%`;
+
+      // Helper: si el usuario pega un número exacto, permitir match exacto por o.id
+      const isNumeric = /^[0-9]+$/.test(raw);
+
+      if (searchType === "order") {
         conds.push(sql`(
-        LOWER(COALESCE(o.customer_name, '')) LIKE ${searchPattern} OR 
-        LOWER(COALESCE(o.customer_email, '')) LIKE ${searchPattern}
+        LOWER(COALESCE(o.order_id, '')) LIKE ${searchPattern} OR
+        LOWER(COALESCE(o.name, '')) LIKE ${searchPattern} OR
+        LOWER(COALESCE(o.order_number, '')) LIKE ${searchPattern}
+        ${isNumeric ? sql` OR o.id = ${Number(raw)}` : sql``}
       )`);
-      } else if (searchType === "product") {
+      } else if (searchType === "sku") {
         conds.push(sql`EXISTS (
-        SELECT 1 FROM order_items oi2 
-        WHERE oi2.order_id = o.id 
-        AND (
-          LOWER(COALESCE(oi2.title, '')) LIKE ${searchPattern} OR
-          LOWER(COALESCE(oi2.variant_title, '')) LIKE ${searchPattern}
-        )
+        SELECT 1 FROM order_items oi2
+        WHERE oi2.order_id = o.id
+          AND LOWER(COALESCE(oi2.sku, '')) LIKE ${searchPattern}
       )`);
       } else {
+        // "all" = orden + sku
         conds.push(sql`(
-        LOWER(COALESCE(o.order_id, '')) LIKE ${searchPattern} OR 
-        LOWER(COALESCE(o.customer_name, '')) LIKE ${searchPattern} OR 
-        LOWER(COALESCE(o.customer_email, '')) LIKE ${searchPattern} OR
-        EXISTS (
-          SELECT 1 FROM order_items oi2 
-          WHERE oi2.order_id = o.id 
-          AND (
-            LOWER(COALESCE(oi2.sku, '')) LIKE ${searchPattern} OR
-            LOWER(COALESCE(oi2.title, '')) LIKE ${searchPattern} OR
-            LOWER(COALESCE(oi2.variant_title, '')) LIKE ${searchPattern}
-          )
+        LOWER(COALESCE(o.order_id, '')) LIKE ${searchPattern} OR
+        LOWER(COALESCE(o.name, '')) LIKE ${searchPattern} OR
+        LOWER(COALESCE(o.order_number, '')) LIKE ${searchPattern}
+        ${isNumeric ? sql` OR o.id = ${Number(raw)}` : sql``}
+        OR EXISTS (
+          SELECT 1 FROM order_items oi2
+          WHERE oi2.order_id = o.id
+            AND LOWER(COALESCE(oi2.sku, '')) LIKE ${searchPattern}
         )
       )`);
       }
@@ -2109,8 +2145,7 @@ export class DatabaseStorage implements IStorage {
       ? sql`${conds.reduce((acc, cond, i) => (i === 0 ? cond : sql`${acc} AND ${cond}`))}`
       : undefined;
 
-    const offset = Math.max(0, (page - 1) * pageSize);
-    // ✅ Whitelist de columnas para ORDER BY
+    // ===== Ordenamiento
     const sortMap: Record<string, string> = {
       name: `COALESCE(o.name, o.order_id, '')`,
       createdAt: `COALESCE(o.shopify_created_at, o.created_at)`,
@@ -2118,13 +2153,12 @@ export class DatabaseStorage implements IStorage {
     };
     const sortCol = sortField && sortMap[sortField] ? sortMap[sortField] : `COALESCE(o.shopify_created_at, o.created_at)`;
     const sortDir = sortOrder === "asc" ? sql`ASC` : sql`DESC`;
-    const orderSql = sortField
-      ? sql`ORDER BY ${sql.raw(sortCol)} ${sortDir}`
-      : sql`ORDER BY o.shopify_created_at DESC NULLS LAST, o.id DESC`;
+    const orderSql =
+      sortField ? sql`ORDER BY ${sql.raw(sortCol)} ${sortDir}` : sql`ORDER BY o.shopify_created_at DESC NULLS LAST, o.id DESC`;
 
+    const offset = Math.max(0, (page - 1) * pageSize);
 
-    const orderDir = sortOrder?.toLowerCase() === "asc" ? sql`ASC` : sql`DESC`;
-
+    // ===== Query principal
     const baseQuery = sql`
     SELECT 
       o.id::text as id,
@@ -2144,24 +2178,24 @@ export class DatabaseStorage implements IStorage {
       COALESCE(
         JSON_AGG(
           JSON_BUILD_OBJECT(
-          'sku', oi.sku,
-          'quantity', oi.quantity,
-          'price', oi.price,
-          'vendorFromShop', p.vendor,
-          'catalogBrand', a.proveedor,
-          'stockFromCatalog', a.stock,
-          'stockState', CASE 
-            WHEN a.stock IS NULL THEN 'Desconocido'
-            WHEN a.stock = 0 THEN 'Stock Out'
-            WHEN a.stock <= 15 THEN 'Apartar'
-            ELSE 'OK'
-          END,
-          'enAlmacen', a.en_almacen,   -- ← NUEVO
-          'skuArticulo', a.sku,
-          'skuInterno', a.sku_interno,
-          'nombreProducto', a.nombre,
-          'stockMarca', a.stock,
-          'unitPrice', a.costo
+            'sku', oi.sku,
+            'quantity', oi.quantity,
+            'price', oi.price,
+            'vendorFromShop', p.vendor,
+            'catalogBrand', a.proveedor,
+            'stockFromCatalog', a.stock,
+            'stockState', CASE 
+              WHEN a.stock IS NULL THEN 'Desconocido'
+              WHEN a.stock = 0 THEN 'Stock Out'
+              WHEN a.stock <= 15 THEN 'Apartar'
+              ELSE 'OK'
+            END,
+            'enAlmacen', a.en_almacen,
+            'skuArticulo', a.sku,
+            'skuInterno', a.sku_interno,
+            'nombreProducto', a.nombre,
+            'stockMarca', a.stock,
+            'unitPrice', a.costo
           )
         ) FILTER (WHERE oi.id IS NOT NULL),
         '[]'::json
@@ -2188,15 +2222,19 @@ export class DatabaseStorage implements IStorage {
     LIMIT ${pageSize} OFFSET ${offset}
   `;
 
+    // ===== COUNT seguro (replica los LEFT JOIN si el WHERE los usa)
     const countQuery = sql`
     SELECT COUNT(DISTINCT o.id) as count
     FROM orders o
+    LEFT JOIN order_items oi ON oi.order_id = o.id
+    LEFT JOIN products p ON p.id_shopify = oi.shopify_product_id AND p.shop_id = o.shop_id
+    LEFT JOIN articulos a ON a.sku_interno = oi.sku
     ${whereClause ? sql`WHERE ${whereClause}` : sql``}
   `;
 
     const [rows, totalRes] = await Promise.all([
       baseDatos.execute(baseQuery),
-      baseDatos.execute(countQuery)
+      baseDatos.execute(countQuery),
     ]);
 
     const total = Number(totalRes.rows[0]?.count ?? 0);
@@ -2205,9 +2243,11 @@ export class DatabaseStorage implements IStorage {
       rows: rows.rows as any[],
       page,
       pageSize,
-      total
+      total,
     };
   }
+
+
 
 
   // Items de una orden
@@ -2659,5 +2699,4 @@ export async function markOrderCancelledSafe(idNum: number, payload: {
     return { ok: true, warning: "update skipped" } as const;
   }
 }
-
 

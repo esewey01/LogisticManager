@@ -266,6 +266,7 @@ export const orders = pgTable(
     idxShopifyCreated: index("orders_shopify_created_idx").on(t.shopifyCreatedAt),
     idxShop: index("ix_orders_shop").on(t.shopId),
     idxChannel: index("ix_orders_channel").on(t.shopId),
+    idxOrdersStatus: index("idx_orders_status").on(t.status),
   }),
 );
 export type Order = typeof orders.$inferSelect;

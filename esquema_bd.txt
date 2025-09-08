@@ -15,7 +15,7 @@ CREATE TABLE articulos(
     peso_kg numeric,
     imagen1 text,
     costo numeric,
-    stock integer,
+    stock_cp integer,
     descripcion text,
     status text NOT NULL DEFAULT 'activo'::text,
     garantia_meses integer,
@@ -30,6 +30,11 @@ CREATE TABLE articulos(
     en_almacen boolean NOT NULL DEFAULT false,
     created_at timestamp without time zone DEFAULT now(),
     updated_at timestamp without time zone DEFAULT now(),
+    stock_a integer DEFAULT 0,
+    stock integer GENERATED ALWAYS AS stock_cp STORED,
+    es_combo boolean NOT NULL DEFAULT false,
+    sku_combo text,
+    CONSTRAINT articulos_sku_combo_fk FOREIGN key(sku_combo) REFERENCES combos(sku_combo),
     CONSTRAINT articulos_status_check CHECK (status = ANY (ARRAY['activo'::text, 'inactivo'::text]))
 );
 CREATE UNIQUE INDEX articulos_sku_uniq ON public.articulos USING btree (sku);
@@ -38,7 +43,9 @@ CREATE INDEX ix_articulos_categoria ON public.articulos USING btree (categoria);
 CREATE INDEX ix_articulos_sku_interno ON public.articulos USING btree (sku_interno);
 CREATE INDEX ix_articulos_nombre ON public.articulos USING btree (nombre);
 CREATE INDEX ix_articulos_status ON public.articulos USING btree (status);
-CREATE INDEX ix_articulos_stock ON public.articulos USING btree (stock);
+CREATE INDEX ix_articulos_stock ON public.articulos USING btree (stock_cp);
+CREATE INDEX ix_articulos_stock_cp ON public.articulos USING btree (stock_cp);
+CREATE INDEX ix_articulos_stock_a ON public.articulos USING btree (stock_a);
 
 CREATE TABLE brands(
     id SERIAL NOT NULL,

@@ -33,6 +33,12 @@ export default function Sidebar({ collapsed }: SidebarProps) {
       badge: metrics?.unmanaged,
     },
     {
+      path: "/marketplaces",
+      icon: "fas fa-layer-group",
+      label: "Marketplaces",
+      badge: null,
+    },
+    {
       path: "/tickets",
       icon: "fas fa-ticket-alt",
       label: "Tickets",
@@ -106,6 +112,7 @@ export default function Sidebar({ collapsed }: SidebarProps) {
           <span className={`w-5 ${collapsed ? 'text-center' : ''}`}>
             {item.path === '/' && <PieChart className="h-5 w-5" />}
             {item.path === '/pedidos' && <ShoppingBag className="h-5 w-5" />}
+            {item.path === '/marketplaces' && <Layers className="h-5 w-5" />}
             {item.path === '/tickets' && <Ticket className="h-5 w-5" />}
             {(item.path === '/catalogo' || item.path === '/articulos') && <Package className="h-5 w-5" />}
             {item.path === '/paqueteria' && <Truck className="h-5 w-5" />}

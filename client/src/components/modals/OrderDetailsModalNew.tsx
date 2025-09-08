@@ -1,6 +1,6 @@
 // src/components/modals/OrderDetailsModalNew.tsx
-import React, { useMemo, useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import React, { useMemo } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
@@ -9,14 +9,12 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import {
   Loader2, Package, User, Calendar, DollarSign, MapPin, Phone, Mail,
-  Store, Ticket, CheckCircle2, AlertTriangle, Barcode, Search, ShoppingCart, Link as LinkIcon, Warehouse,
+  Store, Ticket, CheckCircle2, AlertTriangle, Barcode, ShoppingCart, Link as LinkIcon, Warehouse,
 } from "lucide-react";
 
 /* ===================== Tipos ===================== */
@@ -24,6 +22,16 @@ type OrderDetailsModalProps = {
   orderId: number | null;
   isOpen: boolean;
   onClose: () => void;
+};
+
+type ComboComponent = {
+  sku: string;
+  nombre: string | null;
+  costo: number | null;
+  stock: number | null;      // Catálogo (articulos.stock)
+  stock_a?: number | null;   // Almacén (articulos.stock_a)
+  cantidad: number;
+  subtotal: number;
 };
 
 // ⚠️ Tipos flexibles para soportar transición de catalogo_productos → articulos
@@ -46,7 +54,8 @@ type OrderItemEnriched = {
   skuInterno?: string | null;     // articulos.sku_interno (match clave)
   skuArticulo?: string | null;    // articulos.sku (si lo incorporas)
   nombreProducto: string | null;  // (antes) catalogo_productos.nombre_producto | (ahora) articulos.nombre
-  stockMarca: number | null;      // (ahora) articulos.stock
+  stockMarca: number | null;      // Catálogo (articulos.stock)
+  stockAlmacen?: number | null;   // Almacén  (articulos.stock_a)
   unitPrice?: string | number | null; // costo (articulos.costo)
   enAlmacen?: boolean | null;     // articulos.en_almacen
   foto?: string | null;           // imagen desde catálogo si la tienes
@@ -54,6 +63,10 @@ type OrderItemEnriched = {
   quantity: number;
   mappingStatus?: "matched" | "unmapped";
   matchSource?: "interno" | "externo" | null;
+
+  isCombo?: boolean;
+  comboTotalCosto?: number | null;
+  comboComponents?: ComboComponent[];
 };
 
 type OrderDetails = {
@@ -142,152 +155,6 @@ const calculateItemTotal = (price: string | null, quantity: number, currency?: s
   return formatCurrency(String(total), currency ?? "MXN");
 };
 
-/* ===================== Selector de SKU (re-asignación) ===================== */
-type CatalogItem = {
-  sku: string;
-  sku_interno: string | null;
-  nombre_producto: string | null; // o 'nombre' si tu backend ya migró
-  costo: number | string | null;
-  stock: number | null;
-  en_almacen?: boolean | null;
-};
-
-function SkuSelector({
-  orderId,
-  itemId,
-  onAssigned,
-  compact,
-}: {
-  orderId: number;
-  itemId: number;
-  onAssigned: () => void;
-  compact?: boolean;
-}) {
-  const qc = useQueryClient();
-  const [q, setQ] = useState("");
-  const [results, setResults] = useState<CatalogItem[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [selected, setSelected] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  // Busca en catálogo; si ya migraste, puedes apuntar a /api/articulos/search en backend manteniendo la misma forma de respuesta
-  const searchCatalog = async (query: string) => {
-    // Si ya tienes /api/articulos/search, cambia la URL abajo:
-    const url = `/api/catalogo/search?q=${encodeURIComponent(query)}`;
-    const res = await fetch(url, { credentials: "include" });
-    if (!res.ok) throw new Error(await res.text());
-    return (await res.json()) as CatalogItem[];
-  };
-
-  const handleSearch = async () => {
-    setError(null);
-    const term = q.trim();
-    if (!term) {
-      setResults([]);
-      return;
-    }
-    try {
-      setLoading(true);
-      const rows = await searchCatalog(term);
-      setResults(rows);
-    } catch (e: any) {
-      setError(e?.message || "Error en búsqueda");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const assignMutation = useMutation({
-    mutationFn: async (sku: string) => {
-      const res = await apiRequest(
-        "PUT",
-        `/api/orders/${orderId}/items/${itemId}/sku`,
-        { sku }
-      );
-      return res.json().catch(() => ({}));
-    },
-    onSuccess: async () => {
-      await qc.invalidateQueries({ queryKey: ["/api/orders", orderId, "details"] });
-      onAssigned();
-    },
-    onError: (e: any) => {
-      setError(e?.message || "No se pudo asignar SKU");
-    },
-  });
-
-  return (
-    <div className={compact ? "space-y-2" : "space-y-3 p-3 border rounded-md bg-white"}>
-      <div className="flex items-center gap-2">
-        <Input
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-          placeholder="Buscar por SKU, interno o nombre"
-          onKeyDown={(e) => {
-            if (e.key === "Enter") handleSearch();
-          }}
-        />
-        <Button type="button" variant="secondary" onClick={handleSearch} disabled={loading}>
-          <Search className="w-4 h-4 mr-1" /> Buscar
-        </Button>
-      </div>
-      {error && (
-        <p className="text-sm text-red-600">{error}</p>
-      )}
-      <div className="max-h-48 overflow-auto border rounded">
-        {loading ? (
-          <div className="p-3 text-sm text-gray-500">Buscando...</div>
-        ) : results.length === 0 ? (
-          <div className="p-3 text-sm text-gray-500">Sin resultados</div>
-        ) : (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>SKU</TableHead>
-                <TableHead>Interno</TableHead>
-                <TableHead>Nombre</TableHead>
-                <TableHead className="text-right">Costo</TableHead>
-                <TableHead className="text-center">Stock</TableHead>
-                <TableHead className="text-right">Acción</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {results.map((r) => (
-                <TableRow key={`${r.sku}-${r.sku_interno}`} className={selected === (r.sku || r.sku_interno || "") ? "bg-amber-50" : ""}>
-                  <TableCell className="font-mono text-xs">{r.sku || "-"}</TableCell>
-                  <TableCell className="font-mono text-xs">{r.sku_interno || "-"}</TableCell>
-                  <TableCell className="text-sm">{r.nombre_producto || "-"}</TableCell>
-                  <TableCell className="text-right font-mono text-xs">{formatCurrency(String(r.costo ?? 0))}</TableCell>
-                  <TableCell className="text-center">
-                    {r.stock === 0 ? (
-                      <Badge variant="destructive">Sin stock</Badge>
-                    ) : (
-                      <Badge variant="secondary">{r.stock ?? "-"}</Badge>
-                    )}
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <Button
-                      size="sm"
-                      onClick={() => {
-                        const sku = r.sku_interno || r.sku; // prefer interno si está
-                        if (!sku) return;
-                        setSelected(sku);
-                        assignMutation.mutate(sku);
-                      }}
-                      disabled={assignMutation.isPending}
-                    >
-                      Asignar
-                    </Button>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        )}
-      </div>
-    </div>
-  );
-}
-
 /* ===================== Componente principal ===================== */
 export default function OrderDetailsModalNew({ orderId, isOpen, onClose }: OrderDetailsModalProps) {
   const {
@@ -311,7 +178,6 @@ export default function OrderDetailsModalNew({ orderId, isOpen, onClose }: Order
   });
 
   const items = order?.items ?? [];
-  const qc = useQueryClient();
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
@@ -361,12 +227,12 @@ export default function OrderDetailsModalNew({ orderId, isOpen, onClose }: Order
         {order && (
           <div className="space-y-6">
 
-            {/* ===================== A) ITEMS: 2 secciones por ítem ===================== */}
+            {/* ===================== A) ITEMS: Del canal (arriba) y Artículos (abajo) ===================== */}
             <Card>
               <CardHeader className="pb-3">
                 <CardTitle className="flex items-center gap-2 text-xl">
                   <ShoppingCart className="w-5 h-5 text-green-600" />
-                  Productos del pedido (canal vs catálogo)
+                  Productos del pedido
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
@@ -384,117 +250,154 @@ export default function OrderDetailsModalNew({ orderId, isOpen, onClose }: Order
 
                   return (
                     <div key={String(it.orderItemId)} className="border rounded-xl p-3 space-y-3">
-                      {/* FILA 1: Shopify / Canal */}
-                      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-                        {/* Sección Shopify */}
-                        <div className="border rounded-lg">
-                          <div className="px-3 py-2 border-b flex items-center gap-2">
-                            <Package className="w-4 h-4 text-green-600" />
-                            <span className="font-semibold">Del canal (Shopify)</span>
-                          </div>
-                          <div className="p-3">
-                            <div className="flex items-start gap-3">
-                              {(it.fotoShopify || it.foto) ? (
-                                <img
-                                  src={it.fotoShopify || it.foto || ""}
-                                  alt={it.title || "foto"}
-                                  className="w-16 h-16 rounded object-cover border"
-                                  onError={(e) => ((e.target as HTMLImageElement).style.display = "none")}
-                                />
-                              ) : null}
-                              <div className="flex-1 min-w-0">
-                                <div className="flex items-center gap-2 text-sm text-gray-600">
-                                  <span className="font-mono">{it.skuCanal || "-"}</span>
-                                  {it.vendor && <Badge variant="outline">{it.vendor}</Badge>}
-                                  {it.productType && <Badge variant="outline">{it.productType}</Badge>}
-                                </div>
-                                <div className="font-medium truncate">{it.title || "Producto"}</div>
-                                <div className="mt-2 grid grid-cols-3 gap-2 text-sm">
-                                  <div>
-                                    <div className="text-xs text-gray-500">Cantidad</div>
-                                    <Badge variant="secondary">{it.quantity}</Badge>
-                                  </div>
-                                  <div className="text-right">
-                                    <div className="text-xs text-gray-500">Precio</div>
-                                    <div className="font-mono">{formatCurrency(unitPriceVenta, order.currency ?? "MXN")}</div>
-                                  </div>
-                                  <div className="text-right">
-                                    <div className="text-xs text-gray-500">Total</div>
-                                    <div className="font-mono font-semibold">{totalVenta}</div>
-                                  </div>
-                                </div>
-                              </div>
-                            </div>
-                          </div>
+                      {/* Sección Shopify - SIEMPRE ARRIBA */}
+                      <div className="border rounded-lg">
+                        <div className="px-3 py-2 border-b flex items-center gap-2">
+                          <Package className="w-4 h-4 text-green-600" />
+                          <span className="font-semibold">Del canal (Shopify)</span>
                         </div>
-
-                        {/* Sección Catálogo (Artículos) */}
-                        <div className="border rounded-lg">
-                          <div className="px-3 py-2 border-b flex items-center gap-2">
-                            <LinkIcon className="w-4 h-4 text-blue-600" />
-                            <span className="font-semibold">Del catálogo (Artículos)</span>
-                          </div>
-                          <div className="p-3">
-                            <div className="flex flex-col gap-2">
-                              <div className="flex items-center gap-2 text-sm flex-wrap">
-                                <span className="font-mono">{it.skuArticulo || it.skuMarca || "-"}</span>
-                                {it.skuInterno && (
-                                  <span className="font-mono text-gray-500">/ {it.skuInterno}</span>
-                                )}
-                                {it.enAlmacen ? (
-                                  <Badge className="gap-1 bg-emerald-50 text-emerald-700 border-emerald-200">
-                                    <Warehouse className="w-3.5 h-3.5" />
-                                    En nuestro almacén
-                                  </Badge>
-                                ) : null}
-                                {it.mappingStatus === "unmapped" && (
-                                  <Badge variant="destructive">Sin mapeo</Badge>
-                                )}
+                        <div className="p-3">
+                          <div className="flex items-start gap-3">
+                            {(it.fotoShopify || it.foto) ? (
+                              <img
+                                src={it.fotoShopify || it.foto || ""}
+                                alt={it.title || "foto"}
+                                className="w-16 h-16 rounded object-cover border"
+                                onError={(e) => ((e.target as HTMLImageElement).style.display = "none")}
+                              />
+                            ) : null}
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2 text-sm text-gray-600 flex-wrap">
+                                <span className="font-mono">{it.skuCanal || "-"}</span>
+                                {it.vendor && <Badge variant="outline">{it.vendor}</Badge>}
+                                {it.productType && <Badge variant="outline">{it.productType}</Badge>}
                               </div>
-                              <div className="truncate">{it.nombreProducto || "—"}</div>
-
-                              <div className="grid grid-cols-4 gap-2 text-sm">
-                                <div>
-                                  <div className="text-xs text-gray-500">Stock</div>
-                                  {it.stockMarca === 0 ? (
-                                    <Badge variant="destructive">Sin stock</Badge>
-                                  ) : (
-                                    <Badge variant="secondary">{it.stockMarca ?? "-"}</Badge>
-                                  )}
-                                </div>
+                              <div className="font-medium truncate">{it.title || "Producto"}</div>
+                              <div className="mt-2 grid grid-cols-3 gap-2 text-sm">
                                 <div>
                                   <div className="text-xs text-gray-500">Cantidad</div>
                                   <Badge variant="secondary">{it.quantity}</Badge>
                                 </div>
                                 <div className="text-right">
-                                  <div className="text-xs text-gray-500">Costo</div>
-                                  <div className="font-mono">{formatCurrency(unitCosto, order.currency ?? "MXN")}</div>
+                                  <div className="text-xs text-gray-500">Precio</div>
+                                  <div className="font-mono">{formatCurrency(unitPriceVenta, order.currency ?? "MXN")}</div>
                                 </div>
                                 <div className="text-right">
-                                  <div className="text-xs text-gray-500">Total costo</div>
-                                  <div className="font-mono font-semibold">
-                                    {calculateItemTotal(unitCosto, it.quantity, order.currency)}
-                                  </div>
+                                  <div className="text-xs text-gray-500">Total</div>
+                                  <div className="font-mono font-semibold">{totalVenta}</div>
                                 </div>
                               </div>
-
-                              {/* Reasignación SIEMPRE posible (aunque no haya relación) */}
-                              <details className="mt-1">
-                                <summary className="cursor-pointer text-blue-600 hover:underline text-sm">
-                                  Buscar / reasignar SKU
-                                </summary>
-                                <div className="mt-2">
-                                  <SkuSelector
-                                    orderId={order.id}
-                                    itemId={it.orderItemId}
-                                    compact
-                                    onAssigned={() => {
-                                      qc.invalidateQueries({ queryKey: ["/api/orders", order.id, "details"] });
-                                    }}
-                                  />
-                                </div>
-                              </details>
                             </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Sección Artículos - SIEMPRE ABAJO */}
+                      <div className="border rounded-lg">
+                        <div className="px-3 py-2 border-b flex items-center gap-2">
+                          <LinkIcon className="w-4 h-4 text-blue-600" />
+                          <span className="font-semibold">Del catálogo (Artículos)</span>
+                        </div>
+                        <div className="p-3">
+                          <div className="flex flex-col gap-2">
+                            <div className="flex items-center gap-2 text-sm flex-wrap">
+                              <span className="font-mono">{it.skuArticulo || it.skuMarca || "-"}</span>
+                              {it.skuInterno && (
+                                <span className="font-mono text-gray-500">/ {it.skuInterno}</span>
+                              )}
+                              {it.enAlmacen ? (
+                                <Badge className="gap-1 bg-emerald-50 text-emerald-700 border-emerald-200">
+                                  <Warehouse className="w-3.5 h-3.5" />
+                                  En nuestro almacén
+                                </Badge>
+                              ) : null}
+                              {it.mappingStatus === "unmapped" && (
+                                <Badge variant="destructive">Sin mapeo</Badge>
+                              )}
+                            </div>
+
+                            <div className="truncate">{it.nombreProducto || "—"}</div>
+
+                            {/* Grid sin "Total Costo"; se agregan Catálogo y Almacén */}
+                            <div className="grid grid-cols-4 gap-2 text-sm">
+                              <div>
+                                <div className="text-xs text-gray-500">Catálogo</div>
+                                {it.stockMarca === 0 ? (
+                                  <Badge variant="destructive">Sin stock</Badge>
+                                ) : (
+                                  <Badge variant="secondary">{it.stockMarca ?? "-"}</Badge>
+                                )}
+                              </div>
+                              <div>
+                                <div className="text-xs text-gray-500">Almacén</div>
+                                {it.stockAlmacen != null ? (
+                                  <Badge variant="secondary">{it.stockAlmacen}</Badge>
+                                ) : (
+                                  <Badge variant="secondary">-</Badge>
+                                )}
+                              </div>
+                              <div>
+                                <div className="text-xs text-gray-500">Cantidad</div>
+                                <Badge variant="secondary">{it.quantity}</Badge>
+                              </div>
+                              <div className="text-right">
+                                <div className="text-xs text-gray-500">Costo</div>
+                                <div className="font-mono">
+                                  {formatCurrency(it.unitPrice != null ? String(it.unitPrice) : null, order.currency ?? "MXN")}
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Si es combo, mostrar sus componentes con Catálogo y Almacén */}
+                            {it.isCombo && Array.isArray(it.comboComponents) && it.comboComponents.length > 0 && (
+                              <div className="mt-3">
+                                <div className="text-sm font-medium mb-2">Componentes del combo</div>
+                                <div className="border rounded-md overflow-x-auto">
+                                  <Table>
+                                    <TableHeader>
+                                      <TableRow>
+                                        <TableHead>SKU</TableHead>
+                                        <TableHead>Nombre</TableHead>
+                                        <TableHead className="text-center">Catálogo</TableHead>
+                                        <TableHead className="text-center">Almacén</TableHead>
+                                        <TableHead className="text-center">Cantidad</TableHead>
+                                        <TableHead className="text-right">Costo</TableHead>
+                                        <TableHead className="text-right">Subtotal</TableHead>
+                                      </TableRow>
+                                    </TableHeader>
+                                    <TableBody>
+                                      {it.comboComponents.map((c, idx) => (
+                                        <TableRow key={`${c.sku}-${idx}`}>
+                                          <TableCell className="font-mono text-xs">{c.sku}</TableCell>
+                                          <TableCell className="text-sm">{c.nombre ?? "—"}</TableCell>
+                                          <TableCell className="text-center">
+                                            {c.stock === 0 ? (
+                                              <Badge variant="destructive">Sin stock</Badge>
+                                            ) : (
+                                              <Badge variant="secondary">{c.stock ?? "-"}</Badge>
+                                            )}
+                                          </TableCell>
+                                          <TableCell className="text-center">
+                                            {c.stock_a != null ? (
+                                              <Badge variant="secondary">{c.stock_a}</Badge>
+                                            ) : (
+                                              <Badge variant="secondary">-</Badge>
+                                            )}
+                                          </TableCell>
+                                          <TableCell className="text-center">{c.cantidad}</TableCell>
+                                          <TableCell className="text-right font-mono text-xs">
+                                            {formatCurrency(String(c.costo ?? 0), order.currency ?? "MXN")}
+                                          </TableCell>
+                                          <TableCell className="text-right font-mono text-xs">
+                                            {formatCurrency(String(c.subtotal ?? 0), order.currency ?? "MXN")}
+                                          </TableCell>
+                                        </TableRow>
+                                      ))}
+                                    </TableBody>
+                                  </Table>
+                                </div>
+                              </div>
+                            )}
                           </div>
                         </div>
                       </div>
@@ -560,73 +463,7 @@ export default function OrderDetailsModalNew({ orderId, isOpen, onClose }: Order
             </Card>
 
             {/* ===================== C) PAGO + ESTADO (unificado) ===================== 
-            <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="flex items-center gap-2 text-xl">
-                  <DollarSign className="w-5 h-5 text-emerald-600" />
-                  Pago & Estado
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="grid grid-cols-1 lg:grid-cols-3 gap-4 items-start">
-                <div className="space-y-2">
-                  {order.subtotalPrice && (
-                    <div className="flex justify-between text-sm">
-                      <span>Subtotal:</span>
-                      <span className="font-mono">{formatCurrency(order.subtotalPrice, order.currency ?? "MXN")}</span>
-                    </div>
-                  )}
-                  <Separator />
-                  <div className="flex justify-between items-center">
-                    <span className="text-lg font-semibold">Total:</span>
-                    <span className="text-2xl font-bold text-green-600">
-                      {formatCurrency(order.totalAmount, order.currency ?? "MXN")}
-                    </span>
-                  </div>
-                  {order.currency && <p className="text-xs text-gray-500">Moneda: {order.currency}</p>}
-                </div>
-
-                <div className="space-y-2">
-                  <div>
-                    <div className="text-xs text-gray-500 mb-1">Estado de gestión</div>
-                    {getStatusBadge(order.fulfillmentStatus)}
-                  </div>
-                  {order.financialStatus && (
-                    <div>
-                      <div className="text-xs text-gray-500 mb-1">Estado financiero</div>
-                      <Badge variant="outline">{order.financialStatus}</Badge>
-                    </div>
-                  )}
-                  {(order.hasTicket || order.ticketNumber) && (
-                    <div>
-                      <div className="text-xs text-gray-500 mb-1">Ticket</div>
-                      <Badge className="gap-1 bg-indigo-50 text-indigo-700">
-                        <Ticket className="h-3.5 w-3.5" />
-                        {order.ticketNumber || "Registrado"}
-                      </Badge>
-                    </div>
-                  )}
-                </div>
-
-                <div className="space-y-2">
-                  {order.tags && order.tags.length > 0 && (
-                    <div>
-                      <div className="text-xs text-gray-500 mb-1">Etiquetas</div>
-                      <div className="flex flex-wrap gap-1">
-                        {order.tags.map((tag, i) => (
-                          <Badge key={i} variant="secondary" className="text-xs">{tag}</Badge>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                  {order.orderNote && (
-                    <div>
-                      <div className="text-xs text-gray-500 mb-1">Nota</div>
-                      <p className="text-sm bg-gray-50 p-3 rounded border">{order.orderNote}</p>
-                    </div>
-                  )}
-                </div>
-              </CardContent>
-            </Card>*/}
+            (Sin cambios visuales en esta petición) */}
           </div>
         )}
       </DialogContent>

@@ -14,7 +14,6 @@ import {
 } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
 import { Search, Upload, Download, X, Filter, LayoutList } from "lucide-react";
-import { debounce } from "lodash";
 import { fetchArticulos, fetchCategorias, fetchMarcas, type ArticuloListItem } from "@/lib/api/articulos";
 import ArticuloModal from "@/components/articulos/ArticuloModal";
 
@@ -31,6 +30,10 @@ function fmt(dt?: string | null) {
 }
 
 export default function ArticulosPage() {
+  // Búsqueda unificada
+  const [searchText, setSearchText] = useState("");
+  const [searchScope, setSearchScope] =
+    useState<"all" | "sku" | "sku_interno" | "producto">("all");
   const [sku, setSku] = useState("");
   const [skuInterno, setSkuInterno] = useState("");
   const [producto, setProducto] = useState("");
@@ -43,6 +46,11 @@ export default function ArticulosPage() {
   const [orderDir, setOrderDir] = useState<'asc' | 'desc'>("asc");
   const [limit, setLimit] = useState(50);
   const [offset, setOffset] = useState(0);
+  // Draft filters for textual inputs
+  const [draftSku, setDraftSku] = useState("");
+  const [draftSkuInterno, setDraftSkuInterno] = useState("");
+  const [draftProducto, setDraftProducto] = useState("");
+  const [esCombo, setEsCombo] = useState<"all" | "1" | "0">("all");
 
   // Estados para el modal
   const [open, setOpen] = useState(false);
@@ -51,20 +59,45 @@ export default function ArticulosPage() {
   // Sincronización con URL
   useEffect(() => {
     const p = new URLSearchParams(window.location.search);
-    setSku(p.get('sku') || "");
-    setSkuInterno(p.get('sku_interno') || "");
-    setProducto(p.get('producto') || "");
+    const urlSku = p.get("sku") || "";
+    const urlSkuInt = p.get("sku_interno") || "";
+    const urlProd = p.get("producto") || "";
+
+    setSku(urlSku);
+    setSkuInterno(urlSkuInt);
+    setProducto(urlProd);
+    // sync drafts initially
+    setDraftSku(urlSku);
+    setDraftSkuInterno(urlSkuInt);
+    setDraftProducto(urlProd);
     setProveedor(p.get('proveedor') || "all");
     setCategoria(p.get('categoria') || "all");
     setSoloSinStock(p.get('solo_sin_stock') === '1');
-    setEnAlmacen(["1", "0"].includes(p.get('en_almacen') || "") ? (p.get('en_almacen') as "1"|"0") : "all");
-    setStatus(["activo", "inactivo"].includes(p.get('status') || "") ? (p.get('status') as "activo"|"inactivo") : "all");
+    setEnAlmacen(["1", "0"].includes(p.get('en_almacen') || "") ? (p.get('en_almacen') as "1" | "0") : "all");
+    setStatus(["activo", "inactivo"].includes(p.get('status') || "") ? (p.get('status') as "activo" | "inactivo") : "all");
+    setEsCombo(["1", "0"].includes(p.get('es_combo') || "") ? (p.get('es_combo') as "1" | "0") : "all");
 
     const ob = p.get('order_by');
-    setOrderBy(['sku','nombre','created_at','updated_at','stock'].includes(ob || "") ? (ob as any) : 'nombre');
+    setOrderBy(['sku', 'nombre', 'created_at', 'updated_at', 'stock'].includes(ob || "") ? (ob as any) : 'nombre');
     setOrderDir(p.get('order_dir') === 'desc' ? 'desc' : 'asc');
     setLimit(Number(p.get('limit')) || 50);
     setOffset(Number(p.get('offset')) || 0);
+
+    if (urlSku) {
+      setSearchText(urlSku);
+      setSearchScope("sku");
+    } else if (urlSkuInt) {
+      setSearchText(urlSkuInt);
+      setSearchScope("sku_interno");
+    } else if (urlProd) {
+      setSearchText(urlProd);
+      setSearchScope("producto");
+    } else {
+      setSearchText("");
+      setSearchScope("all");
+    }
+
+
   }, []);
 
   useEffect(() => {
@@ -81,29 +114,25 @@ export default function ArticulosPage() {
     if (orderDir) qs.set('order_dir', orderDir);
     if (limit !== 50) qs.set('limit', String(limit));
     if (offset) qs.set('offset', String(offset));
+    if (esCombo !== "all") qs.set('es_combo', esCombo);
 
     const url = qs.toString() ? `/articulos?${qs.toString()}` : '/articulos';
     window.history.replaceState(null, '', url);
   }, [sku, skuInterno, producto, proveedor, categoria, soloSinStock, enAlmacen, status, orderBy, orderDir, limit, offset]);
 
-  // Debounced inputs
-  const [skuInput, setSkuInput] = useState("");
-  const [skuIntInput, setSkuIntInput] = useState("");
-  const [prodInput, setProdInput] = useState("");
-
-  const debSku = useMemo(() => debounce((v: string) => { setSku(v); setOffset(0); }, 400), []);
-  const debSkuInt = useMemo(() => debounce((v: string) => { setSkuInterno(v); setOffset(0); }, 400), []);
-  const debProd = useMemo(() => debounce((v: string) => { setProducto(v); setOffset(0); }, 400), []);
-
-  useEffect(() => { debSku(skuInput); }, [skuInput, debSku]);
-  useEffect(() => { debSkuInt(skuIntInput); }, [skuIntInput, debSkuInt]);
-  useEffect(() => { debProd(prodInput); }, [prodInput, debProd]);
+  // Apply/Clear for main textual filters
+  const applyTextFilters = () => {
+    setSku(draftSku.trim());
+    setSkuInterno(draftSkuInterno.trim());
+    setProducto(draftProducto.trim());
+    setOffset(0);
+  };
 
   // Consultas
   const { data: lista, isLoading } = useQuery({
     queryKey: ["/api/articulos", {
       sku, skuInterno, producto, proveedor, categoria, soloSinStock,
-      enAlmacen, status, limit, offset, orderBy, orderDir
+      enAlmacen, status, esCombo, limit, offset, orderBy, orderDir
     }],
     queryFn: () => fetchArticulos({
       sku,
@@ -114,6 +143,7 @@ export default function ArticulosPage() {
       solo_sin_stock: soloSinStock,
       en_almacen: enAlmacen === "all" ? undefined : enAlmacen,
       status: status === "all" ? undefined : status,
+      es_combo: esCombo === "all" ? undefined : esCombo,
       limit, offset,
       order_by: orderBy,
       order_dir: orderDir
@@ -133,12 +163,37 @@ export default function ArticulosPage() {
   };
 
   const clearFilters = () => {
-    setSkuInput(""); setSku("");
-    setSkuIntInput(""); setSkuInterno("");
-    setProdInput(""); setProducto("");
+    setDraftSku(""); setSku("");
+    setDraftSkuInterno(""); setSkuInterno("");
+    setDraftProducto(""); setProducto("");
     setProveedor("all"); setCategoria("all"); setSoloSinStock(false);
     setEnAlmacen("all"); setStatus("all");
     setOrderBy('nombre'); setOrderDir('asc'); setLimit(50); setOffset(0);
+  };
+
+  const applyUnifiedSearch = () => {
+    const txt = searchText.trim();
+    if (searchScope === "sku") {
+      setSku(txt); setSkuInterno(""); setProducto("");
+    } else if (searchScope === "sku_interno") {
+      setSku(""); setSkuInterno(txt); setProducto("");
+    } else if (searchScope === "producto") {
+      setSku(""); setSkuInterno(""); setProducto(txt);
+    } else {
+      // all => busca en los tres campos
+      setSku(txt); setSkuInterno(txt); setProducto(txt);
+    }
+    setOffset(0);
+  };
+
+  // Limpia TODO (incluida la búsqueda unificada)
+  const clearUnifiedSearch = () => {
+    setSearchText("");
+    setSearchScope("all");
+    setSku(""); setSkuInterno(""); setProducto("");
+    setProveedor("all"); setCategoria("all"); setSoloSinStock(false);
+    setEnAlmacen("all"); setStatus("all");
+    setOrderBy("nombre"); setOrderDir("asc"); setLimit(50); setOffset(0);
   };
 
   return (
@@ -174,38 +229,62 @@ export default function ArticulosPage() {
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          {/* Fila 1: Campos de búsqueda */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
-            <div>
-              <Label htmlFor="sku">SKU</Label>
+          {/* Fila única: 3 búsquedas + acciones */}
+          <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
+            <div className="md:col-span-7">
+              <Label htmlFor="q">Buscar</Label>
               <Input
-                id="sku"
-                placeholder="Buscar por SKU"
-                value={skuInput}
-                onChange={(e) => setSkuInput(e.target.value)}
+                id="q"
+                placeholder="Escribe y elige dónde buscar (SKU, SKU Interno, Producto o Todos)"
+                value={searchText}
+                onChange={(e) => setSearchText(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") applyUnifiedSearch(); }}
                 className="mt-1"
               />
             </div>
-            <div>
-              <Label htmlFor="sku-interno">SKU Interno</Label>
-              <Input
-                id="sku-interno"
-                placeholder="SKU interno"
-                value={skuIntInput}
-                onChange={(e) => setSkuIntInput(e.target.value)}
-                className="mt-1"
-              />
+
+            <div className="md:col-span-3">
+              <Label htmlFor="scope">Buscar en</Label>
+              <Select
+                value={searchScope}
+                onValueChange={(v: "all" | "sku" | "sku_interno" | "producto") => {
+                  setSearchScope(v);
+                }}
+              >
+                <SelectTrigger id="scope" className="mt-1">
+                  <SelectValue placeholder="Todos" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todos los campos</SelectItem>
+                  <SelectItem value="sku">SKU</SelectItem>
+                  <SelectItem value="sku_interno">SKU Interno</SelectItem>
+                  <SelectItem value="producto">Producto</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
-            <div>
-              <Label htmlFor="producto">Producto</Label>
-              <Input
-                id="producto"
-                placeholder="Nombre del producto"
-                value={prodInput}
-                onChange={(e) => setProdInput(e.target.value)}
-                className="mt-1"
-              />
+
+            <div className="md:col-span-2 flex gap-2 md:justify-end">
+              <Button
+                onClick={applyUnifiedSearch}
+                className="w-full md:w-auto bg-blue-600 hover:bg-blue-700 text-white"
+                title="Aplicar filtros"
+              >
+                Aplicar
+              </Button>
+              <Button
+                variant="outline"
+                onClick={clearUnifiedSearch}
+                className="w-full md:w-auto"
+                title="Limpiar filtros"
+              >
+                Limpiar
+              </Button>
             </div>
+          </div>
+
+          {/* Fila 2: Filtros avanzados compactos (incluye 'Es combo') */}
+          <div className="grid grid-cols-1 md:grid-cols-6 gap-3 items-end mt-1">
+            {/* Proveedor */}
             <div>
               <Label>Proveedor</Label>
               <Select value={proveedor} onValueChange={(v) => { setProveedor(v); setOffset(0); }}>
@@ -215,17 +294,13 @@ export default function ArticulosPage() {
                 <SelectContent>
                   <SelectItem value="all">Todos los proveedores</SelectItem>
                   {(marcas || []).map((m) => (
-                    <SelectItem key={m.codigo} value={m.nombre}>
-                      {m.nombre}
-                    </SelectItem>
+                    <SelectItem key={m.codigo} value={m.nombre}>{m.nombre}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
-          </div>
 
-          {/* Fila 2: Filtros avanzados */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-3 mt-2">
+            {/* Categoría */}
             <div>
               <Label>Categoría</Label>
               <Select value={categoria} onValueChange={(v) => { setCategoria(v); setOffset(0); }}>
@@ -241,9 +316,10 @@ export default function ArticulosPage() {
               </Select>
             </div>
 
+            {/* Almacén */}
             <div>
               <Label>Almacén</Label>
-              <Select value={enAlmacen} onValueChange={(v: "all"|"1"|"0") => { setEnAlmacen(v); setOffset(0); }}>
+              <Select value={enAlmacen} onValueChange={(v: "all" | "1" | "0") => { setEnAlmacen(v); setOffset(0); }}>
                 <SelectTrigger className="mt-1">
                   <SelectValue placeholder="Todos" />
                 </SelectTrigger>
@@ -255,9 +331,10 @@ export default function ArticulosPage() {
               </Select>
             </div>
 
+            {/* Estado */}
             <div>
               <Label>Estado</Label>
-              <Select value={status} onValueChange={(v: "all"|"activo"|"inactivo") => { setStatus(v); setOffset(0); }}>
+              <Select value={status} onValueChange={(v: "all" | "activo" | "inactivo") => { setStatus(v); setOffset(0); }}>
                 <SelectTrigger className="mt-1">
                   <SelectValue placeholder="Todos" />
                 </SelectTrigger>
@@ -269,20 +346,24 @@ export default function ArticulosPage() {
               </Select>
             </div>
 
-            <div className="flex items-end">
-              <div className="flex items-center gap-2">
-                <input
-                  id="sinstock"
-                  type="checkbox"
-                  checked={soloSinStock}
-                  onChange={(e) => { setSoloSinStock(e.target.checked); setOffset(0); }}
-                  className="rounded"
-                />
-                <Label htmlFor="sinstock" className="text-sm">Sin stock</Label>
-              </div>
+            {/* Es combo */}
+            <div>
+              <Label>Es combo</Label>
+              <Select value={esCombo} onValueChange={(v: "all" | "1" | "0") => { setEsCombo(v); setOffset(0); }}>
+                <SelectTrigger className="mt-1">
+                  <SelectValue placeholder="Todos" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todos</SelectItem>
+                  <SelectItem value="1">Sí</SelectItem>
+                  <SelectItem value="0">No</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
 
-            <div className="flex items-end">
+            {/* Orden */}
+            <div>
+              <Label>Orden</Label>
               <Select
                 value={`${orderBy}:${orderDir}`}
                 onValueChange={(v) => {
@@ -302,85 +383,13 @@ export default function ArticulosPage() {
                   <SelectItem value="stock:desc">Stock ↓</SelectItem>
                   <SelectItem value="stock:asc">Stock ↑</SelectItem>
                   <SelectItem value="created_at:desc">Recientes</SelectItem>
-                  <SelectItem value="updated_at:desc">Actualizados</SelectItem>
+                  <SelectItem value="created_at:asc">Antiguos</SelectItem>
                 </SelectContent>
               </Select>
             </div>
           </div>
-
-          {/* Filtros activos */}
-          <div className="flex flex-wrap gap-2 mt-3 pt-2 border-t dark:border-gray-700">
-            {sku && (
-              <Badge variant="secondary" className="px-2 py-1">
-                SKU: {sku}
-                <button onClick={() => { setSkuInput(""); setSku(""); }} className="ml-1">
-                  <X className="h-3 w-3" />
-                </button>
-              </Badge>
-            )}
-            {skuInterno && (
-              <Badge variant="secondary" className="px-2 py-1">
-                SKU Interno: {skuInterno}
-                <button onClick={() => { setSkuIntInput(""); setSkuInterno(""); }} className="ml-1">
-                  <X className="h-3 w-3" />
-                </button>
-              </Badge>
-            )}
-            {producto && (
-              <Badge variant="secondary" className="px-2 py-1">
-                Producto: {producto}
-                <button onClick={() => { setProdInput(""); setProducto(""); }} className="ml-1">
-                  <X className="h-3 w-3" />
-                </button>
-              </Badge>
-            )}
-            {proveedor !== "all" && (
-              <Badge variant="secondary" className="px-2 py-1">
-                Proveedor: {proveedor}
-                <button onClick={() => setProveedor("all")} className="ml-1">
-                  <X className="h-3 w-3" />
-                </button>
-              </Badge>
-            )}
-            {categoria !== "all" && (
-              <Badge variant="secondary" className="px-2 py-1">
-                Categoría: {categoria}
-                <button onClick={() => setCategoria("all")} className="ml-1">
-                  <X className="h-3 w-3" />
-                </button>
-              </Badge>
-            )}
-            {soloSinStock && (
-              <Badge variant="destructive" className="px-2 py-1">
-                Sin stock
-                <button onClick={() => setSoloSinStock(false)} className="ml-1">
-                  <X className="h-3 w-3" />
-                </button>
-              </Badge>
-            )}
-            {enAlmacen !== "all" && (
-              <Badge variant="outline" className="px-2 py-1">
-                Almacén: {enAlmacen === "1" ? "Sí" : "No"}
-                <button onClick={() => setEnAlmacen("all")} className="ml-1">
-                  <X className="h-3 w-3" />
-                </button>
-              </Badge>
-            )}
-            {status !== "all" && (
-              <Badge variant="secondary" className="px-2 py-1">
-                Estado: {status}
-                <button onClick={() => setStatus("all")} className="ml-1">
-                  <X className="h-3 w-3" />
-                </button>
-              </Badge>
-            )}
-            {(sku || skuInterno || producto || proveedor !== "all" || categoria !== "all" || soloSinStock || enAlmacen !== "all" || status !== "all") && (
-              <Button variant="ghost" size="sm" onClick={clearFilters} className="text-xs">
-                Limpiar todos
-              </Button>
-            )}
-          </div>
         </CardContent>
+
       </Card>
 
       {/* Tabla de resultados */}
@@ -401,22 +410,21 @@ export default function ArticulosPage() {
                 <TableHead>Proveedor</TableHead>
                 <TableHead className="w-20">Almacén</TableHead>
                 <TableHead className="w-20">Stock</TableHead>
-                <TableHead className="w-20">Estado</TableHead>
-                <TableHead className="w-28">Creado</TableHead>
-                <TableHead className="w-28">Actualizado</TableHead>
+                <TableHead className="w-20">Combo</TableHead>
+
                 <TableHead className="w-20">Acciones</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {isLoading ? (
                 <TableRow>
-                  <TableCell colSpan={10} className="text-center py-10 text-gray-500">
+                  <TableCell colSpan={8} className="text-center py-10 text-gray-500">
                     Cargando artículos...
                   </TableCell>
                 </TableRow>
               ) : items.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={10} className="text-center py-10 text-gray-500">
+                  <TableCell colSpan={8} className="text-center py-10 text-gray-500">
                     No se encontraron artículos. Intenta ajustar los filtros.
                   </TableCell>
                 </TableRow>
@@ -434,31 +442,31 @@ export default function ArticulosPage() {
                           </span>
                         )}
                       </div>
+                      <span className="ml-2 font-medium">{(it as any).stock_a ?? 0}</span>
                     </TableCell>
                     <TableCell className="font-mono text-xs">{it.sku_interno || '-'}</TableCell>
                     <TableCell>{it.proveedor || '-'}</TableCell>
                     <TableCell>
                       <span
-                        className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
-                          it.en_almacen
-                            ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-900 dark:text-emerald-200"
-                            : "bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300"
-                        }`}
+                        className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${it.en_almacen
+                          ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-900 dark:text-emerald-200"
+                          : "bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300"
+                          }`}
                       >
                         {it.en_almacen ? "Sí" : "No"}
                       </span>
                     </TableCell>
                     <TableCell className="font-medium">{it.stock ?? 0}</TableCell>
                     <TableCell>
-                      <Badge
-                        variant={it.status === "activo" ? "default" : "secondary"}
-                        className={it.status === "inactivo" ? "bg-gray-200 text-gray-700" : ""}
+                      <span
+                        className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${(it as any).es_combo
+                          ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-900 dark:text-emerald-200"
+                          : "bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300"
+                          }`}
                       >
-                        {it.status || "n/a"}
-                      </Badge>
+                        {(it as any).es_combo ? "Sí" : "No"}
+                      </span>
                     </TableCell>
-                    <TableCell>{fmt(it.created_at)}</TableCell>
-                    <TableCell>{fmt(it.updated_at)}</TableCell>
                     <TableCell>
                       <Button size="sm" variant="ghost" onClick={() => abrir(it.sku)}>
                         Editar
@@ -470,6 +478,30 @@ export default function ArticulosPage() {
             </TableBody>
           </Table>
         </CardContent>
+        {/* Paginación */}
+        <div className="flex items-center justify-between px-4 py-3">
+          <div className="text-sm text-muted-foreground">
+            Total: {total} · Página {Math.floor(offset / limit) + 1}
+          </div>
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setOffset(Math.max(0, offset - limit))}
+              disabled={offset === 0}
+            >
+              Anterior
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setOffset(offset + limit)}
+              disabled={offset + items.length >= total}
+            >
+              Siguiente
+            </Button>
+          </div>
+        </div>
       </Card>
 
       {/* Modal */}
@@ -477,3 +509,10 @@ export default function ArticulosPage() {
     </div>
   );
 }
+
+
+
+
+
+
+

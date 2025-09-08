@@ -26,7 +26,7 @@ import { ProductService } from "./services/ProductService"; // Servicio de produ
 import multer, { type FileFilterCallback } from "multer";
 import type { Request, Response } from "express";
 import xlsx from "xlsx";
-
+import articulosSearchRouter from "./routes/articulosSearch";
 
 
 
@@ -888,7 +888,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const page = req.query.page ? Number(req.query.page) : 1;
       const pageSize = req.query.pageSize ? Number(req.query.pageSize) : 50; // opcional: alinea con el FE
       const search = req.query.search as string | undefined;
-      const searchType = req.query.searchType as "all" | "sku" | "customer" | "product" | undefined;
+      const searchType = req.query.searchType as "all" | "order" | "sku" | undefined;
       const brand = (req.query.brand as string | undefined) || undefined;
       const stockState = (req.query.stock_state as string | undefined) as any;
 
@@ -986,9 +986,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const rowsRes = await baseDatos.execute(sql`
       SELECT
-        sku, nombre, sku_interno, proveedor, stock, status,
+        sku,
+        nombre,
+        sku_interno,
+        proveedor,
+        stock,
+        status,
         en_almacen,               -- NUEVO
-        created_at, updated_at    -- NUEVO
+        created_at,
+        updated_at,               -- NUEVO
+        COALESCE(stock_a, 0)::int AS stock_a,
+        COALESCE(es_combo, false) AS es_combo
       FROM ${sql.raw('articulos')}
       WHERE ${whereSQL}
       ORDER BY ${sql.raw(orderBy)} ${sql.raw(orderDir)}, sku ASC
@@ -1018,6 +1026,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(500).json({ message: 'No se pudieron obtener marcas' });
     }
   });
+  app.use("/api/articulos", articulosSearchRouter);
 
   app.get("/api/articulos/categorias", requiereAutenticacion, async (_req, res) => {
     try {
@@ -1051,7 +1060,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const allowed = new Set([
         'sku_interno', 'nombre', 'descripcion', 'proveedor', 'status', 'categoria', 'marca_producto', 'codigo_barras',
         'garantia_meses', 'tipo_variante', 'variante', 'stock', 'costo', 'alto_cm', 'largo_cm', 'ancho_cm', 'peso_kg', 'peso_volumetrico',
-        'clave_producto_sat', 'unidad_medida_sat', 'clave_unidad_medida_sat'
+        'clave_producto_sat', 'unidad_medida_sat', 'clave_unidad_medida_sat',
+        // nuevos campos editables desde modal
+        'stock_a', 'en_almacen'
       ]);
       const updates: Record<string, any> = {};
       for (const [k, v] of Object.entries(payload)) {
@@ -1978,6 +1989,129 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Marca una orden como pendiente de marketplace, sin tocar fulfillment_status ni Shopify
+  app.post("/api/orders/:id/mark-marketplace-pending", requiereAutenticacion, async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      if (!Number.isInteger(id) || id <= 0) {
+        return res.status(400).json({ message: "ID de orden inválido" });
+      }
+
+      // Verificar existencia
+      const orden = await (almacenamiento as any).getOrder(id);
+      if (!orden) return res.status(404).json({ message: "Orden no encontrada" });
+
+      // No modificar fulfillmentStatus; solo status
+      const updated = await (almacenamiento as any).updateOrder(id, {
+        status: 'marketplace_pending',
+        updatedAt: new Date(),
+      });
+
+      // Importante: no disparar sincronización Shopify ni side-effects
+      // Este endpoint solo actualiza status local.
+      res.json({ ok: true, order: jsonSafe(updated) });
+    } catch (e: any) {
+      res.status(500).json({ message: e?.message || 'No se pudo actualizar el estado' });
+    }
+  });
+
+  // Regresa una orden a pending (tabla principal), sin tocar fulfillment ni Shopify
+  app.post("/api/orders/:id/mark-pending", requiereAutenticacion, async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      if (!Number.isInteger(id) || id <= 0) {
+        return res.status(400).json({ message: "ID de orden inválido" });
+      }
+
+      const orden = await (almacenamiento as any).getOrder(id);
+      if (!orden) return res.status(404).json({ message: "Orden no encontrada" });
+
+      const updated = await (almacenamiento as any).updateOrder(id, {
+        status: 'pending',
+        updatedAt: new Date(),
+      });
+      res.json({ ok: true, order: jsonSafe(updated) });
+    } catch (e: any) {
+      res.status(500).json({ message: e?.message || 'No se pudo actualizar el estado' });
+    }
+  });
+
+  // ===== Marketplace substitutions =====
+  // Crea una sustitución ligada a una orden
+  app.post("/api/orders/:id/substitutions", requiereAutenticacion, async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ message: 'ID de orden inválido' });
+
+      const orden = await (almacenamiento as any).getOrder(id);
+      if (!orden) return res.status(404).json({ message: 'Orden no encontrada' });
+
+      const body = req.body || {};
+      const source = String(body.source || '').trim();
+      const url = String(body.url || '').trim();
+      const title = body.title != null ? String(body.title) : null;
+      const externalRef = body.external_ref != null ? String(body.external_ref) : null;
+      const unitCost = Number(body.unit_cost);
+      const proposedPrice = Number(body.proposed_price);
+      const quantity = Number.isFinite(Number(body.quantity)) ? Math.max(1, parseInt(String(body.quantity), 10)) : 1;
+      const notes = body.notes != null ? String(body.notes) : null;
+
+      if (!source) return res.status(400).json({ message: 'source requerido' });
+      if (!url) return res.status(400).json({ message: 'url requerida' });
+      if (!Number.isFinite(unitCost)) return res.status(400).json({ message: 'unit_cost inválido' });
+      if (!Number.isFinite(proposedPrice)) return res.status(400).json({ message: 'proposed_price inválido' });
+
+      const r = await baseDatos.execute(sql`
+        INSERT INTO marketplace_substitutions (
+          order_id, source, url, title, external_ref, unit_cost, proposed_price, quantity, notes, status, created_at
+        ) VALUES (
+          ${id}, ${source}, ${url}, ${title}, ${externalRef}, ${unitCost}, ${proposedPrice}, ${quantity}, ${notes}, 'proposed', NOW()
+        ) RETURNING *
+      `);
+      res.status(201).json(r.rows?.[0] || null);
+    } catch (e: any) {
+      res.status(500).json({ message: e?.message || 'No se pudo crear la sustitución' });
+    }
+  });
+
+  // Lista sustituciones de una orden
+  app.get("/api/orders/:id/substitutions", requiereAutenticacion, async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ message: 'ID de orden inválido' });
+      const r = await baseDatos.execute(sql`SELECT * FROM marketplace_substitutions WHERE order_id = ${id} ORDER BY created_at DESC`);
+      res.json(r.rows || []);
+    } catch (e: any) {
+      res.status(500).json({ message: e?.message || 'No se pudieron obtener sustituciones' });
+    }
+  });
+
+  // Aprobar sustitución
+  app.post("/api/marketplace-substitutions/:id/approve", requiereAutenticacion, async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ message: 'ID inválido' });
+      const r = await baseDatos.execute(sql`UPDATE marketplace_substitutions SET status='approved', approved_at=NOW() WHERE id = ${id} RETURNING *`);
+      if ((r.rows || []).length === 0) return res.status(404).json({ message: 'Sustitución no encontrada' });
+      res.json(r.rows[0]);
+    } catch (e: any) {
+      res.status(500).json({ message: e?.message || 'No se pudo aprobar la sustitución' });
+    }
+  });
+
+  // Rechazar sustitución
+  app.post("/api/marketplace-substitutions/:id/reject", requiereAutenticacion, async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ message: 'ID inválido' });
+      const r = await baseDatos.execute(sql`UPDATE marketplace_substitutions SET status='rejected' WHERE id = ${id} RETURNING *`);
+      if ((r.rows || []).length === 0) return res.status(404).json({ message: 'Sustitución no encontrada' });
+      res.json(r.rows[0]);
+    } catch (e: any) {
+      res.status(500).json({ message: e?.message || 'No se pudo rechazar la sustitución' });
+    }
+  });
+
 
   //ORDENES IMPORTACION Y EXPORTACION VIA EXCEL
   // Body: { selectedIds?: (number|string)[], statusFilter?, channelId?, search?, searchType? }
@@ -2085,7 +2219,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         statusFilter?: "unmanaged" | "managed" | "all";
         channelId?: number | string;
         search?: string;
-        searchType?: "all" | "sku" | "customer" | "product";
+        searchType?: "all" | "order" | "sku";
         page?: number;
         pageSize?: number;
         sortField?: string;
@@ -2134,6 +2268,42 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (err: any) {
       console.error("❌ Export error:", err);
       res.status(500).json({ message: "No se pudo exportar el Excel" });
+    }
+  });
+
+  // Listado de órdenes con status = 'marketplace_pending'
+  app.get("/api/marketplaces", requiereAutenticacion, async (req, res) => {
+    try {
+      const page = Math.max(Number(req.query.page) || 1, 1);
+      const pageSize = Math.min(Math.max(Number(req.query.pageSize) || 50, 1), 200);
+      const offset = (page - 1) * pageSize;
+
+      const rowsRes = await baseDatos.execute(sql`
+        SELECT
+          o.id,
+          o.name,
+          o.order_number AS "orderNumber",
+          o.customer_name AS "customerName",
+          o.customer_email AS "customerEmail",
+          o.total_amount::numeric AS "totalAmount",
+          o.fulfillment_status AS "fulfillmentStatus",
+          o.created_at AS "createdAt"
+        FROM orders o
+        WHERE o.status = 'marketplace_pending'
+        ORDER BY o.created_at DESC
+        LIMIT ${pageSize} OFFSET ${offset}
+      `);
+
+      const totalRes = await baseDatos.execute(sql`
+        SELECT COUNT(*)::int AS total
+        FROM orders o
+        WHERE o.status = 'marketplace_pending'
+      `);
+
+      const total = Number(totalRes.rows?.[0]?.total ?? 0);
+      res.json({ rows: rowsRes.rows || [], total, page, pageSize });
+    } catch (e) {
+      res.status(500).json({ message: 'No se pudieron obtener órdenes marketplace' });
     }
   });
 
@@ -2572,21 +2742,49 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/catalogo/search", requiereAutenticacion, async (req, res) => {
     try {
       const q = String(req.query.q || "").trim();
+      const includeCombos = String(req.query.includeCombos || "0") === "1";
       if (!q) return res.json([]);
       const pattern = `%${q.toLowerCase()}%`;
+
+      const whereCombos =
+        includeCombos ? sql`TRUE` : sql`es_combo = false`;
+
       const r = await baseDatos.execute(sql`
-        SELECT sku, sku_interno, nombre, costo, stock
-        FROM articulos
-        WHERE lower(sku) LIKE ${pattern}
-           OR lower(sku_interno) LIKE ${pattern}
-           OR lower(nombre) LIKE ${pattern}
-        LIMIT 20
-      `);
-      res.json(r.rows);
+      SELECT
+        sku,
+        sku_interno,
+        nombre_producto        AS nombre,
+        costo,
+        stock,
+        COALESCE(en_almacen, false) AS en_almacen,
+        es_combo
+      FROM vw_catalogo_busqueda
+      WHERE ${whereCombos}
+        AND (
+          LOWER(sku) LIKE ${pattern}
+          OR LOWER(COALESCE(sku_interno,'')) LIKE ${pattern}
+          OR LOWER(COALESCE(nombre_producto,'')) LIKE ${pattern}
+        )
+      ORDER BY nombre_producto NULLS LAST
+      LIMIT 20
+    `);
+
+      // normalizamos nombres de campos al shape existente del SkuSelector
+      const rows = (r.rows as any[]).map(x => ({
+        sku: x.sku,
+        sku_interno: x.sku_interno ?? null,
+        nombre_producto: x.nombre ?? x.nombre_producto ?? null,
+        costo: x.costo ?? 0,
+        stock: x.stock ?? 0,
+        en_almacen: !!x.en_almacen,
+        es_combo: !!x.es_combo,
+      }));
+      res.json(rows);
     } catch (e: any) {
       res.status(500).json({ message: e?.message || "Error en búsqueda de catálogo" });
     }
   });
+
 
   // TODO: /api/external-products endpoint removed — external_products not in current schema
 

@@ -39,13 +39,13 @@ def crear_orden(line_items, order_name=None):
             "name": order_name,
             "line_items": line_items,
             "customer": {
-                "first_name": "David",
-                "last_name": "Prueba",
-                "email": "dmau639@gmail.com"
+                "first_name": "Rogelio",
+                "last_name": "Payan",
+                "email": "rpayan@express-pl.com"
             },
             "shipping_address": {
-                "first_name": "David",
-                "last_name": "ULUM",
+                "first_name": "Rogelio",
+                "last_name": "Payan",
                 "address1": "Calle Falsa 123",  # ✅ Corregido
                 "phone": "5512345678",
                 "city": "Ciudad de México",
@@ -54,8 +54,8 @@ def crear_orden(line_items, order_name=None):
                 "zip": "03100"
             },
             "billing_address": {
-                "first_name": "David",
-                "last_name": "BIW",
+                "first_name": "Rogelio",
+                "last_name": "Payan",
                 "address1": "Calle Falsa 123",  # ✅ Corregido
                 "phone": "5512345678",
                 "city": "Ciudad de México",
@@ -64,6 +64,7 @@ def crear_orden(line_items, order_name=None):
                 "zip": "03100"
             },
             "financial_status": "paid",
+            "fulfillment_status": "fulfilled",
             "tags": "test"
         }
     }

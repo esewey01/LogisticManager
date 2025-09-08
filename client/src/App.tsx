@@ -11,6 +11,7 @@ import NotFound from "@/pages/not-found";
 import Login from "@/pages/login";
 import Dashboard from "@/pages/dashboard";
 import Pedidos from "@/pages/pedidos";
+import MarketplacesPage from "@/pages/marketplaces";
 import Tickets from "@/pages/tickets";
 import Catalogo from "@/pages/catalogo";
 import ArticulosPage from "@/pages/articulos";
@@ -48,6 +49,7 @@ function Router() {
       <Switch>
         <Route path="/" component={Dashboard} />
         <Route path="/pedidos" component={Pedidos} />
+        <Route path="/marketplaces" component={MarketplacesPage} />
         <Route path="/tickets" component={Tickets} />
         <Route path="/catalogo" component={Catalogo} />
         <Route path="/articulos" component={ArticulosPage} />

@@ -12,6 +12,9 @@ export type ArticuloListItem = {
   en_almacen?: boolean | null;
   created_at?: string | null;
   updated_at?: string | null;
+  // extensiones para UI de tabla
+  stock_a?: number | null;
+  es_combo?: boolean | null;
 };
 
 export type Articulo = {
@@ -46,6 +49,9 @@ export type Articulo = {
   en_almacen?: boolean | null;
   created_at?: string | null;
   updated_at?: string | null;
+  // extensiones para UI/modal
+  stock_a?: number | null;
+  es_combo?: boolean | null;
 };
 
 export async function fetchArticulos(params: {
